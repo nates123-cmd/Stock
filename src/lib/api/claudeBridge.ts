@@ -4,7 +4,7 @@
  * never enters the web bundle (Metro can't bundle it cleanly for web, and v1
  * web is preview-only — spec §12).
  */
-import { callClaude, MODELS } from './claude';
+import { callClaude, callClaudePdf, MODELS } from './claude';
 import { makeAiCache } from './cache';
 
 // Native talks to Anthropic directly via the SDK, which needs the client
@@ -21,6 +21,24 @@ export async function claudeText(
     system,
     input,
     model: MODELS.fast,
+    maxTokens: 3000,
+    cache: makeAiCache(task),
+  });
+}
+
+/** Parse a PDF natively (spec §11.1) — reasoning model handles layout. */
+export async function claudePdf(
+  task: string,
+  system: string,
+  pdfBase64: string,
+  prompt: string,
+): Promise<string> {
+  return callClaudePdf({
+    task,
+    system,
+    pdfBase64,
+    prompt,
+    model: MODELS.reasoning,
     maxTokens: 3000,
     cache: makeAiCache(task),
   });

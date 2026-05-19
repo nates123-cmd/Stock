@@ -8,7 +8,7 @@
  */
 import type { Ingredient, Nutrition, Recipe, RecipeSource, Step } from '@/types';
 import { uid } from '@/lib/id';
-import { CLAUDE_AVAILABLE, claudeText } from '@/lib/api/claudeBridge';
+import { CLAUDE_AVAILABLE, claudeText, claudePdf } from '@/lib/api/claudeBridge';
 import { localParseRecipe } from './localRecipe';
 import { extractRecipeJsonLd } from './jsonld';
 
@@ -186,6 +186,40 @@ export async function parseRecipeFromUrl(url: string): Promise<ParsedRecipeDraft
       .replace(/\n{2,}/g, '\n')
       .trim();
   return parseRecipeFromText(body, source);
+}
+
+const PDF_PROMPT =
+  'Extract the recipe from the attached PDF into the JSON schema. ' +
+  'Output ONLY the JSON object.';
+
+/**
+ * §11.1 — parse an uploaded recipe PDF. Claude reads it natively (a printed
+ * or "Save as PDF" export is clean, ad/paywall-free, and already past any
+ * login). No local fallback — there is no on-device PDF reader.
+ */
+export async function parseRecipeFromPdf(
+  base64: string,
+  source: RecipeSource = { type: 'mine' },
+): Promise<ParsedRecipeDraft> {
+  if (!CLAUDE_AVAILABLE) {
+    throw new Error(
+      'PDF import needs Claude — add EXPO_PUBLIC_ANTHROPIC_API_KEY (native) ' +
+        'or configure the Claude proxy (web).',
+    );
+  }
+  const out = await claudePdf('recipe-pdf', SYSTEM, base64, PDF_PROMPT);
+  const mapped = mapRaw(extractJson(out));
+  return {
+    ...mapped,
+    source,
+    status: 'draft',
+    fieldConfidence: {
+      title: 'extracted',
+      ingredients: 'extracted',
+      steps: 'extracted',
+      yield: 'extracted',
+    },
+  };
 }
 
 /** §11.3 — infer recipe structure from a YouTube transcript (low confidence). */

@@ -2,6 +2,7 @@
 export type { Confidence, Confidenced } from './confidence';
 export {
   parseRecipeFromUrl,
+  parseRecipeFromPdf,
   parseRecipeFromText,
   inferRecipeFromTranscript,
   detectTimersAndTemperature,

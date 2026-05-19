@@ -61,6 +61,8 @@ Deno.serve(async (req) => {
     input?: string;
     model?: string;
     maxTokens?: number;
+    /** base64 application/pdf — when present, sent as a document block */
+    pdfBase64?: string;
   };
   try {
     body = await req.json();
@@ -77,6 +79,21 @@ Deno.serve(async (req) => {
     Math.max(1, Math.floor(body.maxTokens ?? 3000)),
     MAX_TOKENS_CAP,
   );
+
+  // ~22 MB of PDF once base64-decoded; Anthropic's request cap is 32 MB.
+  const pdf = typeof body.pdfBase64 === 'string' ? body.pdfBase64 : '';
+  if (pdf && pdf.length > 30 * 1024 * 1024) {
+    return json({ error: 'pdf too large' }, 413);
+  }
+  const content = pdf
+    ? [
+        {
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: pdf },
+        },
+        { type: 'text', text: input },
+      ]
+    : input;
 
   let res: Response;
   try {
@@ -95,7 +112,7 @@ Deno.serve(async (req) => {
         system: [
           { type: 'text', text: system, cache_control: { type: 'ephemeral' } },
         ],
-        messages: [{ role: 'user', content: input }],
+        messages: [{ role: 'user', content }],
       }),
     });
   } catch (e) {

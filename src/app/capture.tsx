@@ -27,9 +27,11 @@ import {
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
 import { usePipelineStore } from '@/store/pipeline';
+import * as DocumentPicker from 'expo-document-picker';
 import {
   parseRecipeFromText,
   parseRecipeFromUrl,
+  parseRecipeFromPdf,
   detectSource,
   type ParsedRecipeDraft,
 } from '@/lib/parsing';
@@ -41,6 +43,26 @@ import type { Recipe, RecipeSource } from '@/types';
 type Step = 'capture' | 'parsing' | 'review' | 'saved';
 
 const isUrl = (s: string) => /^https?:\/\//i.test(s.trim());
+
+const MAX_PDF_BYTES = 12 * 1024 * 1024; // recipes are tiny; Anthropic cap is 32MB
+
+/** Read a picked file (native file:// or web blob:) into base64, no prefix. */
+async function fileToBase64(uri: string): Promise<string> {
+  const blob = await (await fetch(uri)).blob();
+  if (blob.size > MAX_PDF_BYTES) {
+    throw new Error('That PDF is large — try a single-recipe print/export.');
+  }
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.onloadend = () => {
+      const s = String(reader.result);
+      const comma = s.indexOf(',');
+      resolve(comma >= 0 ? s.slice(comma + 1) : s);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
 
 function sourceLabel(src: RecipeSource): string {
   if (src.type === 'nyt') return 'NYT Cooking';
@@ -117,6 +139,48 @@ export default function CaptureFlow() {
     }
   }, [raw]);
 
+  const runPdfImport = useCallback(async () => {
+    let picked: DocumentPicker.DocumentPickerResult;
+    try {
+      picked = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+    } catch {
+      return; // picker unavailable / dismissed by the OS
+    }
+    if (picked.canceled || !picked.assets?.[0]) return;
+    const asset = picked.assets[0];
+
+    setStep('parsing');
+    setError(null);
+    const seq: ProgressStep[] = [
+      { label: 'Read the PDF', state: 'doing' },
+      { label: 'Structuring ingredients & method', state: 'todo' },
+      { label: 'Checking against your pantry', state: 'todo' },
+      { label: 'Suggesting tags', state: 'todo' },
+    ];
+    setProgress(seq);
+    const tick = (i: number, state: ProgressStep['state']) =>
+      setProgress((p) => p.map((s, idx) => (idx === i ? { ...s, state } : s)));
+    try {
+      const b64 = await fileToBase64(asset.uri);
+      tick(0, 'done');
+      tick(1, 'doing');
+      const d = await parseRecipeFromPdf(b64);
+      tick(1, 'done');
+      tick(2, 'done');
+      tick(3, 'done');
+      setDraft(d);
+      setTitle(d.title ?? '');
+      setServes(String(d.yield?.serves ?? 4));
+      setStep('review');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not read that PDF.');
+    }
+  }, []);
+
   const persist = async (status: Recipe['status']) => {
     if (!draft) return;
     const now = new Date();
@@ -161,6 +225,7 @@ export default function CaptureFlow() {
             src={src}
             onCancel={close}
             onNext={runParse}
+            onPickPdf={runPdfImport}
           />
         )}
         {step === 'parsing' && (
@@ -217,6 +282,7 @@ function CaptureStep({
   src,
   onCancel,
   onNext,
+  onPickPdf,
 }: {
   raw: string;
   setRaw: (s: string) => void;
@@ -225,6 +291,7 @@ function CaptureStep({
   src: RecipeSource;
   onCancel: () => void;
   onNext: () => void;
+  onPickPdf: () => void;
 }) {
   const recipes = useRecipeStore((s) => s.recipes);
   const [tip, setTip] = useState<string | null>(null);
@@ -264,12 +331,7 @@ function CaptureStep({
 
         <View style={styles.modeRow}>
           <Button label="Type" variant="secondary" flex onPress={() => inputRef.current?.focus()} />
-          <Button
-            label="Photo"
-            variant="secondary"
-            flex
-            onPress={() => setTip('Cookbook OCR is deferred to v1.1 (spec §12). Paste text for now.')}
-          />
+          <Button label="PDF" variant="secondary" flex onPress={onPickPdf} />
           <Button
             label="Voice"
             variant="secondary"
