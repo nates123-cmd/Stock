@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { create } from 'zustand';
 import type { Recipe } from '@/types';
 import { migrate, recipeRepo } from '@/lib/db';
+import { webPersist } from '@/lib/db/webStore';
 import { seedRecipes } from '@/lib/seed';
 
 /**
@@ -41,7 +42,8 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
         console.warn('[stock] recipe hydrate failed, using seed', e);
       }
     }
-    set({ recipes: seedRecipes(), hydrated: true });
+    const saved = await webPersist.load<Recipe[]>('recipes');
+    set({ recipes: saved ?? seedRecipes(), hydrated: true });
   },
 
   getById: (id) => get().recipes.find((r) => r.id === id),
@@ -74,3 +76,10 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
     }
   },
 }));
+
+// Web: write the working set through to IndexedDB on every change (native
+// persists per-mutation via the repo above). Small JSON-ish collection —
+// whole-array write-through is simplest and matches the §4 blob model.
+if (!NATIVE) {
+  useRecipeStore.subscribe((s) => void webPersist.save('recipes', s.recipes));
+}

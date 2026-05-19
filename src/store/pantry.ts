@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { create } from 'zustand';
 import type { PantryItem, PantryLocation, ShoppingCategory } from '@/types';
 import { migrate, pantryRepo } from '@/lib/db';
+import { webPersist } from '@/lib/db/webStore';
 import { uid } from '@/lib/id';
 import { seedPantry } from '@/lib/seed';
 import {
@@ -83,7 +84,8 @@ export const usePantryStore = create<PantryState>((set, get) => ({
         console.warn('[stock] pantry hydrate failed, using seed', e);
       }
     }
-    set({ items: seedPantry(), hydrated: true });
+    const saved = await webPersist.load<PantryItem[]>('pantry');
+    set({ items: saved ?? seedPantry(), hydrated: true });
   },
 
   applyPaste: async (rows, at = new Date()) => {
@@ -182,3 +184,7 @@ export const usePantryStore = create<PantryState>((set, get) => ({
     }
   },
 }));
+
+if (!NATIVE) {
+  usePantryStore.subscribe((s) => void webPersist.save('pantry', s.items));
+}

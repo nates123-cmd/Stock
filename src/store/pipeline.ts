@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { create } from 'zustand';
 import type { Ingredient, PipelineIdea } from '@/types';
 import { migrate, pipelineRepo } from '@/lib/db';
+import { webPersist } from '@/lib/db/webStore';
 import { uid } from '@/lib/id';
 import { seedPipeline } from '@/lib/seed';
 
@@ -58,7 +59,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         console.warn('[stock] pipeline hydrate failed, using seed', e);
       }
     }
-    set({ ideas: seedPipeline(), hydrated: true });
+    const saved = await webPersist.load<PipelineIdea[]>('pipeline');
+    set({ ideas: saved ?? seedPipeline(), hydrated: true });
   },
 
   getById: (id) => get().ideas.find((i) => i.id === id),
@@ -164,3 +166,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     }
   },
 }));
+
+if (!NATIVE) {
+  usePipelineStore.subscribe((s) => void webPersist.save('pipeline', s.ideas));
+}

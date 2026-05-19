@@ -14,7 +14,7 @@
     "dev:ios": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" expo start --ios",
     "typecheck": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" node node_modules/typescript/bin/tsc --noEmit",
     "build:web": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" expo export --platform web",
-    "serve:web": "npm run build:web && python3 -m http.server 8088 --bind 127.0.0.1 --directory dist"
+    "serve:web": "npm run build:web && ln -sfn . dist/Stock && python3 -m http.server 8088 --bind 127.0.0.1 --directory dist"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
@@ -38,6 +38,7 @@
     "expo-symbols": "~1.0.8",
     "expo-system-ui": "~6.0.9",
     "expo-web-browser": "~15.0.10",
+    "idb-keyval": "^6.2.2",
     "nativewind": "^4.2.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",

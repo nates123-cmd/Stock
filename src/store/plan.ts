@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { create } from 'zustand';
 import type { Meal, PlanEntry } from '@/types';
 import { migrate, planRepo } from '@/lib/db';
+import { webPersist } from '@/lib/db/webStore';
 import { uid } from '@/lib/id';
 import { dateKey, startOfWeek } from '@/lib/week';
 
@@ -55,7 +56,8 @@ export const usePlanStore = create<PlanState>((set, get) => ({
         console.warn('[stock] plan hydrate failed, using seed', e);
       }
     }
-    set({ entries: seedPlan(), hydrated: true });
+    const saved = await webPersist.load<PlanEntry[]>('plan');
+    set({ entries: saved ?? seedPlan(), hydrated: true });
   },
 
   entryFor: (key, meal) =>
@@ -138,3 +140,7 @@ export const usePlanStore = create<PlanState>((set, get) => ({
     }
   },
 }));
+
+if (!NATIVE) {
+  usePlanStore.subscribe((s) => void webPersist.save('plan', s.entries));
+}

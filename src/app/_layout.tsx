@@ -13,6 +13,7 @@ import { useRecipeStore } from '@/store/recipes';
 import { usePlanStore } from '@/store/plan';
 import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
+import { useCookStore } from '@/store/cooks';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -39,13 +40,17 @@ export default function RootLayout() {
   const hydratePlan = usePlanStore((s) => s.hydrate);
   const hydratePantry = usePantryStore((s) => s.hydrate);
   const hydratePipeline = usePipelineStore((s) => s.hydrate);
+  const hydrateCooks = useCookStore((s) => s.hydrate);
   useEffect(() => {
-    // Hydrate the local-first stores (migrate + seed on native, seed on web).
+    // Hydrate the local-first stores: native = SQLite (+ seed first run),
+    // web = IndexedDB (+ seed first run) — Stock is a real PWA, see
+    // project_stock_is_a_pwa.
     hydrateRecipes();
     hydratePlan();
     hydratePantry();
     hydratePipeline();
-  }, [hydrateRecipes, hydratePlan, hydratePantry, hydratePipeline]);
+    hydrateCooks();
+  }, [hydrateRecipes, hydratePlan, hydratePantry, hydratePipeline, hydrateCooks]);
 
   return (
     <QueryClientProvider client={queryClient}>
