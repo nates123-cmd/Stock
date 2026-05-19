@@ -29,6 +29,22 @@ export type RecipeSource = {
   bookRef?: string;
 };
 
+/**
+ * Per-serving nutrition. `extracted` = from the source's schema.org/Recipe
+ * JSON-LD; `estimated` = Claude's best guess from the ingredients (flag it so
+ * the UI can mark it, and so a future Tide push knows the provenance).
+ */
+export type Nutrition = {
+  per: 'serving';
+  /** kcal */
+  calories?: number;
+  /** grams */
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  source: 'extracted' | 'estimated';
+};
+
 export type Recipe = {
   id: string;
   title: string;
@@ -47,6 +63,10 @@ export type Recipe = {
   cookCount: number;
   /** if promoted from Pipeline */
   linkedPipelineId?: string;
+  /** schema.org/Recipe image — the URL, not the bytes */
+  imageUrl?: string;
+  /** per-serving; extracted from source JSON-LD or estimated by Claude */
+  nutrition?: Nutrition;
 };
 
 export type Ingredient = {

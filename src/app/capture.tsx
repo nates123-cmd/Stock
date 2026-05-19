@@ -479,6 +479,36 @@ function ReviewStep({
           </View>
         ) : null}
 
+        {draft.nutrition ? (
+          <View style={styles.reviewSection}>
+            <View style={styles.labelRow}>
+              <SectionLabel color="textMuted">Nutrition · per serving</SectionLabel>
+              <Pill
+                label={draft.nutrition.source === 'extracted' ? 'from source' : 'estimated'}
+                tone={draft.nutrition.source === 'extracted' ? 'muted' : 'warn'}
+              />
+            </View>
+            <Text color="textMuted">
+              {[
+                draft.nutrition.calories != null
+                  ? `${Math.round(draft.nutrition.calories)} kcal`
+                  : null,
+                draft.nutrition.protein != null
+                  ? `${Math.round(draft.nutrition.protein)}g protein`
+                  : null,
+                draft.nutrition.carbs != null
+                  ? `${Math.round(draft.nutrition.carbs)}g carbs`
+                  : null,
+                draft.nutrition.fat != null
+                  ? `${Math.round(draft.nutrition.fat)}g fat`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join('  ·  ')}
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.reviewSection}>
           <SectionLabel color="textMuted">First cook intention</SectionLabel>
           <TextInput

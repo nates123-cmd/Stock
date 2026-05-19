@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button } from '@/components';
@@ -8,7 +8,7 @@ import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { formatMinutes, formatAmount } from '@/lib/format';
-import type { RecipeSource } from '@/types';
+import type { Nutrition, RecipeSource } from '@/types';
 
 const SOURCE_NAME: Record<RecipeSource['type'], string> = {
   nyt: 'NYT Cooking',
@@ -48,6 +48,13 @@ export default function RecipeDetail() {
       <TopBar onBack={goBack} clean={clean} onToggleClean={() => setClean((c) => !c)} />
 
       <ScrollView contentContainerStyle={styles.content}>
+        {recipe.imageUrl ? (
+          <Image
+            source={{ uri: recipe.imageUrl }}
+            style={styles.hero}
+            resizeMode="cover"
+          />
+        ) : null}
         <Heading variant="screenTitle" style={styles.title}>
           {recipe.title}
         </Heading>
@@ -63,6 +70,8 @@ export default function RecipeDetail() {
           {time ? <Numeric color="textMuted">~{time}</Numeric> : null}
           <Numeric color="textMuted">cooked {recipe.cookCount}×</Numeric>
         </View>
+
+        {recipe.nutrition ? <NutritionCard n={recipe.nutrition} /> : null}
 
         <View style={styles.toolbar}>
           <Button
@@ -153,6 +162,42 @@ export default function RecipeDetail() {
         ) : null}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function NutritionCard({ n }: { n: Nutrition }) {
+  const cells: [string, number | undefined, string][] = [
+    ['kcal', n.calories, ''],
+    ['protein', n.protein, 'g'],
+    ['carbs', n.carbs, 'g'],
+    ['fat', n.fat, 'g'],
+  ];
+  return (
+    <Card style={styles.nutri}>
+      <View style={styles.nutriHead}>
+        <SectionLabel color="textMuted">Nutrition · per serving</SectionLabel>
+        <Text
+          variant="sectionLabel"
+          color={n.source === 'extracted' ? 'textMuted' : 'warn'}>
+          {n.source === 'extracted' ? 'from source' : 'estimated'}
+        </Text>
+      </View>
+      <View style={styles.nutriRow}>
+        {cells
+          .filter(([, v]) => v != null)
+          .map(([label, v, u]) => (
+            <View key={label} style={styles.nutriCell}>
+              <Numeric color="text" style={styles.nutriVal}>
+                {Math.round(v as number)}
+                {u}
+              </Numeric>
+              <Text color="textFaint" style={styles.nutriLabel}>
+                {label}
+              </Text>
+            </View>
+          ))}
+      </View>
+    </Card>
   );
 }
 
@@ -299,4 +344,21 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   link: { paddingTop: 22 },
+  hero: {
+    width: '100%',
+    height: 200,
+    borderRadius: layout.cardRadius,
+    marginBottom: 4,
+    backgroundColor: colors.bg2,
+  },
+  nutri: { marginTop: 16, gap: 10 },
+  nutriHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  nutriRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  nutriCell: { alignItems: 'center', flex: 1, gap: 2 },
+  nutriVal: { fontSize: 18 },
+  nutriLabel: { fontSize: 11 },
 });

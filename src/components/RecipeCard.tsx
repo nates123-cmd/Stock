@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { Card } from './Card';
 import { Text, Numeric } from './Text';
 import { SourceBadge, Pill } from './Badge';
@@ -15,6 +15,13 @@ export function RecipeCard({ recipe, onPress }: { recipe: Recipe; onPress?: () =
   return (
     <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
       <Card style={styles.card}>
+        {recipe.imageUrl ? (
+          <Image
+            source={{ uri: recipe.imageUrl }}
+            style={styles.thumb}
+            resizeMode="cover"
+          />
+        ) : null}
         <View style={styles.headerRow}>
           <Text variant="recipeTitle" style={styles.title}>
             {recipe.title}
@@ -47,6 +54,7 @@ export function RecipeCard({ recipe, onPress }: { recipe: Recipe; onPress?: () =
 
 const styles = StyleSheet.create({
   card: { gap: 10 },
+  thumb: { width: '100%', height: 124, borderRadius: 10, backgroundColor: colors.bg2 },
   pressed: { opacity: 0.6 },
   headerRow: {
     flexDirection: 'row',

@@ -6,10 +6,11 @@
  * works in a keyless preview (spec §14.2). Tasks 3/8/9/10 remain typed stubs
  * for later build steps.
  */
-import type { Ingredient, Recipe, RecipeSource, Step } from '@/types';
+import type { Ingredient, Nutrition, Recipe, RecipeSource, Step } from '@/types';
 import { uid } from '@/lib/id';
 import { CLAUDE_AVAILABLE, claudeText } from '@/lib/api/claudeBridge';
 import { localParseRecipe } from './localRecipe';
+import { extractRecipeJsonLd } from './jsonld';
 
 export type ParsedRecipeDraft = Partial<Recipe> & {
   /** which fields were inferred vs. extracted, per spec §11 confidence flags */
@@ -32,9 +33,12 @@ const SYSTEM = `You convert a recipe into STRICT JSON, no prose, no markdown.
 Schema: {"title":string,"serves":number,"totalMinutes":number|null,
 "tags":string[],
 "ingredients":[{"amount":number|null,"unit":string|null,"canonicalName":string,"originalText":string}],
-"steps":[{"title":string,"body":string}]}
+"steps":[{"title":string,"body":string}],
+"nutrition":{"calories":number|null,"protein":number|null,"carbs":number|null,"fat":number|null}}
 canonicalName is normalized & lowercase (e.g. "olive oil, evoo"). title is a
-short 3-6 word step summary. Output ONLY the JSON object.`;
+short 3-6 word step summary. nutrition is your best PER-SERVING estimate from
+the ingredients (calories in kcal; protein/carbs/fat in grams); use null only
+if you genuinely cannot estimate. Output ONLY the JSON object.`;
 
 type RawDraft = {
   title?: string;
@@ -43,12 +47,19 @@ type RawDraft = {
   tags?: string[];
   ingredients?: { amount: number | null; unit: string | null; canonicalName: string; originalText?: string }[];
   steps?: { title: string; body: string }[];
+  nutrition?: {
+    calories?: number | null;
+    protein?: number | null;
+    carbs?: number | null;
+    fat?: number | null;
+  };
 };
 
 function mapRaw(raw: RawDraft): Pick<Recipe, 'ingredients' | 'steps'> & {
   title?: string;
   yield: { serves: number; totalMinutes?: number };
   tags: string[];
+  nutrition?: Nutrition;
 } {
   const ingredients: Ingredient[] = (raw.ingredients ?? []).map((i) => ({
     id: uid('ing'),
@@ -67,12 +78,25 @@ function mapRaw(raw: RawDraft): Pick<Recipe, 'ingredients' | 'steps'> & {
     parsedAmounts: [],
     modificationHistory: [],
   }));
+  const n = raw.nutrition;
+  const nutrition: Nutrition | undefined =
+    n && (n.calories != null || n.protein != null || n.carbs != null || n.fat != null)
+      ? {
+          per: 'serving',
+          source: 'estimated',
+          calories: n.calories ?? undefined,
+          protein: n.protein ?? undefined,
+          carbs: n.carbs ?? undefined,
+          fat: n.fat ?? undefined,
+        }
+      : undefined;
   return {
     title: raw.title?.trim(),
     yield: { serves: raw.serves && raw.serves > 0 ? raw.serves : 4, totalMinutes: raw.totalMinutes ?? undefined },
     tags: Array.isArray(raw.tags) ? raw.tags.map((t) => t.toLowerCase()) : [],
     ingredients,
     steps,
+    nutrition,
   };
 }
 
@@ -111,24 +135,56 @@ export async function parseRecipeFromText(
 /** §11.1 — fetch a recipe URL (NYT/generic) and structure it. */
 export async function parseRecipeFromUrl(url: string): Promise<ParsedRecipeDraft> {
   const source = detectSource(url);
-  let body = '';
+  let html = '';
   try {
     const res = await fetch(url);
-    const html = await res.text();
-    const title = html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim();
-    body =
-      (title ? `${title}\n` : '') +
-      html
-        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<[^>]+>/g, '\n')
-        .replace(/&[a-z]+;/gi, ' ')
-        .replace(/\n{2,}/g, '\n')
-        .trim();
+    html = await res.text();
   } catch (e) {
     console.warn('[stock] URL fetch failed', e);
     throw new Error('Could not fetch that URL. Paste the recipe text instead.');
   }
+
+  // Preferred path: structured JSON-LD (clean, ad/paywall-free, carries the
+  // photo + nutrition + yield). Its ingredient/step text still goes through
+  // the normal parser so unit/amount/fraction logic applies.
+  const ld = extractRecipeJsonLd(html);
+  if (ld && ld.ingredients.length > 0 && ld.steps.length > 0) {
+    const text =
+      `${ld.title ?? ''}\n\nIngredients:\n${ld.ingredients.join('\n')}\n\n` +
+      `Method:\n${ld.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
+    const draft = await parseRecipeFromText(text, source);
+    return {
+      ...draft,
+      title: draft.title || ld.title,
+      imageUrl: ld.imageUrl ?? draft.imageUrl,
+      // Extracted nutrition beats Claude's estimate.
+      nutrition: ld.nutrition ?? draft.nutrition,
+      yield: {
+        serves: ld.serves ?? draft.yield?.serves ?? 4,
+        totalMinutes: ld.totalMinutes ?? draft.yield?.totalMinutes,
+      },
+      tags: Array.from(new Set([...(draft.tags ?? []), ...ld.tags])),
+      fieldConfidence: {
+        ...(draft.fieldConfidence ?? {}),
+        title: 'extracted',
+        ingredients: 'extracted',
+        steps: 'extracted',
+        yield: 'extracted',
+      },
+    };
+  }
+
+  // Fallback: strip tags and let the text parser do its best.
+  const title = html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim();
+  const body =
+    (title ? `${title}\n` : '') +
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, '\n')
+      .replace(/&[a-z]+;/gi, ' ')
+      .replace(/\n{2,}/g, '\n')
+      .trim();
   return parseRecipeFromText(body, source);
 }
 
