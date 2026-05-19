@@ -31,7 +31,6 @@ import {
 export default function PlanScreen() {
   const router = useRouter();
   const entries = usePlanStore((s) => s.entries);
-  const entryFor = usePlanStore((s) => s.entryFor);
   const setStatus = usePlanStore((s) => s.setStatus);
   const removeEntry = usePlanStore((s) => s.remove);
   const recipes = useRecipeStore((s) => s.recipes);
@@ -46,6 +45,17 @@ export default function PlanScreen() {
     recipes.forEach((r) => m.set(r.id, r));
     return m;
   }, [recipes]);
+
+  // Grid lookup derived from the SAME subscribed `entries` the action bar
+  // and shopping list use — keeps every surface provably in sync. (Replaces
+  // the store's imperative entryFor(), which read get() outside the reactive
+  // path and could render stale after returning from the picker modal.)
+  const entryIndex = useMemo(() => {
+    const m = new Map<string, PlanEntry>();
+    for (const e of entries) m.set(`${dateKey(e.date)}|${e.meal}`, e);
+    return m;
+  }, [entries]);
+  const entryFor = (key: string, meal: Meal) => entryIndex.get(`${key}|${meal}`);
 
   // Action-bar stats: this week's pinned, non-skipped recipes (spec §5).
   const weekKeys = new Set(days.map(dateKey));

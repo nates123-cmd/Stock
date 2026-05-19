@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -17,11 +17,12 @@ import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
 import {
-  consolidate,
-  breakdownLabel,
-  quantityLabel,
+  consolidateSmart,
+  consolidateLocalSmart,
   instacartText,
   CATEGORY_ORDER,
+  type ShoppingLine,
+  type ShoppingSource,
 } from '@/lib/shopping';
 import type { Recipe, ShoppingCategory } from '@/types';
 
@@ -35,6 +36,9 @@ const CAT_LABEL: Record<ShoppingCategory, string> = {
   other: 'Other',
 };
 
+const srcQty = (s: ShoppingSource) =>
+  s.amount == null ? 'some' : s.unit && s.unit !== 'pc' ? `${s.amount} ${s.unit}` : `×${s.amount}`;
+
 export default function ShoppingList() {
   const router = useRouter();
   const params = useLocalSearchParams<{ weekStart: string }>();
@@ -46,6 +50,7 @@ export default function ShoppingList() {
   const recipes = useRecipeStore((s) => s.recipes);
 
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
   const [revealText, setRevealText] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -61,16 +66,38 @@ export default function ShoppingList() {
       .filter((r): r is Recipe => !!r);
   }, [entries, recipes, weekStart]);
 
-  const items = useMemo(() => consolidate(weekRecipes), [weekRecipes]);
+  // Render the local merge instantly, then upgrade with Claude's fuzzier
+  // estimate when it resolves (graceful — consolidateSmart self-falls-back).
+  const [items, setItems] = useState<ShoppingLine[]>([]);
+  const [refining, setRefining] = useState(false);
+  useEffect(() => {
+    setItems(consolidateLocalSmart(weekRecipes));
+    if (weekRecipes.length === 0) {
+      setRefining(false);
+      return;
+    }
+    let cancelled = false;
+    setRefining(true);
+    consolidateSmart(weekRecipes)
+      .then((r) => !cancelled && setItems(r))
+      .catch(() => {})
+      .finally(() => !cancelled && setRefining(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [weekRecipes]);
+
   const text = useMemo(() => instacartText(items), [items]);
 
-  const toggle = (name: string) =>
-    setChecked((prev) => {
+  const toggle = (set: typeof setChecked) => (name: string) =>
+    set((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
       return next;
     });
+  const toggleCheck = toggle(setChecked);
+  const toggleExpand = toggle(setExpanded);
 
   const copy = async () => {
     const clip =
@@ -100,6 +127,7 @@ export default function ShoppingList() {
           <Heading variant="screenTitle">Shopping list</Heading>
           <Text color="textMuted">
             {weekRecipes.length} recipes · {weekRangeLabel(weekStart)}
+            {refining ? ' · estimating…' : ''}
           </Text>
         </View>
         <Pressable onPress={() => router.back()} hitSlop={8}>
@@ -111,12 +139,12 @@ export default function ShoppingList() {
 
       <ScrollView contentContainerStyle={styles.body}>
         <Card style={styles.summary}>
-          <SummaryRow label="Total needed" value={`${items.length} ingredients`} />
-          <SummaryRow label="Already in pantry" value="0 items" tone="ok" />
-          <SummaryRow label="To buy" value={`${items.length} items`} tone="accent" />
+          <SummaryRow label="Items to buy" value={`${items.length}`} tone="accent" />
+          <SummaryRow label="Already in pantry" value="0" tone="ok" />
           <Text color="textFaint" style={styles.pantryNote}>
-            Pantry subtraction turns on with the Pantry pillar (spec §10) — for
-            now everything is on the buy list.
+            Quantities are estimates — merged across recipes, prep words and
+            juice/zest folded into the whole item. Tap a row for the math.
+            Pantry subtraction turns on with §10.
           </Text>
         </Card>
 
@@ -132,27 +160,52 @@ export default function ShoppingList() {
                 {items
                   .filter((i) => i.category === cat)
                   .map((item) => {
-                    const on = checked.has(item.canonicalName);
+                    const on = checked.has(item.name);
+                    const open = expanded.has(item.name);
                     return (
                       <Pressable
-                        key={item.canonicalName}
+                        key={item.name}
                         style={styles.item}
-                        onPress={() => toggle(item.canonicalName)}>
-                        <View style={[styles.check, on && styles.checkOn]}>
+                        onPress={() => toggleExpand(item.name)}>
+                        <Pressable
+                          hitSlop={10}
+                          onPress={() => toggleCheck(item.name)}
+                          style={[styles.check, on && styles.checkOn]}>
                           {on ? <Glyph name="done" size={12} color="bg" /> : null}
-                        </View>
+                        </Pressable>
                         <View style={styles.flex}>
                           <Text
                             style={on ? styles.struck : undefined}
                             color={on ? 'textFaint' : 'text'}>
-                            {item.canonicalName}
+                            {item.name}
                           </Text>
-                          <Numeric color="textFaint" style={styles.breakdown}>
-                            {breakdownLabel(item)}
-                          </Numeric>
+                          {item.math ? (
+                            <Numeric color="textFaint" style={styles.breakdown}>
+                              {item.math}
+                            </Numeric>
+                          ) : null}
+                          {open ? (
+                            <View style={styles.sources}>
+                              {item.sources.map((s, i) => (
+                                <Text
+                                  key={`${s.recipe}-${i}`}
+                                  color="textFaint"
+                                  style={styles.sourceLine}>
+                                  · {srcQty(s)} {s.text} — {s.recipe}
+                                </Text>
+                              ))}
+                            </View>
+                          ) : item.sources.length > 0 ? (
+                            <Text color="textFaint" style={styles.expandHint}>
+                              {item.sources.length} source
+                              {item.sources.length > 1 ? 's' : ''} · tap for the math
+                            </Text>
+                          ) : null}
                         </View>
-                        <Numeric color={on ? 'textFaint' : 'text'} style={styles.qty}>
-                          {quantityLabel(item)}
+                        <Numeric
+                          color={on ? 'textFaint' : 'text'}
+                          style={styles.qty}>
+                          {item.buy}
                         </Numeric>
                       </Pressable>
                     );
@@ -247,7 +300,7 @@ const styles = StyleSheet.create({
   section: { gap: 4 },
   item: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
     paddingVertical: 11,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -261,11 +314,15 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 1,
   },
   checkOn: { backgroundColor: colors.ok, borderColor: colors.ok },
   struck: { textDecorationLine: 'line-through' },
-  breakdown: { fontSize: 12, paddingTop: 2 },
-  qty: { fontSize: 14, fontWeight: '700' },
+  breakdown: { fontSize: 12, paddingTop: 2, lineHeight: 16 },
+  sources: { paddingTop: 6, gap: 3 },
+  sourceLine: { fontSize: 12, lineHeight: 16 },
+  expandHint: { fontSize: 11, paddingTop: 3, fontStyle: 'italic' },
+  qty: { fontSize: 14, fontWeight: '700', marginTop: 1 },
   pantryCard: { gap: 6 },
   empty: { textAlign: 'center', paddingVertical: 40 },
   revealCard: { gap: 8 },

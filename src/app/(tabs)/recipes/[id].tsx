@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button } from '@/components';
@@ -21,6 +21,7 @@ export default function RecipeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const recipe = useRecipeStore((s) => s.recipes.find((r) => r.id === id));
+  const save = useRecipeStore((s) => s.save);
   const [clean, setClean] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
 
@@ -125,13 +126,18 @@ export default function RecipeDetail() {
           ))}
         </View>
 
-        {!clean && recipe.myNotes ? (
-          <Card style={styles.notes}>
-            <SectionLabel color="textMuted">My notes</SectionLabel>
-            <Text color="textMuted" style={styles.notesText}>
-              {recipe.myNotes}
-            </Text>
-          </Card>
+        {!clean ? (
+          <NotesEditor
+            key={recipe.id}
+            initial={recipe.myNotes ?? ''}
+            onSave={(text) =>
+              save({
+                ...recipe,
+                myNotes: text.trim() || undefined,
+                modifiedAt: new Date(),
+              })
+            }
+          />
         ) : null}
 
         {!clean && mods > 0 ? (
@@ -147,6 +153,53 @@ export default function RecipeDetail() {
         ) : null}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function NotesEditor({
+  initial,
+  onSave,
+}: {
+  initial: string;
+  onSave: (text: string) => void | Promise<void>;
+}) {
+  const [text, setText] = useState(initial);
+  const [saved, setSaved] = useState(false);
+  const dirty = text !== initial;
+
+  const commit = async () => {
+    if (!dirty) return;
+    await onSave(text);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1800);
+  };
+
+  return (
+    <Card style={styles.notes}>
+      <View style={styles.notesHead}>
+        <SectionLabel color="textMuted">My notes</SectionLabel>
+        {saved ? (
+          <Text variant="sectionLabel" color="ok">
+            Saved
+          </Text>
+        ) : dirty ? (
+          <Pressable onPress={commit} hitSlop={8}>
+            <Text variant="sectionLabel" color="accent">
+              Save
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        onBlur={commit}
+        multiline
+        placeholder="What worked, what to change next time…"
+        placeholderTextColor={colors.textFaint}
+        style={styles.notesInput}
+      />
+    </Card>
   );
 }
 
@@ -233,6 +286,17 @@ const styles = StyleSheet.create({
   stepBody: { flex: 1, lineHeight: 21 },
   cleanBody: { fontSize: 17, lineHeight: 26 },
   notes: { marginTop: 24, gap: 8 },
-  notesText: { lineHeight: 20 },
+  notesHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  notesInput: {
+    minHeight: 76,
+    fontSize: 15,
+    lineHeight: 21,
+    color: colors.text,
+    textAlignVertical: 'top',
+  },
   link: { paddingTop: 22 },
 });

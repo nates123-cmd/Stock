@@ -15,11 +15,36 @@ const FRACTIONS: Record<string, number> = {
   '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125,
 };
 
-const UNITS = new Set([
-  'g', 'kg', 'mg', 'ml', 'l', 'cup', 'cups', 'tbsp', 'tablespoon', 'tablespoons',
-  'tsp', 'teaspoon', 'teaspoons', 'oz', 'lb', 'lbs', 'clove', 'cloves',
-  'pc', 'piece', 'pieces', 'pinch', 'can', 'stick', 'sticks',
-]);
+/**
+ * Synonyms → canonical Unit codes (spec §4 Unit). This both recognizes a
+ * token as a unit AND normalizes its spelling, so formatAmount and Bench see
+ * one form ("grams"→"g", "teaspoons"→"tsp") instead of whatever the source
+ * happened to write.
+ */
+const UNIT_SYNONYMS: Record<string, string> = {
+  g: 'g', gram: 'g', grams: 'g', gms: 'g', gr: 'g',
+  kg: 'kg', kilo: 'kg', kilos: 'kg', kilogram: 'kg', kilograms: 'kg',
+  mg: 'mg',
+  ml: 'ml', milliliter: 'ml', milliliters: 'ml', millilitre: 'ml', millilitres: 'ml',
+  l: 'l', liter: 'l', liters: 'l', litre: 'l', litres: 'l',
+  cup: 'cup', cups: 'cup',
+  tbsp: 'tbsp', tbsps: 'tbsp', tbs: 'tbsp', tablespoon: 'tbsp', tablespoons: 'tbsp',
+  tsp: 'tsp', tsps: 'tsp', teaspoon: 'tsp', teaspoons: 'tsp',
+  oz: 'oz', ounce: 'oz', ounces: 'oz',
+  lb: 'lb', lbs: 'lb', pound: 'lb', pounds: 'lb',
+  clove: 'clove', cloves: 'clove',
+  stick: 'stick', sticks: 'stick',
+  can: 'can', cans: 'can',
+  pinch: 'pinch', pinches: 'pinch',
+  pc: 'pc', piece: 'pc', pieces: 'pc',
+};
+
+// Yield lines ("Serves 6", "6 servings", or a lone "6" above "servings")
+// must set the recipe yield, never list as an ingredient (spec §6).
+const YIELD_INLINE_RE = /^\s*(?:serves|makes|yields?)\s*:?\s*(\d+)\b/i;
+const YIELD_SERVINGS_RE = /^\s*(\d+)\s*servings?\s*$/i;
+const SERVINGS_WORD_RE = /^servings?$/i;
+const NON_INGREDIENT_NAMES = new Set(['servings', 'serving', 'yield', 'makes']);
 
 function parseQuantity(token: string): number | null {
   let t = token.trim();
@@ -53,9 +78,12 @@ function toIngredient(line: string): Ingredient | null {
   let unit: string | null = null;
   let name = (m[3] ?? '').trim();
   const maybeUnit = (m[2] ?? '').toLowerCase();
-  if (maybeUnit && UNITS.has(maybeUnit)) unit = maybeUnit;
+  const canon = UNIT_SYNONYMS[maybeUnit];
+  if (canon) unit = canon;
   else if (maybeUnit) name = `${maybeUnit} ${name}`.trim();
   if (!name) return null;
+  // "6 servings" slipping through as an ingredient (spec §6).
+  if (NON_INGREDIENT_NAMES.has(name.toLowerCase())) return null;
   return {
     id: uid('ing'),
     amount,
@@ -90,8 +118,31 @@ export function localParseRecipe(text: string, fallbackTitle = 'Untitled recipe'
   const ingredients: Ingredient[] = [];
   const stepLines: string[] = [];
   let title = '';
+  let serves = 4;
+  let servesFound = false;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
+
+    // Yield, not an ingredient.
+    const ym = line.match(YIELD_SERVINGS_RE) ?? line.match(YIELD_INLINE_RE);
+    if (ym) {
+      serves = parseInt(ym[1] as string, 10) || serves;
+      servesFound = true;
+      continue;
+    }
+    // NYT two-line shape: "6" on its own line, "servings" on the next.
+    if (
+      /^\d+$/.test(line) &&
+      i + 1 < lines.length &&
+      SERVINGS_WORD_RE.test(lines[i + 1] as string)
+    ) {
+      serves = parseInt(line, 10) || serves;
+      servesFound = true;
+      i++; // consume the "servings" line too
+      continue;
+    }
+
     const ing = toIngredient(line);
     if (ing) {
       ingredients.push(ing);
@@ -108,7 +159,7 @@ export function localParseRecipe(text: string, fallbackTitle = 'Untitled recipe'
 
   return {
     title: title || fallbackTitle,
-    yield: { serves: 4 },
+    yield: { serves },
     ingredients,
     steps,
     tags: [],
@@ -116,7 +167,7 @@ export function localParseRecipe(text: string, fallbackTitle = 'Untitled recipe'
       title: 'guessed',
       ingredients: 'guessed',
       steps: 'guessed',
-      yield: 'guessed',
+      yield: servesFound ? 'parsed' : 'guessed',
     },
   };
 }

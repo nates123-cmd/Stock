@@ -9,7 +9,6 @@ import type { Ingredient } from '@/types';
 import { uid } from '@/lib/id';
 import { CLAUDE_AVAILABLE, claudeText } from '@/lib/api/claudeBridge';
 import type { Confidenced } from './confidence';
-import { hasApiKey } from './recipe';
 import { localParseInstacart } from './localInstacart';
 import { localBestGuess } from './localBestGuess';
 
@@ -57,7 +56,7 @@ function extractItems(text: string): RawItem[] {
 export async function parseInstacartPaste(
   text: string,
 ): Promise<ParsedPantryItem[]> {
-  if (hasApiKey() && CLAUDE_AVAILABLE) {
+  if (CLAUDE_AVAILABLE) {
     try {
       const out = await claudeText('instacart-parse', SYSTEM, text);
       return extractItems(out)
@@ -117,7 +116,7 @@ export async function bestGuessIngredients(
   ideaTitle: string,
   freeText: string,
 ): Promise<Confidenced<Ingredient>[]> {
-  if (hasApiKey() && CLAUDE_AVAILABLE) {
+  if (CLAUDE_AVAILABLE) {
     try {
       const out = await claudeText(
         'best-guess-ingredients',

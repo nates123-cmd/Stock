@@ -26,10 +26,41 @@ export function relativeAge(date: Date, now = new Date()): string {
   return `${Math.round(days / 30)}mo ago`;
 }
 
-/** "200g", "2 pc", "1.5 cup", "" for null amount. */
+/** Common culinary fractions, matched by nearest (absorbs 0.333… → 1/3). */
+const FRACTION_PARTS: [number, number][] = [
+  [1, 8], [1, 4], [1, 3], [3, 8], [1, 2], [5, 8], [2, 3], [3, 4], [7, 8],
+];
+
+/** 0.75 → "3/4", 0.3333… → "1/3", 1.5 → "1 1/2", 2 → "2". */
+export function toFraction(amount: number): string {
+  if (Number.isInteger(amount)) return String(amount);
+  const sign = amount < 0 ? '-' : '';
+  const abs = Math.abs(amount);
+  const whole = Math.floor(abs);
+  const frac = abs - whole;
+  if (frac <= 0.03) return `${sign}${whole}`;
+  if (frac >= 0.97) return `${sign}${whole + 1}`;
+  let best: [number, number] | null = null;
+  let bestErr = Infinity;
+  for (const [a, b] of FRACTION_PARTS) {
+    const err = Math.abs(frac - a / b);
+    if (err < bestErr) {
+      bestErr = err;
+      best = [a, b];
+    }
+  }
+  // Unusual amount with no clean fraction nearby — trim, don't fake one.
+  if (!best || bestErr > 0.04) return `${sign}${Number(abs.toFixed(2))}`;
+  const [a, b] = best;
+  return whole > 0 ? `${sign}${whole} ${a}/${b}` : `${sign}${a}/${b}`;
+}
+
+/** "200g", "2 pc", "3/4 cup", "1 1/2 cup", "" for null amount. */
 export function formatAmount(amount: number | null, unit: string | null): string {
   if (amount == null) return '';
-  const n = Number.isInteger(amount) ? String(amount) : String(amount);
-  if (!unit) return n;
-  return unit === 'pc' ? `${n}` : `${n}${unit.length <= 2 ? '' : ' '}${unit}`;
+  const n = toFraction(amount);
+  if (!unit || unit === 'pc') return n;
+  // Short units hug the number ("200g"); fractions/mixed always get a space.
+  const tight = unit.length <= 2 && !n.includes('/') && !n.includes(' ');
+  return `${n}${tight ? '' : ' '}${unit}`;
 }

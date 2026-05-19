@@ -13,6 +13,7 @@ import type {
   Recipe,
 } from '@/types';
 import { getDb } from './client';
+import { dateKey } from '@/lib/week';
 
 /** JSON round-trips Dates to ISO strings; restore the §4 Date fields. */
 function reviveModDates(mods: Modification[] | undefined): void {
@@ -120,15 +121,31 @@ export const planRepo = {
   },
 
   async upsert(entry: PlanEntry): Promise<void> {
-    await getDb().runAsync(
+    const db = getDb();
+    // Store the LOCAL day key, not toISOString().slice(0,10) (UTC) — the
+    // store matches entries by local dateKey(), so a UTC column drifts a day
+    // east of UTC and desyncs the grid from what's persisted.
+    const day = dateKey(entry.date);
+    // (date, meal) is UNIQUE. The old ON CONFLICT(id)-only upsert threw
+    // "UNIQUE constraint failed" when re-pinning a slot that held a row with
+    // a different id (e.g. a seed), and setRecipe swallowed it — the pin was
+    // silently lost. Clear the slot first so the write is idempotent.
+    await db.runAsync(
+      'DELETE FROM plan_entries WHERE date = ? AND meal = ? AND id <> ?',
+      day,
+      entry.meal,
+      entry.id,
+    );
+    await db.runAsync(
       `INSERT INTO plan_entries
          (id, date, meal, recipe_id, pipeline_idea_id, status, cook_id, data)
        VALUES (?,?,?,?,?,?,?,?)
        ON CONFLICT(id) DO UPDATE SET
+         date=excluded.date, meal=excluded.meal,
          recipe_id=excluded.recipe_id, pipeline_idea_id=excluded.pipeline_idea_id,
          status=excluded.status, cook_id=excluded.cook_id, data=excluded.data`,
       entry.id,
-      entry.date.toISOString().slice(0, 10),
+      day,
       entry.meal,
       entry.recipeId ?? null,
       entry.pipelineIdeaId ?? null,

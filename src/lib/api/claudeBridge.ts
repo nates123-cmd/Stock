@@ -7,7 +7,9 @@
 import { callClaude, MODELS } from './claude';
 import { makeAiCache } from './cache';
 
-export const CLAUDE_AVAILABLE = true;
+// Native talks to Anthropic directly via the SDK, which needs the client
+// key; availability tracks its presence (web's sibling tracks the proxy URL).
+export const CLAUDE_AVAILABLE = !!process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
 
 export async function claudeText(
   task: string,

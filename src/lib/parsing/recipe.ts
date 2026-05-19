@@ -89,7 +89,7 @@ export async function parseRecipeFromText(
   text: string,
   source: RecipeSource = { type: 'mine' },
 ): Promise<ParsedRecipeDraft> {
-  if (hasApiKey() && CLAUDE_AVAILABLE) {
+  if (CLAUDE_AVAILABLE) {
     try {
       const out = await claudeText('recipe-parse', SYSTEM, text);
       const mapped = mapRaw(extractJson(out));

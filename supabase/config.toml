@@ -1,0 +1,9 @@
+# Minimal Supabase config for Stock's Claude proxy. If your CLI wants the full
+# canonical file, run `supabase init` and merge the [functions.claude] block.
+project_id = "stock"
+
+# No Supabase auth in Stock (single-user, no users table) — the function is
+# called from the web app without a Supabase session, so JWT verification is
+# off. Abuse is bounded by STOCK_PROXY_SECRET + an Anthropic spend limit.
+[functions.claude]
+verify_jwt = false

@@ -31,9 +31,9 @@ import {
   parseRecipeFromText,
   parseRecipeFromUrl,
   detectSource,
-  hasApiKey,
   type ParsedRecipeDraft,
 } from '@/lib/parsing';
+import { CLAUDE_AVAILABLE } from '@/lib/api/claudeBridge';
 import { formatAmount } from '@/lib/format';
 import { uid } from '@/lib/id';
 import type { Recipe, RecipeSource } from '@/types';
@@ -283,10 +283,11 @@ function CaptureStep({
           </Text>
         ) : null}
 
-        {!hasApiKey() ? (
+        {!CLAUDE_AVAILABLE ? (
           <Text color="textFaint" style={styles.tip}>
-            No Claude API key set — using the built-in parser. Add
-            EXPO_PUBLIC_ANTHROPIC_API_KEY for higher-fidelity parsing (spec §11/§14.2).
+            Claude isn't configured — using the built-in parser. Set the
+            Claude proxy (web) or EXPO_PUBLIC_ANTHROPIC_API_KEY (native) for
+            higher-fidelity parsing (spec §11/§14.2).
           </Text>
         ) : null}
 
