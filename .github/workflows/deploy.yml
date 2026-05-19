@@ -33,7 +33,13 @@ jobs:
         run: npm ci
 
       - name: Export web bundle
-        run: npx expo export --platform web
+        # EXPO_PUBLIC_* are inlined into the bundle at build time (Babel
+        # replaces process.env.EXPO_PUBLIC_*). --clear because Metro doesn't
+        # cache-bust on env changes — defense in depth even on a fresh CI run.
+        env:
+          EXPO_PUBLIC_CLAUDE_PROXY_URL: ${{ secrets.EXPO_PUBLIC_CLAUDE_PROXY_URL }}
+          EXPO_PUBLIC_CLAUDE_PROXY_SECRET: ${{ secrets.EXPO_PUBLIC_CLAUDE_PROXY_SECRET }}
+        run: npx expo export --platform web --clear
 
       - name: SPA + Pages fixups
         run: |
