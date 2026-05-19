@@ -1,50 +1,95 @@
-# Welcome to your Expo app 👋
+# Stock
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Cooking app for the Nate Apps suite. Plan-driven, recipe-aware, pantry-conscious.
+Mobile-first, cross-platform (iOS, Android, web preview). Local-first, v1.
 
-## Get started
+Build spec (source of truth): `../Stock artifacts/stock-spec.md`.
+Visual reference mockups: `assets/mockups/*.html`.
 
-1. Install dependencies
+## Stack
 
-   ```bash
-   npm install
-   ```
+- Expo SDK 54 · React Native 0.81 · React 19 · TypeScript (strict)
+- Expo Router (file-based) — `src/app`
+- NativeWind v4 + Tailwind 3 (palette mirrors `src/design`)
+- Zustand + TanStack Query (installed, not yet wired)
+- expo-sqlite (local-first storage, native; web DB deferred — spec §12)
+- @anthropic-ai/sdk (Claude API — spec §11)
 
-2. Start the app
+## Run
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+> **Node 26 (system default) breaks Expo SDK 54.** `expo start` hangs and
+> `expo export` crashes (`rnGetPolyfills`) on Node 26. Node 22 LTS is
+> installed keg-only at `/opt/homebrew/opt/node@22`; **every** `dev:*` /
+> `build:*` / `serve:web` script forces it (system default untouched).
+> Also: `npx`/`npm exec` itself hangs in non-TTY shells — use the npm
+> scripts or call local bins via `node` directly. Run these in a real
+> terminal or a fresh session.
 
 ```bash
-npm run reset-project
+npm install
+cp .env.example .env        # add EXPO_PUBLIC_ANTHROPIC_API_KEY (spec §14.2)
+
+# Hot-reload dev — run in a REAL terminal:
+npm run dev:web             # http://localhost:8088, Fast Refresh
+npm run dev:ios             # simulator
+
+# Static build + serve (headless/agent or quick look):
+npm run serve:web           # export to dist/ then serve on :8088 (no reload)
+                            # if it hangs/cache-errors:  npm run serve:web -- --clear
+
+npm run typecheck           # node tsc, pinned to node@22 — NEVER `npx tsc` (npx hangs)
+                            # (system Node 26 makes tsc emit phantom "Cannot find
+                            #  global type Object/Number/Boolean" lib errors + zero-
+                            #  output hangs; the script forces node@22 like the rest)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+> ⚠️ Don't `kill -9` Metro repeatedly — orphaned workers become zombies that
+> brick all Node tooling for the session. If exports start hanging with zero
+> output, the fix is a fresh session/reboot, not retries.
 
-## Learn more
+## Layout (spec §13)
 
-To learn more about developing your project with Expo, look at the following resources:
+```
+src/
+  app/            Expo Router screens — (tabs)/ is the 5-pillar nav
+  components/     UI primitives (Text, Glyph, Card, Screen) + design system
+  lib/
+    api/          Claude API wrapper (cache + model routing — §11)
+    db/           SQLite schema, client, repositories (§4)
+    parsing/      recipe / instacart / units stubs (§11 tasks)
+  design/         palette, typography, glyph tokens (§2) — source of truth
+  types/          domain types transcribed from spec §4
+assets/
+  mockups/        HTML visual reference
+  fonts/          (Iowan/JetBrains fallbacks — to add)
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Build status (spec §13 order)
 
-## Join the community
+| Pillar | State | Verified |
+|---|---|---|
+| Scaffold / design system / nav | ✅ | tsc + web bundle (clean) |
+| Recipes §6 (library, detail, capture flow, parser) | ✅ | tsc clean |
+| Cook §7 (Focused, Glance, timers, scrub, post-cook) | ✅ | tsc clean |
+| Plan §5 (week grid, picker, shopping list) | ✅ | **tsc not yet run** — verify first |
+| Pantry §10 | ⬜ next | — |
+| Pipeline §8 · Bench §9 · Mod history | ⬜ | — |
 
-Join our community of developers creating universal apps.
+**First thing in a new session:** `npm run typecheck` (Plan §5 was written but
+its typecheck couldn't run last session — fix anything it flags), then
+`npm run dev:web` (your terminal) or `npm run serve:web` (agent) to preview.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+> **2026-05-18 — root cause found, post-reboot resume:** the typecheck "couldn't
+> run" because the `typecheck` script was the *only* npm script not pinning
+> node@22; under system Node 26 tsc emitted 5 phantom global-lib errors
+> (`Object`/`Number`/`Boolean`/`CallableFunction`/`NewableFunction`) and then
+> hung with zero output (the documented Node-zombie state — reboot, don't retry).
+> Fixed: `typecheck` now forces node@22. **After the reboot, just run
+> `npm run typecheck`** — no Plan §5 code error has been observed yet; the lib
+> errors were environment, not source. If it's now clean, Plan §5 is verified —
+> mark it ✅ and proceed to Pantry §10. If real errors in Plan §5 files appear
+> (`src/app/plan-picker.tsx`, `src/app/shopping.tsx`, `src/lib/week.ts`,
+> `src/lib/shopping.ts`, `src/store/plan.ts`), fix those, then `npm run dev:web`.
+
+Stores: `src/store/` (recipes, cooks, plan — zustand; web-seeded in-memory,
+native SQLite). Open build decisions: spec §14.

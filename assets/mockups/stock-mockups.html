@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock — Mockups</title>
+<style>
+  :root {
+    --bg: #F5EDDD;
+    --bg2: #EDE2CC;
+    --bg3: #E4D7BB;
+    --accent: #B5462A;
+    --accent-soft: #C56B4D;
+    --text: #3D2B1F;
+    --text-muted: #8A6F5C;
+    --text-faint: #B19981;
+    --line: #DCC9A8;
+    --line-soft: #E4D5B8;
+    --ok: #5C7A3E;
+    --warn: #C28B2B;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background: #2a2620;
+    font-family: var(--sans);
+    color: var(--text);
+    padding: 40px 20px 80px;
+  }
+  .page {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .page-title {
+    color: #d6c4a3;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    text-align: center;
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .page-sub {
+    color: #8a7e69;
+    font-size: 13px;
+    text-align: center;
+    margin: 0 0 40px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 420px));
+    gap: 32px 24px;
+    justify-content: center;
+  }
+  .device {
+    width: 420px;
+    background: var(--bg);
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+    position: relative;
+  }
+  .device-label {
+    color: #8a7e69;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .screen {
+    padding: 20px 22px 28px;
+    min-height: 720px;
+    position: relative;
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 4px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .status-right { display: flex; gap: 6px; align-items: center; font-size: 11px; }
+
+  /* App header */
+  .app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 18px;
+  }
+  .app-name {
+    font-family: var(--serif);
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+  .app-nav {
+    display: flex;
+    gap: 14px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .app-nav .active { color: var(--accent); font-weight: 600; }
+
+  /* Tab strip */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    padding: 8px 14px 10px;
+    font-size: 14px;
+    color: var(--text-muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-weight: 500;
+  }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* Cards */
+  .card {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+  }
+  .card-tight {
+    background: var(--bg2);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .recipe-card {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .recipe-title {
+    font-family: var(--serif);
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0 0 6px;
+    line-height: 1.2;
+  }
+  .recipe-meta {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    background: var(--bg3);
+    color: var(--text-muted);
+  }
+  .badge.nyt { background: #D8C8A4; color: #5a4a2a; }
+  .badge.yt { background: #E5C4B8; color: #8a3a26; }
+  .badge.book { background: #C9D4B8; color: #4a5a3a; }
+  .badge.mine { background: var(--accent); color: #F5EDDD; }
+  .badge.modified {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 1px 7px;
+  }
+  .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-faint); display: inline-block; }
+  .have-it {
+    color: var(--ok);
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .missing {
+    color: var(--warn);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* Section labels */
+  .section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 22px 0 10px;
+  }
+  .section-label:first-child { margin-top: 0; }
+
+  /* Search */
+  .search {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 11px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text-faint);
+    margin-bottom: 14px;
+  }
+
+  /* Filter chips */
+  .chips { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 14px; padding-bottom: 2px; }
+  .chip {
+    padding: 6px 12px;
+    border-radius: 14px;
+    font-size: 12px;
+    background: var(--bg2);
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .chip.active {
+    background: var(--accent);
+    color: var(--bg);
+    font-weight: 600;
+  }
+
+  /* Recipe detail */
+  .recipe-hero {
+    margin-bottom: 16px;
+  }
+  .recipe-hero-title {
+    font-family: var(--serif);
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.15;
+    margin: 0 0 8px;
+  }
+  .recipe-hero-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  .tool-btn {
+    flex: 1;
+    padding: 9px;
+    background: var(--bg2);
+    border-radius: 10px;
+    font-size: 12px;
+    color: var(--text);
+    text-align: center;
+    font-weight: 500;
+  }
+  .tool-btn.primary { background: var(--accent); color: var(--bg); font-weight: 600; }
+
+  .ingredients-list { margin-bottom: 18px; }
+  .ing-row {
+    display: flex;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line-soft);
+    gap: 10px;
+    font-size: 14px;
+  }
+  .ing-row:last-child { border-bottom: none; }
+  .ing-amount {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--text);
+    font-weight: 600;
+    min-width: 56px;
+  }
+  .ing-name { flex: 1; color: var(--text); }
+  .ing-mark {
+    color: var(--accent);
+    font-size: 11px;
+    font-style: italic;
+  }
+  .ing-row.modified .ing-amount { color: var(--accent); }
+
+  .step {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 14px;
+    line-height: 1.5;
+    display: flex;
+    gap: 12px;
+  }
+  .step-num {
+    font-family: var(--serif);
+    font-size: 18px;
+    color: var(--accent);
+    font-weight: 600;
+    min-width: 22px;
+  }
+  .step-body { color: var(--text); }
+
+  .notes-block {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-top: 18px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+  .notes-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .source-link {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Pipeline */
+  .idea-card {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    position: relative;
+    border-left: 3px solid transparent;
+  }
+  .idea-card.researching { border-left-color: var(--warn); }
+  .idea-card.ready { border-left-color: var(--ok); }
+  .idea-card.captured { border-left-color: var(--text-faint); }
+  .idea-title {
+    font-family: var(--serif);
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+  .idea-note {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+  .idea-status {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .ref-count { color: var(--text-faint); }
+
+  /* Workbench */
+  .paste-area {
+    background: var(--bg2);
+    border-radius: 14px;
+    padding: 14px 16px;
+    min-height: 100px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.6;
+    margin-bottom: 14px;
+  }
+  .paste-placeholder { color: var(--text-faint); font-style: italic; }
+  .converted {
+    background: var(--bg);
+    border: 1.5px solid var(--accent);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .converted-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .conv-row {
+    display: flex;
+    align-items: baseline;
+    padding: 6px 0;
+    font-size: 13.5px;
+    gap: 10px;
+  }
+  .conv-grams {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 52px;
+  }
+  .conv-pct {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 44px;
+    text-align: right;
+  }
+  .conv-name { flex: 1; }
+
+  /* Pantry */
+  .pantry-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 14px;
+  }
+  .pantry-name { color: var(--text); }
+  .pantry-meta { font-size: 11px; color: var(--text-muted); }
+  .always { color: var(--ok); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+
+  /* FAB */
+  .fab {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 28px;
+    font-weight: 300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(181, 70, 42, 0.35);
+  }
+
+  /* Bottom nav */
+  .bottom-nav {
+    display: flex;
+    justify-content: space-around;
+    padding: 12px 0 6px;
+    border-top: 1px solid var(--line);
+    margin: 20px -22px -28px;
+    background: var(--bg);
+  }
+  .nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 4px 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+  }
+  .nav-item.active { color: var(--accent); }
+  .nav-icon {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+
+  /* Workbench scaling */
+  .scale-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background: var(--bg3);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-size: 13px;
+  }
+  .scale-label { color: var(--text-muted); }
+  .scale-value {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .scale-input {
+    background: var(--bg);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-family: var(--mono);
+    font-weight: 600;
+    border: 1px solid var(--line);
+  }
+
+  /* sub view */
+  .sub-option {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+  }
+  .sub-name {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+  .sub-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+  .sub-rank {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--bg);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  .sub-rank.second { background: var(--accent-soft); }
+  .sub-rank.third { background: var(--text-muted); }
+
+  .hint {
+    background: var(--bg3);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-bottom: 14px;
+    font-style: italic;
+  }
+
+</style>
+</head>
+<body>
+<div class="page">
+<h1 class="page-title">Stock</h1>
+<p class="page-sub">parchment / paprika · mobile · 420px</p>
+
+<div class="grid">
+
+<!-- ============================================================ -->
+<!-- SCREEN 1: RECIPES HOME -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">1 · Recipes (home)</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:42</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="app-header">
+    <div class="app-name">Stock</div>
+    <div class="app-nav">
+      <span class="active">Recipes</span>
+      <span>Pipeline</span>
+      <span>Pantry</span>
+    </div>
+  </div>
+
+  <div class="search">
+    <span>⌕</span>
+    <span>Search recipes, ingredients…</span>
+  </div>
+
+  <div class="chips">
+    <div class="chip active">All · 84</div>
+    <div class="chip">Have it · 31</div>
+    <div class="chip">Weeknight</div>
+    <div class="chip">Baking</div>
+    <div class="chip">Project</div>
+    <div class="chip">Modified</div>
+  </div>
+
+  <div class="section-label">Recently cooked</div>
+
+  <div class="recipe-card">
+    <div class="recipe-title">Pizza dough · 65% hydration</div>
+    <div class="recipe-meta">
+      <span class="badge mine">mine</span>
+      <span class="badge modified">modified</span>
+      <span>·</span>
+      <span>cooked 3d ago</span>
+    </div>
+  </div>
+
+  <div class="recipe-card">
+    <div class="recipe-title">Roasted beet salad, whipped feta</div>
+    <div class="recipe-meta">
+      <span class="badge nyt">NYT</span>
+      <span class="badge modified">modified</span>
+      <span>·</span>
+      <span>cooked 9d ago</span>
+      <span>·</span>
+      <span class="have-it">● have it</span>
+    </div>
+  </div>
+
+  <div class="recipe-card">
+    <div class="recipe-title">Sodium citrate cheese sauce</div>
+    <div class="recipe-meta">
+      <span class="badge book">book</span>
+      <span>·</span>
+      <span>cooked 2w ago</span>
+      <span>·</span>
+      <span class="missing">missing 2</span>
+    </div>
+  </div>
+
+  <div class="section-label">Library</div>
+
+  <div class="recipe-card">
+    <div class="recipe-title">Fermented garlic honey</div>
+    <div class="recipe-meta">
+      <span class="badge yt">YT</span>
+      <span>·</span>
+      <span class="have-it">● have it</span>
+    </div>
+  </div>
+
+  <div class="recipe-card">
+    <div class="recipe-title">Flatbread (Mediterranean spread)</div>
+    <div class="recipe-meta">
+      <span class="badge mine">mine</span>
+      <span>·</span>
+      <span class="have-it">● have it</span>
+    </div>
+  </div>
+
+  <div class="fab">+</div>
+
+  <div class="bottom-nav">
+    <div class="nav-item active"><div class="nav-icon">▤</div>Recipes</div>
+    <div class="nav-item"><div class="nav-icon">◔</div>Pipeline</div>
+    <div class="nav-item"><div class="nav-icon">⚖</div>Bench</div>
+    <div class="nav-item"><div class="nav-icon">▣</div>Pantry</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 2: RECIPE DETAIL (annotated) -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">2 · Recipe detail · annotated</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:43</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+    <span style="color: var(--accent); font-size: 14px;">← Recipes</span>
+    <span style="color: var(--text-muted); font-size: 13px;">Clean view</span>
+  </div>
+
+  <div class="recipe-hero">
+    <h2 class="recipe-hero-title">Roasted beet salad with whipped feta</h2>
+    <div class="recipe-hero-meta">
+      <span class="badge nyt">NYT</span>
+      <span class="badge modified">modified · 3 changes</span>
+      <span>·</span>
+      <span>serves 4</span>
+      <span>·</span>
+      <span>cooked 6×</span>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="tool-btn primary">Cook</div>
+    <div class="tool-btn">⚖ Bench</div>
+    <div class="tool-btn">Scale</div>
+  </div>
+
+  <div class="section-label">Ingredients</div>
+  <div class="ingredients-list">
+    <div class="ing-row">
+      <div class="ing-amount">680g</div>
+      <div class="ing-name">red beets, scrubbed</div>
+    </div>
+    <div class="ing-row modified">
+      <div class="ing-amount">200g</div>
+      <div class="ing-name">feta <span class="ing-mark">· upped from 150g (Apr)</span></div>
+    </div>
+    <div class="ing-row">
+      <div class="ing-amount">60g</div>
+      <div class="ing-name">greek yogurt</div>
+    </div>
+    <div class="ing-row modified">
+      <div class="ing-amount">3 tbsp</div>
+      <div class="ing-name">olive oil <span class="ing-mark">· good stuff, not blend (Mar)</span></div>
+    </div>
+    <div class="ing-row">
+      <div class="ing-amount">1</div>
+      <div class="ing-name">lemon, zest + juice</div>
+    </div>
+    <div class="ing-row modified">
+      <div class="ing-amount">2 tsp</div>
+      <div class="ing-name">honey <span class="ing-mark">· added; original had none (Apr)</span></div>
+    </div>
+    <div class="ing-row">
+      <div class="ing-amount">¼ cup</div>
+      <div class="ing-name">pistachios, toasted</div>
+    </div>
+    <div class="ing-row">
+      <div class="ing-amount">—</div>
+      <div class="ing-name">flaky salt, pepper, dill</div>
+    </div>
+  </div>
+
+  <div class="section-label">Method</div>
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">Roast beets at 400°F, wrapped in foil, until a knife slides in clean — 60–80 min depending on size.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">Whip feta with yogurt, lemon zest, half the oil. Should be spoonable, not stiff.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">Peel beets while warm (skins slip off). Cut into wedges, toss with lemon juice, honey, remaining oil.</div>
+  </div>
+
+  <div class="notes-block">
+    <div class="notes-label">My notes</div>
+    The honey is the unlock — original is too sharp. Plate the feta first, beets on top, juices pool nicely. Pistachios at the very end or they go soft.
+  </div>
+
+  <div class="source-link">
+    → Original recipe (NYT Cooking)
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 3: PIPELINE -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">3 · Pipeline (ideas)</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:44</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="app-header">
+    <div class="app-name">Stock</div>
+    <div class="app-nav">
+      <span>Recipes</span>
+      <span class="active">Pipeline</span>
+      <span>Pantry</span>
+    </div>
+  </div>
+
+  <div class="chips">
+    <div class="chip active">Active · 9</div>
+    <div class="chip">Captured</div>
+    <div class="chip">Researching</div>
+    <div class="chip">Ready</div>
+    <div class="chip">Archive</div>
+  </div>
+
+  <div class="hint">Tap + below to capture. No required fields. Flesh out later or never.</div>
+
+  <div class="idea-card researching">
+    <div class="idea-title">Pho — proper bone broth</div>
+    <div class="idea-note">Want to nail the 6-hour broth. Bone marrow vs just bones? Charring the onion/ginger matters.</div>
+    <div class="idea-status">
+      <span style="color: var(--warn);">▸ researching</span>
+      <span class="ref-count">4 refs · added 5d ago</span>
+    </div>
+  </div>
+
+  <div class="idea-card ready">
+    <div class="idea-title">Japanese-style salad, rice vinegar lean</div>
+    <div class="idea-note">Cucumber, daikon, sesame, shiso if I can find it. Dressing: rice vinegar, mirin, soy, neutral oil, ginger. Maybe a soft egg.</div>
+    <div class="idea-status">
+      <span style="color: var(--ok);">▸ ready to attempt</span>
+      <span class="ref-count">2 refs · this week</span>
+    </div>
+  </div>
+
+  <div class="idea-card captured">
+    <div class="idea-title">Alternative fried chicken</div>
+    <div class="idea-note">Not the standard buttermilk path. Maybe yogurt brine, or the rice-flour cornstarch crunch route. Korean double-fry?</div>
+    <div class="idea-status">
+      <span>▸ captured</span>
+      <span class="ref-count">0 refs · added today</span>
+    </div>
+  </div>
+
+  <div class="idea-card captured">
+    <div class="idea-title">Miso-honey glazed carrots</div>
+    <div class="idea-note">Saw it on a YT short. Roast, glaze in pan, finish under broiler.</div>
+    <div class="idea-status">
+      <span>▸ captured</span>
+      <span class="ref-count">1 ref · 2w ago</span>
+    </div>
+  </div>
+
+  <div class="idea-card researching">
+    <div class="idea-title">Tahini caramel</div>
+    <div class="idea-note">For ice cream + tossing in popcorn. Sub tahini for some butter in standard caramel.</div>
+    <div class="idea-status">
+      <span style="color: var(--warn);">▸ researching</span>
+      <span class="ref-count">3 refs · 3w ago</span>
+    </div>
+  </div>
+
+  <div class="fab">+</div>
+
+  <div class="bottom-nav">
+    <div class="nav-item"><div class="nav-icon">▤</div>Recipes</div>
+    <div class="nav-item active"><div class="nav-icon">◔</div>Pipeline</div>
+    <div class="nav-item"><div class="nav-icon">⚖</div>Bench</div>
+    <div class="nav-item"><div class="nav-icon">▣</div>Pantry</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 4: WORKBENCH · CONVERT -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">4 · Workbench · Convert</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:45</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="app-header">
+    <div class="app-name">Bench</div>
+    <div class="app-nav">
+      <span class="active">Convert</span>
+      <span>Sub</span>
+    </div>
+  </div>
+
+  <div class="hint">Paste any recipe. Returns grams + baker's % for flour-based recipes.</div>
+
+  <div class="section-label">Paste in</div>
+  <div class="paste-area">
+1.75 cups all-purpose flour<br>
+1 tsp instant yeast<br>
+1.5 tsp salt<br>
+1 cup + 2 tbsp water (lukewarm)<br>
+2 tbsp olive oil<br>
+1 stick butter, softened
+  </div>
+
+  <div class="scale-row">
+    <span class="scale-label">Target</span>
+    <span class="scale-input">500g</span>
+    <span class="scale-label">flour · or scale to</span>
+    <span class="scale-input">4×</span>
+  </div>
+
+  <div class="converted">
+    <div class="converted-label">▸ Converted · baker's %</div>
+    <div class="conv-row">
+      <div class="conv-grams">500g</div>
+      <div class="conv-pct">100%</div>
+      <div class="conv-name">all-purpose flour</div>
+    </div>
+    <div class="conv-row">
+      <div class="conv-grams">3g</div>
+      <div class="conv-pct">0.6%</div>
+      <div class="conv-name">instant yeast</div>
+    </div>
+    <div class="conv-row">
+      <div class="conv-grams">9g</div>
+      <div class="conv-pct">1.8%</div>
+      <div class="conv-name">salt</div>
+    </div>
+    <div class="conv-row">
+      <div class="conv-grams">325g</div>
+      <div class="conv-pct">65%</div>
+      <div class="conv-name">water</div>
+    </div>
+    <div class="conv-row">
+      <div class="conv-grams">27g</div>
+      <div class="conv-pct">5.4%</div>
+      <div class="conv-name">olive oil</div>
+    </div>
+    <div class="conv-row">
+      <div class="conv-grams">113g</div>
+      <div class="conv-pct">22.6%</div>
+      <div class="conv-name">butter (1 stick)</div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 8px; margin-top: 14px;">
+    <div class="tool-btn primary" style="flex: 2;">Save as recipe</div>
+    <div class="tool-btn">Edit</div>
+  </div>
+
+  <div style="font-size: 11px; color: var(--text-faint); margin-top: 14px; line-height: 1.5; font-style: italic;">
+    65% hydration. Flour-based — baker's % calculated against flour. Tap any value to override.
+  </div>
+
+  <div class="bottom-nav">
+    <div class="nav-item"><div class="nav-icon">▤</div>Recipes</div>
+    <div class="nav-item"><div class="nav-icon">◔</div>Pipeline</div>
+    <div class="nav-item active"><div class="nav-icon">⚖</div>Bench</div>
+    <div class="nav-item"><div class="nav-icon">▣</div>Pantry</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 5: WORKBENCH · SUB -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">5 · Workbench · Sub</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:46</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="app-header">
+    <div class="app-name">Bench</div>
+    <div class="app-nav">
+      <span>Convert</span>
+      <span class="active">Sub</span>
+    </div>
+  </div>
+
+  <div class="section-label">Substitute for</div>
+  <div class="paste-area" style="min-height: auto; padding: 12px 16px; font-family: var(--serif); font-size: 18px; font-weight: 600;">
+    buttermilk · 1 cup
+  </div>
+
+  <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+    For: <span style="color: var(--text); font-weight: 500;">Roasted beet salad → whipped feta</span>
+  </div>
+
+  <div class="section-label">Options · ranked by closeness</div>
+
+  <div class="sub-option">
+    <div class="sub-name"><span class="sub-rank">1</span>Milk + lemon juice</div>
+    <div class="sub-note">
+      <span style="font-family: var(--mono); color: var(--text); font-weight: 600;">240g milk + 15g lemon juice (or white vinegar).</span> Stand 5 min until curdled. Closest in acidity and water content — texture nearly identical for whipped applications.
+    </div>
+  </div>
+
+  <div class="sub-option">
+    <div class="sub-name"><span class="sub-rank second">2</span>Plain yogurt, thinned</div>
+    <div class="sub-note">
+      <span style="font-family: var(--mono); color: var(--text); font-weight: 600;">180g full-fat yogurt + 60g water or milk.</span> Slightly tangier, slightly denser. Makes the feta richer — actually good here.
+    </div>
+  </div>
+
+  <div class="sub-option">
+    <div class="sub-name"><span class="sub-rank third">3</span>Kefir</div>
+    <div class="sub-note">
+      <span style="font-family: var(--mono); color: var(--text); font-weight: 600;">240g, 1:1 sub.</span> Thinner than buttermilk, more probiotic tang. Stir, don't whip too hard or it breaks.
+    </div>
+  </div>
+
+  <div style="margin-top: 18px; font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+    Long-press any ingredient in a recipe to launch Sub with the amount pre-loaded.
+  </div>
+
+  <div class="bottom-nav">
+    <div class="nav-item"><div class="nav-icon">▤</div>Recipes</div>
+    <div class="nav-item"><div class="nav-icon">◔</div>Pipeline</div>
+    <div class="nav-item active"><div class="nav-icon">⚖</div>Bench</div>
+    <div class="nav-item"><div class="nav-icon">▣</div>Pantry</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 6: PANTRY -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">6 · Pantry</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:47</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="app-header">
+    <div class="app-name">Stock</div>
+    <div class="app-nav">
+      <span>Recipes</span>
+      <span>Pipeline</span>
+      <span class="active">Pantry</span>
+    </div>
+  </div>
+
+  <div class="card-tight" style="background: var(--bg3); margin-bottom: 16px;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; margin-bottom: 4px;">Last Instacart</div>
+        <div style="font-size: 14px; color: var(--text);">May 11 · 23 items added</div>
+      </div>
+      <div style="background: var(--accent); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 12px; font-weight: 600;">+ Paste order</div>
+    </div>
+  </div>
+
+  <div class="section-label">Always have · 14</div>
+  <div class="pantry-row">
+    <span class="pantry-name">olive oil <span class="always">· always</span></span>
+    <span class="pantry-meta">~6w cycle</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">eggs <span class="always">· always</span></span>
+    <span class="pantry-meta">~2w cycle</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">garlic <span class="always">· always</span></span>
+    <span class="pantry-meta">~3w cycle</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">lemons <span class="always">· always</span></span>
+    <span class="pantry-meta">~2w cycle</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">butter <span class="always">· always</span></span>
+    <span class="pantry-meta">~4w cycle</span>
+  </div>
+
+  <div class="section-label">Recently added · 12d window</div>
+  <div class="pantry-row">
+    <span class="pantry-name">red beets</span>
+    <span class="pantry-meta">May 11 · 3 left?</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">feta</span>
+    <span class="pantry-meta">May 11</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">pistachios</span>
+    <span class="pantry-meta">May 11</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">cilantro</span>
+    <span class="pantry-meta">May 11 · wilting?</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">cremini mushrooms</span>
+    <span class="pantry-meta">May 9</span>
+  </div>
+
+  <div class="section-label">Freezer</div>
+  <div class="pantry-row">
+    <span class="pantry-name">chicken thighs</span>
+    <span class="pantry-meta">2 lb</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">beef bones (for stock)</span>
+    <span class="pantry-meta">Apr 22</span>
+  </div>
+  <div class="pantry-row">
+    <span class="pantry-name">pizza dough × 2</span>
+    <span class="pantry-meta">May 7</span>
+  </div>
+
+  <div class="bottom-nav">
+    <div class="nav-item"><div class="nav-icon">▤</div>Recipes</div>
+    <div class="nav-item"><div class="nav-icon">◔</div>Pipeline</div>
+    <div class="nav-item"><div class="nav-icon">⚖</div>Bench</div>
+    <div class="nav-item active"><div class="nav-icon">▣</div>Pantry</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+</div>
+</div>
+</body>
+</html>

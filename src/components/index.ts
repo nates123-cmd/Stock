@@ -1,0 +1,25 @@
+/** UI primitives barrel — import from "@/components". */
+export { Text, Heading, Numeric, SectionLabel } from './Text';
+export type { AppTextProps } from './Text';
+export { Glyph } from './Glyph';
+export type { GlyphProps } from './Glyph';
+export { Card } from './Card';
+export type { CardProps } from './Card';
+export { Screen } from './Screen';
+export type { ScreenProps } from './Screen';
+export { PillarPlaceholder } from './PillarPlaceholder';
+export type { PillarPlaceholderProps } from './PillarPlaceholder';
+export { Button, Fab } from './Button';
+export type { ButtonProps, ButtonVariant } from './Button';
+export { SourceBadge, Pill, ConfidenceTag } from './Badge';
+export type { PillTone } from './Badge';
+export { FilterChip, ChipRow } from './Chip';
+export { SearchBar } from './SearchBar';
+export { BottomActionBar } from './ActionBar';
+export { ProgressStepList } from './ProgressStepList';
+export type { ProgressStep, ProgressState } from './ProgressStepList';
+export { RecipeCard } from './RecipeCard';
+export { StepBody } from './StepBody';
+export { Overlay } from './Overlay';
+export { TimerStrip } from './TimerStrip';
+export { AwakeIndicator } from './AwakeIndicator';

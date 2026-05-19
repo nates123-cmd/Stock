@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock — Instacart paste flow</title>
+<style>
+  :root {
+    --bg: #F5EDDD;
+    --bg2: #EDE2CC;
+    --bg3: #E4D7BB;
+    --accent: #CC3D2E;
+    --accent-deep: #A52E22;
+    --accent-soft: #E16252;
+    --text: #3D2B1F;
+    --text-muted: #8A6F5C;
+    --text-faint: #B19981;
+    --line: #DCC9A8;
+    --line-soft: #E4D5B8;
+    --ok: #5C7A3E;
+    --warn: #C28B2B;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background: #2a2620;
+    font-family: var(--sans);
+    color: var(--text);
+    padding: 40px 20px 80px;
+  }
+  .page { max-width: 1400px; margin: 0 auto; }
+  .page-title {
+    color: #d6c4a3;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    text-align: center;
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .page-sub {
+    color: #8a7e69;
+    font-size: 13px;
+    text-align: center;
+    margin: 0 0 40px;
+  }
+  .flow-arrows {
+    text-align: center;
+    color: #8a7e69;
+    font-size: 11px;
+    letter-spacing: 2px;
+    margin-bottom: 30px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 420px));
+    gap: 32px 24px;
+    justify-content: center;
+  }
+  .device {
+    width: 420px;
+    background: var(--bg);
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+    position: relative;
+  }
+  .device-label {
+    color: #8a7e69;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .screen {
+    padding: 18px 22px 28px;
+    min-height: 760px;
+    position: relative;
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 4px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .nav-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .nav-back {
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .nav-right {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .nav-right.disabled { color: var(--text-faint); }
+  .nav-right.primary { color: var(--accent); font-weight: 600; }
+
+  .screen-title {
+    font-family: var(--serif);
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.1;
+    margin: 0 0 6px;
+    letter-spacing: -0.3px;
+  }
+  .screen-sub {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 0 0 22px;
+    line-height: 1.5;
+  }
+
+  /* Capture */
+  .paste-zone {
+    background: var(--bg2);
+    border: 1.5px dashed var(--line);
+    border-radius: 16px;
+    padding: 28px 20px;
+    margin-bottom: 14px;
+    min-height: 240px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+  .paste-prompt {
+    color: var(--text-faint);
+    font-size: 14px;
+    line-height: 1.6;
+    font-style: italic;
+  }
+  .paste-prompt strong {
+    color: var(--text-muted);
+    font-style: normal;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .paste-prompt-hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-top: 14px;
+    font-style: normal;
+    line-height: 1.6;
+  }
+
+  .paste-zone.filled {
+    border: 1.5px solid var(--accent);
+    border-style: solid;
+    background: var(--bg);
+    text-align: left;
+    padding: 14px 16px;
+    min-height: auto;
+    justify-content: flex-start;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text);
+    line-height: 1.6;
+    max-height: 240px;
+    overflow: hidden;
+    position: relative;
+  }
+  .paste-zone.filled::after {
+    content: "";
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 40px;
+    background: linear-gradient(transparent, var(--bg));
+    pointer-events: none;
+  }
+  .pasted-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .detected-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent);
+    color: var(--bg);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-family: var(--sans);
+  }
+  .pasted-counts {
+    font-family: var(--sans);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .recent-section {
+    margin-top: 22px;
+  }
+  .section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 0 0 10px;
+  }
+  .recent-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13px;
+  }
+  .recent-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .recent-item-date {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .recent-item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .hint {
+    background: var(--bg3);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-top: 12px;
+    font-style: italic;
+  }
+
+  /* Review */
+  .review-summary {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 18px;
+  }
+  .summary-card {
+    flex: 1;
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 10px 12px;
+    text-align: center;
+  }
+  .summary-card-num {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .summary-card-num.accent { color: var(--accent); }
+  .summary-card-label {
+    font-size: 9.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+  }
+
+  .category-section {
+    margin-bottom: 16px;
+  }
+  .category-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 0 0 8px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .category-count {
+    color: var(--text-faint);
+    font-weight: 500;
+  }
+  .item-list {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 4px 14px;
+  }
+  .item-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13.5px;
+  }
+  .item-row:last-child { border-bottom: none; }
+  .item-canonical {
+    flex: 1;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .item-original {
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 2px;
+    font-family: var(--mono);
+  }
+  .item-info {
+    flex: 1;
+  }
+  .item-qty {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 700;
+    min-width: 60px;
+    text-align: right;
+  }
+  .item-tag {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 4px;
+  }
+  .tag-restock {
+    background: var(--ok);
+    color: var(--bg);
+  }
+  .tag-staple {
+    background: var(--bg3);
+    color: var(--text-muted);
+  }
+  .tag-sub {
+    background: var(--warn);
+    color: var(--bg);
+  }
+  .tag-new {
+    background: transparent;
+    color: var(--text-faint);
+    border: 1px solid var(--line);
+  }
+
+  .sub-note {
+    background: rgba(194, 139, 43, 0.1);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin: 4px 0 6px 0;
+    font-style: italic;
+  }
+  .sub-note strong { color: var(--warn); font-style: normal; font-weight: 700; }
+
+  /* Action bar */
+  .action-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    padding: 14px 22px 20px;
+    display: flex;
+    gap: 10px;
+  }
+  .action-btn {
+    flex: 1;
+    padding: 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .action-btn.primary {
+    background: var(--accent);
+    color: var(--bg);
+    flex: 2;
+  }
+  .action-btn.secondary {
+    background: var(--bg2);
+    color: var(--text);
+  }
+
+  /* Saved screen */
+  .saved-hero {
+    text-align: center;
+    margin: 40px 0 24px;
+  }
+  .saved-mark {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--ok);
+    color: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    margin: 0 auto 18px;
+  }
+  .saved-title {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .saved-sub {
+    color: var(--text-muted);
+    font-size: 14px;
+    max-width: 300px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+
+  .cycle-update {
+    background: var(--bg2);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .cycle-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .cycle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13px;
+  }
+  .cycle-row:last-child { border-bottom: none; }
+  .cycle-name { color: var(--text); }
+  .cycle-shift {
+    font-family: var(--mono);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .cycle-old {
+    color: var(--text-faint);
+    text-decoration: line-through;
+    font-size: 11px;
+  }
+  .cycle-new {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .cycle-stable {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 11px;
+  }
+
+  .next-action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--bg2);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+  .next-action-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--bg3);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+  .next-action-text { flex: 1; color: var(--text); }
+  .next-action-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .next-action-arrow { color: var(--text-faint); }
+
+  .checkmark-circle {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--ok);
+    color: var(--bg);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .substitution-block {
+    background: var(--bg2);
+    border-left: 3px solid var(--warn);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin: 6px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .substitution-block strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .sub-action-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .sub-action {
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .sub-action.primary {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+</style>
+</head>
+<body>
+<div class="page">
+<h1 class="page-title">Instacart paste flow</h1>
+<p class="page-sub">paste → parse → review → pantry · learns your cycles over time</p>
+
+<div class="flow-arrows">1 ─── 2 ─── 3 ─── 4</div>
+
+<div class="grid">
+
+<!-- ============================================================ -->
+<!-- SCREEN 1: PASTE · EMPTY -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">1 · Paste · empty</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar"><span>9:42</span><span>●●● ▮▮▮</span></div>
+
+  <div class="nav-bar">
+    <span class="nav-back">← Pantry</span>
+    <span class="nav-right disabled">Parse</span>
+  </div>
+
+  <h1 class="screen-title">Paste your order</h1>
+  <p class="screen-sub">Paste the order confirmation email, or just the cart contents — Stock figures out the format.</p>
+
+  <div class="paste-zone">
+    <div class="paste-prompt">
+      <strong>Paste here</strong>
+      Order email, cart text, or just a list of items.
+      <div class="paste-prompt-hint">
+        Most users paste the Instacart "Your order from Whole Foods" email body. Works with Amazon Fresh, FreshDirect, and plain text too.
+      </div>
+    </div>
+  </div>
+
+  <div class="recent-section">
+    <div class="section-label">Recent orders</div>
+    <div class="recent-item">
+      <div class="recent-item-info">
+        <div class="recent-item-date">May 11 · Whole Foods</div>
+        <div class="recent-item-meta">23 items · ~$142</div>
+      </div>
+      <span style="color: var(--text-faint); font-size: 18px;">›</span>
+    </div>
+    <div class="recent-item">
+      <div class="recent-item-info">
+        <div class="recent-item-date">May 4 · Whole Foods</div>
+        <div class="recent-item-meta">18 items · ~$98</div>
+      </div>
+      <span style="color: var(--text-faint); font-size: 18px;">›</span>
+    </div>
+    <div class="recent-item">
+      <div class="recent-item-info">
+        <div class="recent-item-date">Apr 27 · Fairway</div>
+        <div class="recent-item-meta">31 items · ~$184</div>
+      </div>
+      <span style="color: var(--text-faint); font-size: 18px;">›</span>
+    </div>
+  </div>
+
+  <div class="hint">
+    Pantry & "have everything" indicators update across the app once you save. Restocks merge with what's already there.
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 2: PASTE · PASTED & PARSED -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">2 · Pasted & parsed</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar"><span>9:43</span><span>●●● ▮▮▮</span></div>
+
+  <div class="nav-bar">
+    <span class="nav-back">← Pantry</span>
+    <span class="nav-right primary">Review →</span>
+  </div>
+
+  <h1 class="screen-title">Got it</h1>
+  <p class="screen-sub">Parsed 21 items from your Instacart order. 1 substitution to confirm.</p>
+
+  <div class="paste-zone filled">
+    <div class="pasted-header">
+      <span class="detected-badge">▸ Instacart · Whole Foods</span>
+      <span class="pasted-counts">21 items · May 14</span>
+    </div>
+Organic Valley Whole Milk, 1 gal × 1<br>
+Driscoll's Organic Raspberries, 6 oz × 2<br>
+Bunch Italian Parsley × 1<br>
+Hass Avocados, ripe × 4<br>
+Vital Farms Pasture-Raised Eggs, 12 ct × 2<br>
+Kerrygold Pure Irish Butter, Salted, 8 oz × 2<br>
+Castelvetrano Olives, 7 oz × 1<br>
+Bionaturae Organic Extra Virgin Olive Oil, 25.4 fl oz × 1<br>
+Maldon Sea Salt Flakes, 8.5 oz × 1<br>
+Whole Foods Sourdough Boule × 1<br>
+Berkshire Pork Shoulder, bone-in, ~3 lb × 1
+  </div>
+
+  <div style="margin-top: 20px;">
+    <div class="section-label">Detected categories</div>
+    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+      <div style="background: var(--bg2); padding: 5px 10px; border-radius: 12px; font-size: 11px; color: var(--text); font-weight: 500;">Produce · 6</div>
+      <div style="background: var(--bg2); padding: 5px 10px; border-radius: 12px; font-size: 11px; color: var(--text); font-weight: 500;">Dairy · 4</div>
+      <div style="background: var(--bg2); padding: 5px 10px; border-radius: 12px; font-size: 11px; color: var(--text); font-weight: 500;">Pantry · 7</div>
+      <div style="background: var(--bg2); padding: 5px 10px; border-radius: 12px; font-size: 11px; color: var(--text); font-weight: 500;">Meat · 2</div>
+      <div style="background: var(--bg2); padding: 5px 10px; border-radius: 12px; font-size: 11px; color: var(--text); font-weight: 500;">Bakery · 2</div>
+    </div>
+  </div>
+
+  <div class="hint">
+    1 substitution flagged: you ordered <em>shallots</em>, received <em>red onions</em>. You'll confirm or correct on the next screen.
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 3: REVIEW -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">3 · Review</div>
+<div class="device">
+<div class="screen" style="padding-bottom: 86px;">
+  <div class="status-bar"><span>9:44</span><span>●●● ▮▮▮</span></div>
+
+  <div class="nav-bar">
+    <span class="nav-back">← Back</span>
+    <span class="nav-right">Edit all</span>
+  </div>
+
+  <h1 class="screen-title" style="font-size: 22px;">Review before saving</h1>
+  <p class="screen-sub" style="margin-bottom: 16px;">Tap any item to edit name, amount, or category.</p>
+
+  <div class="review-summary">
+    <div class="summary-card">
+      <div class="summary-card-num">21</div>
+      <div class="summary-card-label">items</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-card-num">8</div>
+      <div class="summary-card-label">restocks</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-card-num accent">1</div>
+      <div class="summary-card-label">to confirm</div>
+    </div>
+  </div>
+
+  <!-- Produce -->
+  <div class="category-section">
+    <div class="category-label">
+      <span>Produce</span>
+      <span class="category-count">6 items</span>
+    </div>
+    <div class="item-list">
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">raspberries</div>
+          <div class="item-original">Driscoll's Organic, 6 oz × 2</div>
+        </div>
+        <div class="item-qty">12 oz</div>
+        <span class="item-tag tag-new">new</span>
+      </div>
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">parsley, italian</div>
+          <div class="item-original">Bunch Italian Parsley × 1</div>
+        </div>
+        <div class="item-qty">1 bch</div>
+        <span class="item-tag tag-restock">restock</span>
+      </div>
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">avocados</div>
+          <div class="item-original">Hass, ripe × 4</div>
+        </div>
+        <div class="item-qty">4</div>
+        <span class="item-tag tag-restock">restock</span>
+      </div>
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">red onions <span style="color: var(--warn); font-size: 11px; font-style: italic;">(was shallots)</span></div>
+          <div class="item-original">Red Onion × 2</div>
+        </div>
+        <div class="item-qty">2</div>
+        <span class="item-tag tag-sub">sub</span>
+      </div>
+    </div>
+    <div class="substitution-block">
+      <strong>Substitution</strong> · You ordered shallots, Instacart sent red onions. Most recipes work with either — keep as red onions or change?
+      <div class="sub-action-row">
+        <span class="sub-action primary">Keep red onions</span>
+        <span class="sub-action">Reject (don't add)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dairy -->
+  <div class="category-section">
+    <div class="category-label">
+      <span>Dairy</span>
+      <span class="category-count">4 items</span>
+    </div>
+    <div class="item-list">
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">milk, whole</div>
+          <div class="item-original">Organic Valley, 1 gal</div>
+        </div>
+        <div class="item-qty">1 gal</div>
+        <span class="item-tag tag-restock">restock</span>
+      </div>
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">eggs</div>
+          <div class="item-original">Vital Farms, 12 ct × 2</div>
+        </div>
+        <div class="item-qty">24</div>
+        <span class="item-tag tag-staple">staple</span>
+      </div>
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">butter, salted</div>
+          <div class="item-original">Kerrygold, 8 oz × 2</div>
+        </div>
+        <div class="item-qty">16 oz</div>
+        <span class="item-tag tag-staple">staple</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pantry -->
+  <div class="category-section">
+    <div class="category-label">
+      <span>Pantry</span>
+      <span class="category-count">7 items</span>
+    </div>
+    <div class="item-list">
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">olive oil, EVOO</div>
+          <div class="item-original">Bionaturae Organic, 25.4 fl oz</div>
+        </div>
+        <div class="item-qty">25 oz</div>
+        <span class="item-tag tag-staple">staple</span>
+      </div>
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-canonical">salt, maldon flakes</div>
+          <div class="item-original">Maldon Sea Salt, 8.5 oz</div>
+        </div>
+        <div class="item-qty">8 oz</div>
+        <span class="item-tag tag-restock">restock</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <div class="action-btn secondary">Edit all</div>
+    <div class="action-btn primary">Save 21 items</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 4: SAVED -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">4 · Saved · pantry updated</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar"><span>9:45</span><span>●●● ▮▮▮</span></div>
+
+  <div class="saved-hero">
+    <div class="saved-mark">✓</div>
+    <h1 class="saved-title">Pantry updated</h1>
+    <p class="saved-sub">21 items added · 8 restocks merged · cycle estimates refreshed</p>
+  </div>
+
+  <div class="cycle-update">
+    <div class="cycle-label">▸ Cycle estimates · updated</div>
+    <div class="cycle-row">
+      <span class="cycle-name">olive oil</span>
+      <div class="cycle-shift">
+        <span class="cycle-old">~6w</span>
+        <span style="color: var(--text-faint);">→</span>
+        <span class="cycle-new">~7w</span>
+      </div>
+    </div>
+    <div class="cycle-row">
+      <span class="cycle-name">eggs</span>
+      <span class="cycle-stable">stable · ~2w</span>
+    </div>
+    <div class="cycle-row">
+      <span class="cycle-name">butter</span>
+      <span class="cycle-stable">stable · ~4w</span>
+    </div>
+    <div class="cycle-row">
+      <span class="cycle-name">parsley</span>
+      <div class="cycle-shift">
+        <span class="cycle-old">—</span>
+        <span style="color: var(--text-faint);">→</span>
+        <span class="cycle-new">~3w</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">What's next</div>
+  <div class="next-action">
+    <div class="next-action-icon">▤</div>
+    <div class="next-action-text">
+      Have everything for these recipes
+      <div class="next-action-sub">12 recipes ready · 4 newly unlocked</div>
+    </div>
+    <div class="next-action-arrow">→</div>
+  </div>
+  <div class="next-action">
+    <div class="next-action-icon">◔</div>
+    <div class="next-action-text">
+      Pipeline ideas with what you have
+      <div class="next-action-sub">2 ideas now within reach</div>
+    </div>
+    <div class="next-action-arrow">→</div>
+  </div>
+  <div class="next-action">
+    <div class="next-action-icon">▣</div>
+    <div class="next-action-text">
+      View pantry
+      <div class="next-action-sub">62 items total · 4 wilting soon</div>
+    </div>
+    <div class="next-action-arrow">→</div>
+  </div>
+
+  <div style="margin-top: 22px; text-align: center;">
+    <div style="display: inline-block; padding: 11px 26px; background: var(--bg2); color: var(--text); border-radius: 12px; font-size: 13px; font-weight: 500;">
+      Paste another order
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>

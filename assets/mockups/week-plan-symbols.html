@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock — Week Plan (symbols)</title>
+<style>
+  :root {
+    --bg: #F5EDDD;
+    --bg2: #EDE2CC;
+    --bg3: #E4D7BB;
+    --accent: #CC3D2E;
+    --accent-deep: #A52E22;
+    --accent-soft: #E16252;
+    --text: #3D2B1F;
+    --text-muted: #8A6F5C;
+    --text-faint: #B19981;
+    --line: #DCC9A8;
+    --line-soft: #E4D5B8;
+    --ok: #5C7A3E;
+    --warn: #C28B2B;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background: #2a2620;
+    font-family: var(--sans);
+    color: var(--text);
+    padding: 40px 20px 80px;
+  }
+  .page { max-width: 1400px; margin: 0 auto; }
+  .page-title {
+    color: #d6c4a3;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    text-align: center;
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .page-sub {
+    color: #8a7e69;
+    font-size: 13px;
+    text-align: center;
+    margin: 0 0 40px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 420px));
+    gap: 32px 24px;
+    justify-content: center;
+  }
+  .device {
+    width: 420px;
+    background: var(--bg);
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+    position: relative;
+  }
+  .device-label {
+    color: #8a7e69;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .screen {
+    padding: 18px 22px 28px;
+    min-height: 760px;
+    position: relative;
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 4px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 16px;
+  }
+  .app-name {
+    font-family: var(--serif);
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+  .app-nav {
+    display: flex;
+    gap: 11px;
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 230px;
+  }
+  .app-nav .active { color: var(--accent); font-weight: 600; }
+
+  .week-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .week-nav {
+    color: var(--text-muted);
+    font-size: 16px;
+    padding: 4px 8px;
+    font-family: var(--serif);
+  }
+  .week-label { text-align: center; }
+  .week-range {
+    font-family: var(--serif);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.1;
+  }
+  .week-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+
+  /* Day rows */
+  .day-row {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .day-row:last-child { border-bottom: none; }
+  .day-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 38px;
+    padding-top: 4px;
+  }
+  .day-name {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .day-num {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+    margin-top: 2px;
+  }
+  .day-name.today { color: var(--accent); }
+  .day-num.today { color: var(--accent); }
+  .day-cells {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .meal-cell {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 50px;
+  }
+  .meal-cell.breakfast {
+    background: var(--bg3);
+    padding: 6px 12px;
+    min-height: 32px;
+  }
+  .meal-cell.empty {
+    background: transparent;
+    border: 1.5px dashed var(--line);
+    color: var(--text-faint);
+    font-size: 12px;
+    font-style: italic;
+    justify-content: center;
+  }
+  .meal-cell.experimental {
+    border: 1.5px dashed var(--warn);
+    background: rgba(194, 139, 43, 0.06);
+  }
+  .meal-cell.cooked {
+    background: var(--bg);
+    border: 1px solid var(--line-soft);
+    opacity: 0.7;
+  }
+  .meal-cell.skipped {
+    background: transparent;
+    border: 1px dashed var(--line);
+    opacity: 0.5;
+  }
+
+  /* Meal-type marker: small letter tag in a circle */
+  .meal-marker {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0;
+    flex-shrink: 0;
+    background: var(--bg3);
+    color: var(--text-muted);
+  }
+  .meal-marker.dinner {
+    background: var(--text);
+    color: var(--bg);
+  }
+  .meal-marker.breakfast {
+    background: var(--bg);
+    color: var(--text-muted);
+    border: 1px solid var(--line);
+  }
+
+  .meal-title {
+    font-family: var(--serif);
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+    flex: 1;
+  }
+  .meal-cell.cooked .meal-title { color: var(--text-muted); }
+  .meal-cell.cooked .meal-title::after {
+    content: " ✓";
+    color: var(--ok);
+    font-weight: 700;
+  }
+  .meal-cell.skipped .meal-title { color: var(--text-faint); text-decoration: line-through; text-decoration-color: var(--text-faint); }
+  .meal-tag {
+    font-size: 8.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .meal-tag.exp { background: var(--warn); color: var(--bg); }
+  .breakfast-title {
+    font-family: var(--serif);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    flex: 1;
+  }
+
+  /* Bottom action bar */
+  .plan-action-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    padding: 14px 22px 20px;
+  }
+  .plan-action-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .plan-action-info { flex: 1; }
+  .plan-action-stats {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+  .plan-action-stats strong { color: var(--text); font-weight: 600; }
+  .plan-action-sub {
+    font-size: 10px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+  }
+  .plan-action-btn {
+    background: var(--accent);
+    color: var(--bg);
+    padding: 12px 18px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(204, 61, 46, 0.2);
+  }
+
+  /* Symbol reference card */
+  .symbol-key {
+    background: rgba(255,255,255,0.04);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-bottom: 36px;
+    max-width: 760px;
+    margin-left: auto;
+    margin-right: auto;
+    color: #d6c4a3;
+  }
+  .symbol-key-title {
+    font-family: var(--serif);
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    color: #f0e4c8;
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+  .symbol-key-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px 18px;
+  }
+  .symbol-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    color: #b8a988;
+  }
+  .symbol-demo {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .symbol-demo.dinner { background: #3D2B1F; color: #F5EDDD; }
+  .symbol-demo.breakfast { background: #F5EDDD; color: #8A6F5C; border: 1px solid #DCC9A8; }
+  .symbol-demo.cook { background: #B5462A; color: #F5EDDD; }
+  .symbol-demo.exp { background: rgba(194, 139, 43, 0.2); color: #C28B2B; border: 1px dashed #C28B2B; }
+  .symbol-demo.check { background: #5C7A3E; color: #F5EDDD; }
+
+</style>
+</head>
+<body>
+<div class="page">
+<h1 class="page-title">Week plan · symbols</h1>
+<p class="page-sub">no emoji · meal markers as letter tags · cleaner read</p>
+
+<div class="symbol-key">
+  <div class="symbol-key-title">Symbol vocabulary</div>
+  <div class="symbol-key-grid">
+    <div class="symbol-row">
+      <div class="symbol-demo dinner">D</div>
+      <span>Dinner</span>
+    </div>
+    <div class="symbol-row">
+      <div class="symbol-demo breakfast">B</div>
+      <span>Breakfast</span>
+    </div>
+    <div class="symbol-row">
+      <div class="symbol-demo exp">!</div>
+      <span>Experimental</span>
+    </div>
+    <div class="symbol-row">
+      <div class="symbol-demo check">✓</div>
+      <span>Cooked</span>
+    </div>
+    <div class="symbol-row">
+      <span style="font-family: var(--mono); color: #B19981; text-decoration: line-through; font-size: 11px;">recipe</span>
+      <span>Skipped</span>
+    </div>
+  </div>
+</div>
+
+<div class="grid">
+
+<!-- ============================================================ -->
+<!-- WEEK PLAN - REBUILT -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">Week plan · no emojis</div>
+<div class="device">
+<div class="screen" style="padding-bottom: 100px;">
+  <div class="status-bar"><span>9:42</span><span>●●● ▮▮▮</span></div>
+
+  <div class="app-header">
+    <div class="app-name">Stock</div>
+    <div class="app-nav">
+      <span>Recipes</span>
+      <span class="active">Plan</span>
+      <span>Pipeline</span>
+      <span>Bench</span>
+      <span>Pantry</span>
+    </div>
+  </div>
+
+  <div class="week-bar">
+    <span class="week-nav">‹</span>
+    <div class="week-label">
+      <div class="week-range">May 11 — May 17</div>
+      <div class="week-meta">This week</div>
+    </div>
+    <span class="week-nav">›</span>
+  </div>
+
+  <!-- Sunday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Sun</div>
+      <div class="day-num">11</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell breakfast">
+        <div class="meal-marker breakfast">B</div>
+        <span class="breakfast-title">eggs + sourdough</span>
+      </div>
+      <div class="meal-cell cooked">
+        <div class="meal-marker dinner">D</div>
+        <span class="meal-title">Roasted beet salad, whipped feta</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Mon</div>
+      <div class="day-num">12</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell cooked">
+        <div class="meal-marker dinner">D</div>
+        <span class="meal-title">Sheet pan chicken thighs</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tuesday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Tue</div>
+      <div class="day-num">13</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell skipped">
+        <div class="meal-marker dinner" style="background: var(--text-faint); color: var(--bg);">D</div>
+        <span class="meal-title">Pasta alla gricia</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wednesday (today) -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name today">Wed</div>
+      <div class="day-num today">14</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell experimental">
+        <div class="meal-marker dinner" style="background: var(--warn); color: var(--bg);">D</div>
+        <span class="meal-title">Pho bo</span>
+        <span class="meal-tag exp">exp</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thursday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Thu</div>
+      <div class="day-num">15</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell">
+        <div class="meal-marker dinner">D</div>
+        <span class="meal-title">Lemon-herb roast chicken</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Friday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Fri</div>
+      <div class="day-num">16</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell">
+        <div class="meal-marker dinner">D</div>
+        <span class="meal-title">Pizza (65% dough)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saturday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Sat</div>
+      <div class="day-num">17</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell">
+        <div class="meal-marker dinner">D</div>
+        <span class="meal-title">Cucumber-daikon salad + soft egg</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="plan-action-bar">
+    <div class="plan-action-content">
+      <div class="plan-action-info">
+        <div class="plan-action-stats"><strong>5 recipes</strong> · 23 ingredients · pantry covers 7</div>
+        <div class="plan-action-sub">16 items to shop</div>
+      </div>
+      <div class="plan-action-btn">Shopping list →</div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>

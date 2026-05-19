@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock — Glance Mode</title>
+<style>
+  :root {
+    --bg: #F5EDDD;
+    --bg2: #EDE2CC;
+    --bg3: #E4D7BB;
+    --bg-cook: #F8F1E2;
+    --accent: #CC3D2E;
+    --accent-deep: #A52E22;
+    --accent-soft: #E16252;
+    --text: #3D2B1F;
+    --text-muted: #8A6F5C;
+    --text-faint: #B19981;
+    --line: #DCC9A8;
+    --line-soft: #E4D5B8;
+    --ok: #5C7A3E;
+    --warn: #C28B2B;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background: #2a2620;
+    font-family: var(--sans);
+    color: var(--text);
+    padding: 40px 20px 80px;
+  }
+  .page { max-width: 1400px; margin: 0 auto; }
+  .page-title {
+    color: #d6c4a3;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    text-align: center;
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .page-sub {
+    color: #8a7e69;
+    font-size: 13px;
+    text-align: center;
+    margin: 0 0 40px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 420px));
+    gap: 32px 24px;
+    justify-content: center;
+  }
+  .device {
+    width: 420px;
+    background: var(--bg-cook);
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+    position: relative;
+  }
+  .device-label {
+    color: #8a7e69;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .screen {
+    padding: 18px 22px 0;
+    min-height: 760px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 4px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .status-right {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 11px;
+  }
+  .wake-lock {
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* Top bar */
+  .cook-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line-soft);
+    margin-bottom: 14px;
+  }
+  .exit-btn {
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .recipe-title-cook {
+    font-family: var(--serif);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    text-align: center;
+    flex: 1;
+    padding: 0 12px;
+    line-height: 1.2;
+  }
+  .ingredients-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--bg2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  /* Mode toggle */
+  .mode-toggle {
+    display: flex;
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 3px;
+    margin-bottom: 18px;
+    position: relative;
+  }
+  .mode-option {
+    flex: 1;
+    padding: 8px 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-muted);
+    border-radius: 7px;
+    letter-spacing: 0.3px;
+  }
+  .mode-option.active {
+    background: var(--bg-cook);
+    color: var(--accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .mode-context {
+    font-size: 10px;
+    color: var(--text-faint);
+    text-align: center;
+    margin-top: 6px;
+    margin-bottom: 18px;
+    font-style: italic;
+    letter-spacing: 0.2px;
+  }
+  .mode-context strong { color: var(--text-muted); font-weight: 600; font-style: normal; }
+
+  /* Recipe header glance */
+  .glance-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 18px;
+  }
+  .glance-title {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.15;
+    margin: 0 0 4px;
+    letter-spacing: -0.3px;
+  }
+  .glance-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+  }
+
+  /* Section label */
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+
+  /* Ingredients compact */
+  .ing-compact {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 22px;
+  }
+  .ing-compact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 18px;
+  }
+  .ing-compact-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12.5px;
+    line-height: 1.3;
+  }
+  .ing-compact-amt {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text);
+    font-weight: 700;
+    min-width: 42px;
+  }
+  .ing-compact-name {
+    color: var(--text);
+    flex: 1;
+  }
+  .ing-compact-mod-mark {
+    color: var(--accent);
+    font-size: 10px;
+    font-style: italic;
+  }
+
+  /* Steps list */
+  .steps-list { margin-bottom: 20px; flex: 1; }
+  .step-row-glance {
+    display: flex;
+    align-items: center;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--line-soft);
+    gap: 14px;
+    cursor: pointer;
+  }
+  .step-row-glance:last-child { border-bottom: none; }
+  .step-num-glance {
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--text-faint);
+    font-weight: 600;
+    min-width: 24px;
+    line-height: 1;
+  }
+  .step-row-glance.done .step-num-glance { color: var(--ok); }
+  .step-row-glance.current .step-num-glance { color: var(--accent); }
+  .step-title-glance {
+    font-family: var(--serif);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.25;
+    flex: 1;
+  }
+  .step-row-glance.done .step-title-glance {
+    color: var(--text-muted);
+  }
+  .step-keydata {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .key-pill {
+    background: var(--bg2);
+    color: var(--text-muted);
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+  }
+  .key-pill.timer {
+    background: var(--accent);
+    color: var(--bg-cook);
+  }
+  .key-pill.temp {
+    background: var(--bg3);
+    color: var(--text);
+  }
+
+  /* Expanded step */
+  .step-expanded {
+    background: var(--bg2);
+    border-radius: 0;
+    margin: 0 -22px;
+    padding: 14px 22px 16px;
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+    margin-top: -1px;
+  }
+  .step-expanded-body {
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--text);
+    padding-left: 38px;
+  }
+  .step-expanded-body .amount-inline {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--accent);
+    background: rgba(204, 61, 46, 0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .step-expanded-body .timer-inline {
+    color: var(--accent);
+    font-weight: 700;
+    border-bottom: 1.5px solid var(--accent);
+    padding-bottom: 1px;
+  }
+  .step-note {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: var(--bg-cook);
+    border-radius: 8px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    font-style: italic;
+    line-height: 1.5;
+    margin-left: 38px;
+  }
+  .step-note::before {
+    content: "▸ note · ";
+    color: var(--accent);
+    font-style: normal;
+    font-weight: 600;
+  }
+
+  /* Active timers strip (pinned bottom) */
+  .timers-pinned {
+    border-top: 1px solid var(--line-soft);
+    padding: 12px 0 16px;
+    margin-top: auto;
+  }
+  .timers-pinned-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .timer-pinned-card {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .timer-pinned-icon { font-size: 16px; }
+  .timer-pinned-info { flex: 1; }
+  .timer-pinned-name {
+    font-size: 12.5px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .timer-pinned-step {
+    font-size: 9.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .timer-pinned-time {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  /* Bottom action - mark cooked */
+  .glance-actions {
+    border-top: 1px solid var(--line-soft);
+    padding: 14px 0 22px;
+    display: flex;
+    gap: 8px;
+  }
+  .glance-btn {
+    flex: 1;
+    padding: 13px;
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .glance-btn.primary {
+    background: var(--accent);
+    color: var(--bg-cook);
+    flex: 2;
+  }
+  .glance-btn.secondary {
+    background: var(--bg2);
+    color: var(--text);
+  }
+
+  .scale-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-cook);
+    padding: 6px 12px;
+    border-radius: 8px;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .scale-row .pill-mini {
+    background: var(--bg3);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--text);
+  }
+
+</style>
+</head>
+<body>
+<div class="page">
+<h1 class="page-title">Glance mode</h1>
+<p class="page-sub">cook #3+ defaults here · the whole recipe at once · expand on tap</p>
+
+<div class="grid">
+
+<!-- ============================================================ -->
+<!-- SCREEN 1: GLANCE · COLLAPSED -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">1 · Glance · default view</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:42</span>
+    <span class="status-right">
+      <span class="wake-lock">● awake</span>
+      <span>●●● ▮▮▮</span>
+    </span>
+  </div>
+
+  <div class="cook-bar">
+    <span class="exit-btn">Exit</span>
+    <div class="recipe-title-cook">Roasted beet salad,<br>whipped feta</div>
+    <div class="ingredients-icon">▤</div>
+  </div>
+
+  <div class="mode-toggle">
+    <div class="mode-option">Focused</div>
+    <div class="mode-option active">Glance</div>
+  </div>
+  <div class="mode-context">cook <strong>#7</strong> · you know this one</div>
+
+  <div class="glance-header">
+    <div>
+      <h2 class="glance-title">Roasted beet salad, whipped feta</h2>
+      <div class="glance-meta">serves 4 · ~70 min · cooked 6×</div>
+    </div>
+  </div>
+
+  <div class="section-label">Ingredients</div>
+  <div class="ing-compact">
+    <div class="ing-compact-grid">
+      <div class="ing-compact-row">
+        <div class="ing-compact-amt">680g</div>
+        <div class="ing-compact-name">red beets</div>
+      </div>
+      <div class="ing-compact-row">
+        <div class="ing-compact-amt">200g</div>
+        <div class="ing-compact-name">feta <span class="ing-compact-mod-mark">·mod</span></div>
+      </div>
+      <div class="ing-compact-row">
+        <div class="ing-compact-amt">60g</div>
+        <div class="ing-compact-name">greek yogurt</div>
+      </div>
+      <div class="ing-compact-row">
+        <div class="ing-compact-amt">3 tbsp</div>
+        <div class="ing-compact-name">olive oil</div>
+      </div>
+      <div class="ing-compact-row">
+        <div class="ing-compact-amt">1</div>
+        <div class="ing-compact-name">lemon</div>
+      </div>
+      <div class="ing-compact-row">
+        <div class="ing-compact-amt">2 tsp</div>
+        <div class="ing-compact-name">honey <span class="ing-compact-mod-mark">·mod</span></div>
+      </div>
+      <div class="ing-compact-row">
+        <div class="ing-compact-amt">¼ cup</div>
+        <div class="ing-compact-name">pistachios</div>
+      </div>
+      <div class="ing-compact-row">
+        <div class="ing-compact-amt">—</div>
+        <div class="ing-compact-name">salt, dill</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">Steps · tap to expand</div>
+  <div class="steps-list">
+    <div class="step-row-glance">
+      <div class="step-num-glance">1</div>
+      <div class="step-title-glance">Roast the beets</div>
+      <div class="step-keydata">
+        <div class="key-pill temp">400°F</div>
+        <div class="key-pill timer">70m</div>
+      </div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">2</div>
+      <div class="step-title-glance">Toast pistachios</div>
+      <div class="step-keydata">
+        <div class="key-pill">dry pan</div>
+      </div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">3</div>
+      <div class="step-title-glance">Whip the feta</div>
+      <div class="step-keydata">
+        <div class="key-pill timer">90s</div>
+      </div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">4</div>
+      <div class="step-title-glance">Peel beets while warm</div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">5</div>
+      <div class="step-title-glance">Wedge + dress beets</div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">6</div>
+      <div class="step-title-glance">Plate: feta, beets, juices</div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">7</div>
+      <div class="step-title-glance">Finish: pistachios, salt, dill</div>
+    </div>
+  </div>
+
+  <div class="glance-actions">
+    <div class="glance-btn secondary">Exit</div>
+    <div class="glance-btn primary">Mark cooked</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 2: GLANCE · STEP EXPANDED -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">2 · Glance · step 3 expanded</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:48</span>
+    <span class="status-right">
+      <span class="wake-lock">● awake</span>
+      <span>●●● ▮▮▮</span>
+    </span>
+  </div>
+
+  <div class="cook-bar">
+    <span class="exit-btn">Exit</span>
+    <div class="recipe-title-cook">Roasted beet salad,<br>whipped feta</div>
+    <div class="ingredients-icon">▤</div>
+  </div>
+
+  <div class="mode-toggle">
+    <div class="mode-option">Focused</div>
+    <div class="mode-option active">Glance</div>
+  </div>
+  <div class="mode-context">cook <strong>#7</strong> · you know this one</div>
+
+  <div class="section-label">Steps · tap to expand</div>
+  <div class="steps-list">
+    <div class="step-row-glance done">
+      <div class="step-num-glance">1</div>
+      <div class="step-title-glance">Roast the beets</div>
+      <div class="step-keydata">
+        <div class="key-pill temp">400°F</div>
+      </div>
+    </div>
+    <div class="step-row-glance done">
+      <div class="step-num-glance">2</div>
+      <div class="step-title-glance">Toast pistachios</div>
+    </div>
+
+    <div class="step-row-glance current">
+      <div class="step-num-glance">3</div>
+      <div class="step-title-glance">Whip the feta</div>
+      <div class="step-keydata">
+        <div class="key-pill timer">90s</div>
+      </div>
+    </div>
+    <div class="step-expanded">
+      <div class="step-expanded-body">
+        In the food processor: <span class="amount-inline">200g feta</span>, <span class="amount-inline">60g yogurt</span>, lemon zest, and half the <span class="amount-inline">3 tbsp oil</span>. Pulse <span class="timer-inline">90 seconds</span>, scraping down.
+      </div>
+      <div class="step-note">Should be spoonable, not stiff. If too thick, splash more yogurt.</div>
+    </div>
+
+    <div class="step-row-glance">
+      <div class="step-num-glance">4</div>
+      <div class="step-title-glance">Peel beets while warm</div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">5</div>
+      <div class="step-title-glance">Wedge + dress beets</div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">6</div>
+      <div class="step-title-glance">Plate: feta, beets, juices</div>
+    </div>
+    <div class="step-row-glance">
+      <div class="step-num-glance">7</div>
+      <div class="step-title-glance">Finish: pistachios, salt, dill</div>
+    </div>
+  </div>
+
+  <div class="timers-pinned">
+    <div class="timers-pinned-label">Active · 1</div>
+    <div class="timer-pinned-card">
+      <div class="timer-pinned-icon">⏱</div>
+      <div class="timer-pinned-info">
+        <div class="timer-pinned-name">Whip the feta</div>
+        <div class="timer-pinned-step">step 3</div>
+      </div>
+      <div class="timer-pinned-time">1:14</div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 3: FIRST-COOK CONTEXT (FOCUSED MODE DEFAULT) -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">3 · Cook #1 · auto-defaults to Focused</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:42</span>
+    <span class="status-right">
+      <span class="wake-lock">● awake</span>
+      <span>●●● ▮▮▮</span>
+    </span>
+  </div>
+
+  <div class="cook-bar">
+    <span class="exit-btn">Exit</span>
+    <div class="recipe-title-cook">Pho Bo —<br>Vietnamese beef noodle soup</div>
+    <div class="ingredients-icon">▤</div>
+  </div>
+
+  <div class="mode-toggle">
+    <div class="mode-option active">Focused</div>
+    <div class="mode-option">Glance</div>
+  </div>
+  <div class="mode-context">cook <strong>#1</strong> · learning this one</div>
+
+  <div style="text-align: center; margin: 20px 0 26px;">
+    <div style="display: inline-block; background: var(--bg2); padding: 6px 14px; border-radius: 16px; font-family: var(--mono); font-size: 12px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.5px;">
+      <span style="font-size: 10px;">▾ </span>1 of 7
+    </div>
+  </div>
+
+  <div style="flex: 1; padding: 0 4px;">
+    <h2 style="font-family: var(--serif); font-size: 28px; font-weight: 600; line-height: 1.2; margin: 0 0 18px; letter-spacing: -0.5px;">
+      Char the aromatics
+    </h2>
+    <div style="font-size: 19px; line-height: 1.5; color: var(--text);">
+      Halve <span style="font-family: var(--mono); font-weight: 700; color: var(--accent); font-size: 18px; background: rgba(204,61,46,0.08); padding: 1px 6px; border-radius: 4px; white-space: nowrap;">2 yellow onions</span> and <span style="font-family: var(--mono); font-weight: 700; color: var(--accent); font-size: 18px; background: rgba(204,61,46,0.08); padding: 1px 6px; border-radius: 4px; white-space: nowrap;">100g ginger</span> lengthwise.
+      <br><br>
+      Char directly over a gas flame or under the broiler for <span style="color: var(--accent); font-weight: 700; border-bottom: 2px solid var(--accent); padding-bottom: 1px;">⏱ 8 minutes</span> total, turning, until blackened in spots.
+      <br><br>
+      <span style="font-style: italic; color: var(--text-muted); font-size: 17px;">Blackening isn't burning — you want char marks, not ash.</span>
+    </div>
+  </div>
+
+  <div style="border-top: 1px solid var(--line-soft); padding: 18px 0 24px; display: flex; gap: 10px; align-items: center; margin-top: auto;">
+    <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--bg2); color: var(--text-muted); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;">←</div>
+    <div style="flex: 1; background: var(--accent); color: var(--bg-cook); border-radius: 18px; padding: 18px; font-size: 18px; font-weight: 600; text-align: center; letter-spacing: 0.3px; box-shadow: 0 4px 14px rgba(204,61,46,0.25);">
+      Done · next →
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>

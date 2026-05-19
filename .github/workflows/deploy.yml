@@ -1,0 +1,59 @@
+name: Deploy Stock (web) to GitHub Pages
+
+# Builds the Expo web export on Linux — sidesteps the local macOS Tahoe ×
+# Expo SDK 54 dev-server/export hang — and publishes dist/ to Pages.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let in-progress deploys finish; only ever publish the latest commit.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Export web bundle
+        run: npx expo export --platform web
+
+      - name: SPA + Pages fixups
+        run: |
+          # Jekyll would strip Expo's _expo/ directory without this.
+          touch dist/.nojekyll
+          # web.output: "single" is a SPA — serve index.html for deep links.
+          cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

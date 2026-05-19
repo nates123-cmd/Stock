@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock — Week Plan</title>
+<style>
+  :root {
+    --bg: #F5EDDD;
+    --bg2: #EDE2CC;
+    --bg3: #E4D7BB;
+    --accent: #CC3D2E;
+    --accent-deep: #A52E22;
+    --accent-soft: #E16252;
+    --text: #3D2B1F;
+    --text-muted: #8A6F5C;
+    --text-faint: #B19981;
+    --line: #DCC9A8;
+    --line-soft: #E4D5B8;
+    --ok: #5C7A3E;
+    --warn: #C28B2B;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background: #2a2620;
+    font-family: var(--sans);
+    color: var(--text);
+    padding: 40px 20px 80px;
+  }
+  .page { max-width: 1400px; margin: 0 auto; }
+  .page-title {
+    color: #d6c4a3;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    text-align: center;
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .page-sub {
+    color: #8a7e69;
+    font-size: 13px;
+    text-align: center;
+    margin: 0 0 40px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 420px));
+    gap: 32px 24px;
+    justify-content: center;
+  }
+  .device {
+    width: 420px;
+    background: var(--bg);
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+    position: relative;
+  }
+  .device-label {
+    color: #8a7e69;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .screen {
+    padding: 18px 22px 28px;
+    min-height: 760px;
+    position: relative;
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 4px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* App header */
+  .app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 16px;
+  }
+  .app-name {
+    font-family: var(--serif);
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+  .app-nav {
+    display: flex;
+    gap: 11px;
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 230px;
+  }
+  .app-nav .active { color: var(--accent); font-weight: 600; }
+
+  /* Week header */
+  .week-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .week-nav {
+    color: var(--text-muted);
+    font-size: 16px;
+    padding: 4px 8px;
+  }
+  .week-label {
+    text-align: center;
+  }
+  .week-range {
+    font-family: var(--serif);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.1;
+  }
+  .week-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+
+  /* Day rows */
+  .day-row {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .day-row:last-child { border-bottom: none; }
+  .day-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 38px;
+    padding-top: 4px;
+  }
+  .day-name {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .day-num {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+    margin-top: 2px;
+  }
+  .day-name.today { color: var(--accent); }
+  .day-num.today { color: var(--accent); }
+  .day-cells {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .meal-cell {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 50px;
+  }
+  .meal-cell.dinner { background: var(--bg2); }
+  .meal-cell.breakfast {
+    background: var(--bg3);
+    padding: 6px 12px;
+    min-height: 32px;
+  }
+  .meal-cell.empty {
+    background: transparent;
+    border: 1.5px dashed var(--line);
+    color: var(--text-faint);
+    font-size: 12px;
+    font-style: italic;
+    justify-content: center;
+  }
+  .meal-cell.empty:hover { border-color: var(--accent); color: var(--accent); }
+  .meal-cell.experimental {
+    border: 1.5px dashed var(--warn);
+    background: rgba(194, 139, 43, 0.06);
+  }
+  .meal-cell.cooked {
+    background: var(--bg);
+    border: 1px solid var(--line-soft);
+    opacity: 0.7;
+  }
+  .meal-cell.skipped {
+    background: transparent;
+    border: 1px dashed var(--line);
+    opacity: 0.5;
+  }
+  .meal-icon {
+    font-size: 11px;
+    color: var(--text-muted);
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .meal-title {
+    font-family: var(--serif);
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+    flex: 1;
+  }
+  .meal-cell.cooked .meal-title { color: var(--text-muted); }
+  .meal-cell.cooked .meal-title::after {
+    content: " ✓";
+    color: var(--ok);
+    font-weight: 700;
+  }
+  .meal-cell.skipped .meal-title { color: var(--text-faint); text-decoration: line-through; text-decoration-color: var(--text-faint); }
+  .meal-cell.experimental .meal-title { color: var(--text); }
+  .meal-tag {
+    font-size: 8.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .meal-tag.exp {
+    background: var(--warn);
+    color: var(--bg);
+  }
+  .meal-tag.source {
+    background: var(--bg3);
+    color: var(--text-muted);
+    font-family: var(--mono);
+  }
+  .breakfast-title {
+    font-family: var(--serif);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    flex: 1;
+  }
+  .meal-time {
+    font-size: 10px;
+    color: var(--text-faint);
+    font-family: var(--mono);
+    font-weight: 600;
+  }
+
+  /* Bottom action: shopping list */
+  .plan-action-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    padding: 14px 22px 20px;
+  }
+  .plan-action-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .plan-action-info {
+    flex: 1;
+  }
+  .plan-action-stats {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+  .plan-action-stats strong { color: var(--text); font-weight: 600; }
+  .plan-action-sub {
+    font-size: 10px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+  }
+  .plan-action-btn {
+    background: var(--accent);
+    color: var(--bg);
+    padding: 12px 18px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(204, 61, 46, 0.2);
+  }
+
+  /* Picker (screen 2) */
+  .picker-header {
+    margin-bottom: 16px;
+  }
+  .picker-day-tag {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--bg);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  .picker-title {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.15;
+    margin: 0;
+  }
+
+  .picker-tabs {
+    display: flex;
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 3px;
+    margin: 14px 0 14px;
+  }
+  .picker-tab {
+    flex: 1;
+    padding: 7px 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-muted);
+    border-radius: 7px;
+  }
+  .picker-tab.active {
+    background: var(--bg);
+    color: var(--accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+
+  .picker-search {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-faint);
+    margin-bottom: 14px;
+  }
+
+  .picker-chips {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    margin-bottom: 14px;
+    padding-bottom: 2px;
+  }
+  .picker-chip {
+    padding: 5px 11px;
+    border-radius: 12px;
+    font-size: 11px;
+    background: var(--bg2);
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .picker-chip.active {
+    background: var(--accent);
+    color: var(--bg);
+    font-weight: 600;
+  }
+
+  .picker-section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 10px 0 8px;
+  }
+
+  .picker-recipe {
+    display: flex;
+    align-items: center;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--line-soft);
+    gap: 10px;
+  }
+  .picker-recipe:last-child { border-bottom: none; }
+  .picker-recipe-info { flex: 1; }
+  .picker-recipe-title {
+    font-family: var(--serif);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.25;
+    margin-bottom: 3px;
+  }
+  .picker-recipe-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 7px;
+    align-items: center;
+  }
+  .picker-add {
+    color: var(--accent);
+    font-size: 20px;
+    font-weight: 300;
+    padding: 2px 8px;
+  }
+  .picker-recipe.pipeline {
+    background: rgba(194, 139, 43, 0.04);
+    border-radius: 8px;
+    padding: 11px 12px;
+    margin-bottom: 6px;
+    border: 1px dashed rgba(194, 139, 43, 0.4);
+    border-bottom-style: dashed;
+  }
+  .picker-recipe.pipeline .picker-add { color: var(--warn); }
+  .exp-flag {
+    background: var(--warn);
+    color: var(--bg);
+    font-size: 8.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  /* Shopping list (screen 3) */
+  .nav-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .nav-back {
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .nav-right {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .shop-header { margin-bottom: 14px; }
+  .shop-title {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.1;
+    margin: 0 0 4px;
+    letter-spacing: -0.3px;
+  }
+  .shop-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .shop-summary {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 18px;
+  }
+  .shop-summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    font-size: 12px;
+  }
+  .shop-summary-label {
+    color: var(--text-muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+  }
+  .shop-summary-value {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .shop-summary-value.accent { color: var(--accent); }
+
+  .shop-category {
+    margin-bottom: 12px;
+  }
+  .shop-cat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .shop-cat-count {
+    color: var(--text-faint);
+    font-weight: 500;
+  }
+
+  .shop-list {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 4px 14px;
+  }
+  .shop-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13.5px;
+  }
+  .shop-item:last-child { border-bottom: none; }
+  .shop-checkbox {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1.5px solid var(--text-faint);
+    flex-shrink: 0;
+  }
+  .shop-checkbox.checked {
+    background: var(--accent);
+    border-color: var(--accent);
+    position: relative;
+  }
+  .shop-checkbox.checked::after {
+    content: "✓";
+    position: absolute;
+    color: var(--bg);
+    font-size: 10px;
+    font-weight: 700;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .shop-item-info { flex: 1; }
+  .shop-item-name {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .shop-item-breakdown {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    margin-top: 1px;
+    font-family: var(--mono);
+  }
+  .shop-item-qty {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 700;
+    min-width: 56px;
+    text-align: right;
+  }
+  .shop-pantry-note {
+    font-size: 10px;
+    color: var(--ok);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+  }
+
+  .shop-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    padding: 14px 22px 20px;
+    display: flex;
+    gap: 10px;
+  }
+  .shop-bottom-btn {
+    flex: 1;
+    padding: 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .shop-bottom-btn.primary {
+    background: var(--accent);
+    color: var(--bg);
+    flex: 2;
+  }
+  .shop-bottom-btn.secondary {
+    background: var(--bg2);
+    color: var(--text);
+  }
+
+</style>
+</head>
+<body>
+<div class="page">
+<h1 class="page-title">Week plan</h1>
+<p class="page-sub">plan first · consolidate ingredients · pantry-aware shopping list</p>
+
+<div class="grid">
+
+<!-- ============================================================ -->
+<!-- SCREEN 1: WEEK PLAN -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">1 · Week plan</div>
+<div class="device">
+<div class="screen" style="padding-bottom: 100px;">
+  <div class="status-bar"><span>9:42</span><span>●●● ▮▮▮</span></div>
+
+  <div class="app-header">
+    <div class="app-name">Stock</div>
+    <div class="app-nav">
+      <span>Recipes</span>
+      <span class="active">Plan</span>
+      <span>Pipeline</span>
+      <span>Bench</span>
+      <span>Pantry</span>
+    </div>
+  </div>
+
+  <div class="week-bar">
+    <span class="week-nav">‹</span>
+    <div class="week-label">
+      <div class="week-range">May 11 — May 17</div>
+      <div class="week-meta">This week</div>
+    </div>
+    <span class="week-nav">›</span>
+  </div>
+
+  <!-- Sunday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Sun</div>
+      <div class="day-num">11</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell breakfast">
+        <span class="meal-icon">☀</span>
+        <span class="breakfast-title">eggs + sourdough</span>
+      </div>
+      <div class="meal-cell dinner cooked">
+        <span class="meal-icon">🌙</span>
+        <span class="meal-title">Roasted beet salad, whipped feta</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Mon</div>
+      <div class="day-num">12</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell dinner cooked">
+        <span class="meal-icon">🌙</span>
+        <span class="meal-title">Sheet pan chicken thighs</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tuesday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Tue</div>
+      <div class="day-num">13</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell dinner skipped">
+        <span class="meal-icon">🌙</span>
+        <span class="meal-title">Pasta alla gricia</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Wednesday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name today">Wed</div>
+      <div class="day-num today">14</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell dinner experimental">
+        <span class="meal-icon">🌙</span>
+        <span class="meal-title">Pho bo</span>
+        <span class="meal-tag exp">exp</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thursday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Thu</div>
+      <div class="day-num">15</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell dinner">
+        <span class="meal-icon">🌙</span>
+        <span class="meal-title">Lemon-herb roast chicken</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Friday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Fri</div>
+      <div class="day-num">16</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell dinner">
+        <span class="meal-icon">🌙</span>
+        <span class="meal-title">Pizza (65% dough)</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saturday -->
+  <div class="day-row">
+    <div class="day-label">
+      <div class="day-name">Sat</div>
+      <div class="day-num">17</div>
+    </div>
+    <div class="day-cells">
+      <div class="meal-cell dinner">
+        <span class="meal-icon">🌙</span>
+        <span class="meal-title">Cucumber-daikon salad + soft egg</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="plan-action-bar">
+    <div class="plan-action-content">
+      <div class="plan-action-info">
+        <div class="plan-action-stats"><strong>5 recipes</strong> · 23 ingredients · pantry covers 7</div>
+        <div class="plan-action-sub">16 items to shop</div>
+      </div>
+      <div class="plan-action-btn">Shopping list →</div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 2: ADD TO DAY (PICKER) -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">2 · Adding to a day</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar"><span>9:43</span><span>●●● ▮▮▮</span></div>
+
+  <div class="nav-bar">
+    <span class="nav-back">← Plan</span>
+    <span class="nav-right">Cancel</span>
+  </div>
+
+  <div class="picker-header">
+    <span class="picker-day-tag">Tue · May 13 · dinner</span>
+    <h2 class="picker-title">What are we eating?</h2>
+  </div>
+
+  <div class="picker-tabs">
+    <div class="picker-tab active">All · 84</div>
+    <div class="picker-tab">Frequent</div>
+    <div class="picker-tab">Pipeline · 9</div>
+  </div>
+
+  <div class="picker-search">
+    <span>⌕</span>
+    <span>Search…</span>
+  </div>
+
+  <div class="picker-chips">
+    <div class="picker-chip">Have most</div>
+    <div class="picker-chip active">Weeknight</div>
+    <div class="picker-chip">&lt; 30 min</div>
+    <div class="picker-chip">Recent</div>
+  </div>
+
+  <div class="picker-section-label">Frequent — weeknight</div>
+
+  <div class="picker-recipe">
+    <div class="picker-recipe-info">
+      <div class="picker-recipe-title">Pasta alla gricia</div>
+      <div class="picker-recipe-meta">
+        <span>~25 min</span>
+        <span>·</span>
+        <span style="color: var(--ok); font-weight: 600;">have everything</span>
+        <span>·</span>
+        <span>cooked 8×</span>
+      </div>
+    </div>
+    <div class="picker-add">+</div>
+  </div>
+
+  <div class="picker-recipe">
+    <div class="picker-recipe-info">
+      <div class="picker-recipe-title">Sheet pan chicken thighs</div>
+      <div class="picker-recipe-meta">
+        <span>~45 min</span>
+        <span>·</span>
+        <span style="color: var(--warn); font-weight: 600;">missing 1</span>
+        <span>·</span>
+        <span>cooked 12×</span>
+      </div>
+    </div>
+    <div class="picker-add">+</div>
+  </div>
+
+  <div class="picker-recipe">
+    <div class="picker-recipe-info">
+      <div class="picker-recipe-title">Salmon, miso glazed</div>
+      <div class="picker-recipe-meta">
+        <span>~30 min</span>
+        <span>·</span>
+        <span style="color: var(--warn); font-weight: 600;">missing 2</span>
+        <span>·</span>
+        <span>cooked 5×</span>
+      </div>
+    </div>
+    <div class="picker-add">+</div>
+  </div>
+
+  <div class="picker-recipe">
+    <div class="picker-recipe-info">
+      <div class="picker-recipe-title">Cucumber-daikon salad + soft egg</div>
+      <div class="picker-recipe-meta">
+        <span>~20 min</span>
+        <span>·</span>
+        <span style="color: var(--ok); font-weight: 600;">have everything</span>
+        <span>·</span>
+        <span>cooked 3×</span>
+      </div>
+    </div>
+    <div class="picker-add">+</div>
+  </div>
+
+  <div class="picker-section-label" style="margin-top: 18px;">From Pipeline</div>
+
+  <div class="picker-recipe pipeline">
+    <div class="picker-recipe-info">
+      <div class="picker-recipe-title">Miso-honey glazed carrots <span class="exp-flag">exp</span></div>
+      <div class="picker-recipe-meta">
+        <span>captured 2w ago</span>
+        <span>·</span>
+        <span style="color: var(--text-muted); font-style: italic;">no recipe yet — best-guess ingredients</span>
+      </div>
+    </div>
+    <div class="picker-add">+</div>
+  </div>
+
+  <div class="picker-recipe pipeline">
+    <div class="picker-recipe-info">
+      <div class="picker-recipe-title">Tahini caramel <span class="exp-flag">exp</span></div>
+      <div class="picker-recipe-meta">
+        <span>researching · 3 refs</span>
+        <span>·</span>
+        <span style="color: var(--text-muted); font-style: italic;">side dish?</span>
+      </div>
+    </div>
+    <div class="picker-add">+</div>
+  </div>
+
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 3: SHOPPING LIST (CONSOLIDATED) -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">3 · Shopping list · consolidated</div>
+<div class="device">
+<div class="screen" style="padding-bottom: 92px;">
+  <div class="status-bar"><span>9:44</span><span>●●● ▮▮▮</span></div>
+
+  <div class="nav-bar">
+    <span class="nav-back">← Plan</span>
+    <span class="nav-right">Edit</span>
+  </div>
+
+  <div class="shop-header">
+    <h2 class="shop-title">Shopping list</h2>
+    <p class="shop-sub">Generated from 5 recipes · May 11 → May 17</p>
+  </div>
+
+  <div class="shop-summary">
+    <div class="shop-summary-row">
+      <span class="shop-summary-label">Total needed</span>
+      <span class="shop-summary-value">23 ingredients</span>
+    </div>
+    <div class="shop-summary-row">
+      <span class="shop-summary-label">Already in pantry</span>
+      <span class="shop-summary-value" style="color: var(--ok);">7 items</span>
+    </div>
+    <div class="shop-summary-row">
+      <span class="shop-summary-label">To buy</span>
+      <span class="shop-summary-value accent">16 items</span>
+    </div>
+  </div>
+
+  <!-- Produce -->
+  <div class="shop-category">
+    <div class="shop-cat-label">
+      <span>Produce</span>
+      <span class="shop-cat-count">6 items</span>
+    </div>
+    <div class="shop-list">
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Lemons</div>
+          <div class="shop-item-breakdown">roast chicken (2) + pasta (1) + salad (1) − 2 in pantry</div>
+        </div>
+        <div class="shop-item-qty">2 → bag of 6</div>
+      </div>
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Yellow onions</div>
+          <div class="shop-item-breakdown">pho (2)</div>
+        </div>
+        <div class="shop-item-qty">2</div>
+      </div>
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Ginger root</div>
+          <div class="shop-item-breakdown">pho (100g)</div>
+        </div>
+        <div class="shop-item-qty">100g</div>
+      </div>
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Cucumber</div>
+          <div class="shop-item-breakdown">cucumber salad (2)</div>
+        </div>
+        <div class="shop-item-qty">2</div>
+      </div>
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Daikon</div>
+          <div class="shop-item-breakdown">cucumber salad (1)</div>
+        </div>
+        <div class="shop-item-qty">1 small</div>
+      </div>
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Thai basil + cilantro</div>
+          <div class="shop-item-breakdown">pho garnish</div>
+        </div>
+        <div class="shop-item-qty">1 bch ea</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Meat -->
+  <div class="shop-category">
+    <div class="shop-cat-label">
+      <span>Meat</span>
+      <span class="shop-cat-count">3 items</span>
+    </div>
+    <div class="shop-list">
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Beef bones (knuckle, marrow)</div>
+          <div class="shop-item-breakdown">pho broth</div>
+        </div>
+        <div class="shop-item-qty">2.5 kg</div>
+      </div>
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Beef brisket</div>
+          <div class="shop-item-breakdown">pho</div>
+        </div>
+        <div class="shop-item-qty">1 kg</div>
+      </div>
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Whole chicken</div>
+          <div class="shop-item-breakdown">roast chicken</div>
+        </div>
+        <div class="shop-item-qty">~4 lb</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pantry -->
+  <div class="shop-category">
+    <div class="shop-cat-label">
+      <span>Pantry</span>
+      <span class="shop-cat-count">4 items</span>
+    </div>
+    <div class="shop-list">
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Rice noodles (banh pho)</div>
+          <div class="shop-item-breakdown">pho</div>
+        </div>
+        <div class="shop-item-qty">450g</div>
+      </div>
+      <div class="shop-item">
+        <div class="shop-checkbox"></div>
+        <div class="shop-item-info">
+          <div class="shop-item-name">Star anise, cinnamon</div>
+          <div class="shop-item-breakdown">pho spices</div>
+        </div>
+        <div class="shop-item-qty">small jar</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Already have -->
+  <div class="shop-category">
+    <div class="shop-cat-label">
+      <span style="color: var(--ok);">✓ Already in pantry</span>
+      <span class="shop-cat-count">7 items</span>
+    </div>
+    <div class="shop-list" style="background: rgba(92, 122, 62, 0.06); padding: 8px 14px;">
+      <div style="font-size: 12.5px; color: var(--text-muted); line-height: 1.7;">
+        Olive oil, butter, eggs, garlic, salt, feta, parsley — won't appear on the shopping output.
+      </div>
+    </div>
+  </div>
+
+  <div class="shop-bottom">
+    <div class="shop-bottom-btn secondary">Edit list</div>
+    <div class="shop-bottom-btn primary">Copy for Instacart</div>
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>

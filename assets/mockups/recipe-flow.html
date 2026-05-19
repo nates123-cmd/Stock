@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock — Recipe capture flow</title>
+<style>
+  :root {
+    --bg: #F5EDDD;
+    --bg2: #EDE2CC;
+    --bg3: #E4D7BB;
+    --accent: #B5462A;
+    --accent-soft: #C56B4D;
+    --text: #3D2B1F;
+    --text-muted: #8A6F5C;
+    --text-faint: #B19981;
+    --line: #DCC9A8;
+    --line-soft: #E4D5B8;
+    --ok: #5C7A3E;
+    --warn: #C28B2B;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background: #2a2620;
+    font-family: var(--sans);
+    color: var(--text);
+    padding: 40px 20px 80px;
+  }
+  .page { max-width: 1400px; margin: 0 auto; }
+  .page-title {
+    color: #d6c4a3;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    text-align: center;
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .page-sub {
+    color: #8a7e69;
+    font-size: 13px;
+    text-align: center;
+    margin: 0 0 40px;
+  }
+  .flow-arrows {
+    text-align: center;
+    color: #8a7e69;
+    font-size: 11px;
+    letter-spacing: 2px;
+    margin-bottom: 30px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 420px));
+    gap: 32px 24px;
+    justify-content: center;
+  }
+  .device {
+    width: 420px;
+    background: var(--bg);
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+    position: relative;
+  }
+  .device-label {
+    color: #8a7e69;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .screen {
+    padding: 20px 22px 28px;
+    min-height: 740px;
+    position: relative;
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 4px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .status-right { display: flex; gap: 6px; align-items: center; font-size: 11px; }
+
+  .nav-back {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+  }
+  .back { color: var(--accent); font-size: 14px; font-weight: 500; }
+  .nav-right { color: var(--text-muted); font-size: 13px; }
+  .nav-right.disabled { color: var(--text-faint); }
+  .nav-right.primary { color: var(--accent); font-weight: 600; }
+
+  .screen-title {
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.1;
+    margin: 0 0 6px;
+    letter-spacing: -0.5px;
+  }
+  .screen-sub {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin: 0 0 22px;
+    line-height: 1.4;
+  }
+
+  /* Capture screen */
+  .capture-box {
+    background: var(--bg2);
+    border: 1.5px dashed var(--line);
+    border-radius: 16px;
+    padding: 28px 20px;
+    margin-bottom: 14px;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+  .capture-prompt {
+    color: var(--text-faint);
+    font-size: 14px;
+    line-height: 1.6;
+    font-style: italic;
+  }
+  .capture-prompt strong {
+    color: var(--text-muted);
+    font-style: normal;
+    font-weight: 600;
+  }
+  .capture-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 18px;
+  }
+  .capture-icon-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: var(--text-muted);
+    border: 1px solid var(--line);
+  }
+
+  .capture-box.filled {
+    border: 1.5px solid var(--accent);
+    border-style: solid;
+    background: var(--bg);
+    text-align: left;
+    padding: 14px 16px;
+    min-height: auto;
+    justify-content: flex-start;
+  }
+  .pasted-url {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    word-break: break-all;
+    line-height: 1.5;
+  }
+  .detected-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent);
+    color: var(--bg);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 8px;
+  }
+
+  .recent-section { margin-top: 22px; }
+  .section-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 0 0 10px;
+  }
+  .recent-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13px;
+  }
+  .recent-item:last-child { border-bottom: none; }
+  .recent-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--bg2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .recent-text { flex: 1; color: var(--text-muted); }
+
+  /* Parsing screen */
+  .parsing-stage {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 24px 20px;
+    margin-bottom: 14px;
+  }
+  .parse-source-box {
+    background: var(--bg);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .source-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: #D8C8A4;
+    color: #5a4a2a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 11px;
+  }
+  .source-meta { flex: 1; }
+  .source-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .source-url { font-size: 11px; color: var(--text-faint); }
+
+  .parse-steps { padding-left: 4px; }
+  .parse-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    font-size: 13px;
+  }
+  .parse-step .check {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .parse-step.done .check { background: var(--ok); color: var(--bg); }
+  .parse-step.done .label { color: var(--text); }
+  .parse-step.doing .check {
+    background: var(--accent);
+    color: var(--bg);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .parse-step.doing .label { color: var(--text); font-weight: 600; }
+  .parse-step.todo .check { background: var(--bg3); color: var(--text-faint); }
+  .parse-step.todo .label { color: var(--text-faint); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Review screen */
+  .field-block {
+    margin-bottom: 18px;
+  }
+  .field-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .confidence {
+    font-size: 10px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+    color: var(--text-faint);
+    font-style: italic;
+  }
+  .confidence.low { color: var(--warn); font-style: italic; }
+  .field-input {
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 15px;
+    font-family: var(--serif);
+    font-weight: 600;
+    color: var(--text);
+  }
+  .field-input.title { font-size: 19px; font-weight: 600; }
+
+  .field-row-list {
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 4px 14px;
+  }
+  .ing-row-review {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 14px;
+  }
+  .ing-row-review:last-child { border-bottom: none; }
+  .ing-row-review .amt {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--text);
+    font-weight: 600;
+    min-width: 56px;
+  }
+  .ing-row-review .name { flex: 1; }
+  .ing-row-review.uncertain .name { font-style: italic; color: var(--text-muted); }
+  .ing-row-review.uncertain .amt { color: var(--warn); }
+
+  .step-row-review {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13.5px;
+    line-height: 1.5;
+    display: flex;
+    gap: 12px;
+  }
+  .step-row-review:last-child { border-bottom: none; }
+  .step-row-review .num {
+    font-family: var(--serif);
+    color: var(--accent);
+    font-weight: 600;
+    min-width: 18px;
+  }
+
+  .tag-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .tag {
+    background: var(--bg3);
+    color: var(--text-muted);
+    padding: 5px 10px;
+    border-radius: 14px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .tag.suggested {
+    background: transparent;
+    border: 1px dashed var(--accent);
+    color: var(--accent);
+  }
+  .tag.added {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  .intention-input {
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13.5px;
+    color: var(--text-muted);
+    font-style: italic;
+    line-height: 1.5;
+    min-height: 60px;
+  }
+
+  /* Action bar */
+  .action-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    border-top: 1px solid var(--line);
+    padding: 14px 22px 20px;
+    display: flex;
+    gap: 10px;
+  }
+  .action-btn {
+    flex: 1;
+    padding: 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .action-btn.primary {
+    background: var(--accent);
+    color: var(--bg);
+    flex: 2;
+  }
+  .action-btn.secondary {
+    background: var(--bg2);
+    color: var(--text);
+  }
+
+  /* Saved confirmation */
+  .saved-hero {
+    text-align: center;
+    margin: 60px 0 30px;
+  }
+  .saved-mark {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--ok);
+    color: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    margin: 0 auto 18px;
+  }
+  .saved-title {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+  .saved-sub {
+    color: var(--text-muted);
+    font-size: 14px;
+    max-width: 280px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+  .saved-recipe-preview {
+    background: var(--bg2);
+    border-radius: 16px;
+    padding: 16px 18px;
+    margin-bottom: 24px;
+  }
+  .saved-recipe-title {
+    font-family: var(--serif);
+    font-size: 19px;
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+  .saved-recipe-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .badge.nyt { background: #D8C8A4; color: #5a4a2a; }
+  .badge.mine { background: var(--accent); color: var(--bg); }
+  .badge.draft {
+    background: transparent;
+    border: 1px solid var(--warn);
+    color: var(--warn);
+  }
+
+  .next-action-list {
+    margin-top: 8px;
+  }
+  .next-action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--bg2);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+  .next-action-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--bg3);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+  .next-action-text { flex: 1; }
+  .next-action-arrow { color: var(--text-faint); }
+
+  /* Pipeline promotion */
+  .promote-context {
+    background: var(--bg3);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 18px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+  .promote-context strong {
+    color: var(--text);
+    font-family: var(--serif);
+    font-size: 14px;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .empty-prompt {
+    color: var(--text-faint);
+    font-style: italic;
+    font-size: 13px;
+  }
+
+  .refs-attached {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--bg2);
+    border-radius: 10px;
+  }
+  .refs-attached-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .ref-link {
+    font-size: 12px;
+    color: var(--accent);
+    padding: 3px 0;
+    display: block;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+<h1 class="page-title">Recipe Capture Flow</h1>
+<p class="page-sub">capture → parse → review → saved · plus pipeline promotion</p>
+
+<div class="flow-arrows">1 ─── 2 ─── 3 ─── 4 ─── (alt entry: 5)</div>
+
+<div class="grid">
+
+<!-- ============================================================ -->
+<!-- SCREEN 1: CAPTURE (empty) -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">1 · Capture (empty)</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:42</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="nav-back">
+    <span class="back">← Cancel</span>
+    <span class="nav-right disabled">Next</span>
+  </div>
+
+  <h1 class="screen-title">Add a recipe</h1>
+  <p class="screen-sub">Paste a URL, drop in text, snap a cookbook page, or just start typing.</p>
+
+  <div class="capture-box">
+    <div class="capture-prompt">
+      Paste anything here.<br>
+      <strong>NYT URL · YouTube link · text · photo</strong>
+    </div>
+    <div class="capture-actions">
+      <div class="capture-icon-btn">📷</div>
+      <div class="capture-icon-btn">🎙</div>
+      <div class="capture-icon-btn">⌨</div>
+    </div>
+  </div>
+
+  <div class="recent-section">
+    <div class="section-label">Recent sources</div>
+    <div class="recent-item">
+      <div class="recent-icon" style="background: #D8C8A4; color: #5a4a2a;">N</div>
+      <div class="recent-text">cooking.nytimes.com — last added 3d ago</div>
+    </div>
+    <div class="recent-item">
+      <div class="recent-icon" style="background: #E5C4B8; color: #8a3a26;">Y</div>
+      <div class="recent-text">youtube.com — last added 1w ago</div>
+    </div>
+    <div class="recent-item">
+      <div class="recent-icon">📖</div>
+      <div class="recent-text">Salt Fat Acid Heat — pg 142, last week</div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 2: CAPTURE (URL pasted, detected) -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">2 · Capture · URL detected</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:42</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="nav-back">
+    <span class="back">← Cancel</span>
+    <span class="nav-right primary">Parse →</span>
+  </div>
+
+  <h1 class="screen-title">Add a recipe</h1>
+  <p class="screen-sub">Paste a URL, drop in text, snap a cookbook page, or just start typing.</p>
+
+  <div class="capture-box filled">
+    <div class="detected-badge">▸ NYT Cooking · detected</div>
+    <div class="pasted-url">
+      cooking.nytimes.com/recipes/<br>1022456-pho-bo-vietnamese-beef-noodle-soup
+    </div>
+  </div>
+
+  <div style="background: var(--bg3); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px;">
+    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">
+      Heads up
+    </div>
+    <div style="font-size: 13px; color: var(--text); line-height: 1.5;">
+      You have <strong>"Pho — proper bone broth"</strong> in your Pipeline. Link this recipe to that idea on save?
+    </div>
+    <div style="display: flex; gap: 8px; margin-top: 12px;">
+      <div style="background: var(--accent); color: var(--bg); padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600;">Yes, link</div>
+      <div style="background: var(--bg2); color: var(--text); padding: 6px 12px; border-radius: 8px; font-size: 12px;">No, separate</div>
+    </div>
+  </div>
+
+  <div style="font-size: 12px; color: var(--text-faint); line-height: 1.5; margin-top: 12px; font-style: italic;">
+    Parsing fetches the recipe and structures it. Takes ~5 seconds. You'll review before saving.
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 3: PARSING -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">3 · Parsing</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:42</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="nav-back">
+    <span class="back" style="color: var(--text-faint);">← Cancel</span>
+    <span class="nav-right disabled">Working…</span>
+  </div>
+
+  <h1 class="screen-title">Reading it</h1>
+  <p class="screen-sub">Pulling the recipe and structuring it. You can keep using the app.</p>
+
+  <div class="parsing-stage">
+    <div class="parse-source-box">
+      <div class="source-icon">N</div>
+      <div class="source-meta">
+        <div class="source-title">Pho Bo — Vietnamese Beef Noodle Soup</div>
+        <div class="source-url">cooking.nytimes.com</div>
+      </div>
+    </div>
+
+    <div class="parse-steps">
+      <div class="parse-step done">
+        <div class="check">✓</div>
+        <div class="label">Fetched the page</div>
+      </div>
+      <div class="parse-step done">
+        <div class="check">✓</div>
+        <div class="label">Found structured recipe data</div>
+      </div>
+      <div class="parse-step doing">
+        <div class="check">●</div>
+        <div class="label">Structuring ingredients & method</div>
+      </div>
+      <div class="parse-step todo">
+        <div class="check">○</div>
+        <div class="label">Checking against your pantry</div>
+      </div>
+      <div class="parse-step todo">
+        <div class="check">○</div>
+        <div class="label">Suggesting tags</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="background: var(--bg2); border-radius: 12px; padding: 14px 16px; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; font-style: italic;">
+    NYT pages are clean — usually no review needed beyond confirming. YouTube videos and photos take longer; the result will say where I had to guess.
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 4: REVIEW -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">4 · Review</div>
+<div class="device">
+<div class="screen" style="padding-bottom: 86px;">
+  <div class="status-bar">
+    <span>9:43</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="nav-back">
+    <span class="back">← Back</span>
+    <span class="nav-right" style="color: var(--text-muted);">Original units · <span style="color: var(--accent); font-weight: 600;">grams</span></span>
+  </div>
+
+  <h1 class="screen-title" style="font-size: 22px;">Review before saving</h1>
+  <p class="screen-sub" style="margin-bottom: 18px;">Tap any field to edit. Italic = I guessed.</p>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Title</span>
+      <span class="confidence">from page</span>
+    </div>
+    <div class="field-input title">Pho Bo — Vietnamese beef noodle soup</div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Source</span>
+      <span class="confidence">from URL</span>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center; background: var(--bg2); border-radius: 10px; padding: 10px 14px;">
+      <span class="badge nyt">NYT</span>
+      <span style="font-size: 13px; color: var(--text-muted);">cooking.nytimes.com · Andrea Nguyen</span>
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Yield & time</span>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <div class="field-input" style="flex: 1; font-size: 13px; font-family: var(--sans); font-weight: 500;">serves 6</div>
+      <div class="field-input" style="flex: 1; font-size: 13px; font-family: var(--sans); font-weight: 500;">6h total</div>
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Ingredients · 11</span>
+      <span class="confidence">all parsed</span>
+    </div>
+    <div class="field-row-list">
+      <div class="ing-row-review">
+        <div class="amt">2.5 kg</div>
+        <div class="name">beef bones (knuckle, marrow)</div>
+      </div>
+      <div class="ing-row-review">
+        <div class="amt">1 kg</div>
+        <div class="name">beef brisket or chuck</div>
+      </div>
+      <div class="ing-row-review">
+        <div class="amt">2</div>
+        <div class="name">large yellow onions, halved</div>
+      </div>
+      <div class="ing-row-review">
+        <div class="amt">100g</div>
+        <div class="name">fresh ginger, halved lengthwise</div>
+      </div>
+      <div class="ing-row-review">
+        <div class="amt">6</div>
+        <div class="name">star anise pods</div>
+      </div>
+      <div class="ing-row-review uncertain">
+        <div class="amt">~3 in</div>
+        <div class="name">cinnamon stick</div>
+      </div>
+      <div class="ing-row-review">
+        <div class="amt">450g</div>
+        <div class="name">dried rice noodles (banh pho)</div>
+      </div>
+      <div style="font-size: 11px; color: var(--text-faint); text-align: center; padding: 6px 0 2px;">+ 4 more · tap to expand</div>
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Method · 7 steps</span>
+      <span class="confidence">from page</span>
+    </div>
+    <div class="field-row-list">
+      <div class="step-row-review">
+        <div class="num">1</div>
+        <div>Char onion and ginger directly over a gas flame or under the broiler until blackened in spots.</div>
+      </div>
+      <div class="step-row-review">
+        <div class="num">2</div>
+        <div>Parboil bones 10 min, drain, rinse. This is the broth-clarity step.</div>
+      </div>
+      <div style="font-size: 11px; color: var(--text-faint); text-align: center; padding: 8px 0;">+ 5 more</div>
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Tags</span>
+      <span class="confidence">suggested</span>
+    </div>
+    <div class="tag-row">
+      <div class="tag suggested">+ vietnamese</div>
+      <div class="tag suggested">+ soup</div>
+      <div class="tag suggested">+ project cook</div>
+      <div class="tag suggested">+ weekend</div>
+      <div class="tag suggested">+ broth</div>
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>First cook intention</span>
+      <span class="confidence">optional</span>
+    </div>
+    <div class="intention-input">
+      Notes for your first attempt — what you'd try, what you're nervous about. Won't count as a modification.
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Linked Pipeline idea</span>
+    </div>
+    <div style="background: var(--bg2); border-left: 3px solid var(--ok); border-radius: 10px; padding: 10px 14px; font-size: 13px;">
+      <strong style="font-family: var(--serif);">Pho — proper bone broth</strong><br>
+      <span style="color: var(--text-muted); font-size: 12px;">4 refs · 5 days in pipeline</span>
+    </div>
+  </div>
+
+  <div class="action-bar">
+    <div class="action-btn secondary">Save draft</div>
+    <div class="action-btn primary">Save recipe</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 5: SAVED -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">5 · Saved</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar">
+    <span>9:44</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="saved-hero">
+    <div class="saved-mark">✓</div>
+    <h1 class="saved-title">In the library</h1>
+    <p class="saved-sub">Pipeline idea marked as cooked-from. Pantry checked.</p>
+  </div>
+
+  <div class="saved-recipe-preview">
+    <div class="saved-recipe-title">Pho Bo — Vietnamese beef noodle soup</div>
+    <div class="saved-recipe-meta">
+      <span class="badge nyt">NYT</span>
+      <span>·</span>
+      <span>serves 6 · 6h</span>
+      <span>·</span>
+      <span style="color: var(--warn);">missing 4 of 11</span>
+    </div>
+  </div>
+
+  <div class="section-label">What's next</div>
+  <div class="next-action-list">
+    <div class="next-action">
+      <div class="next-action-icon">⌕</div>
+      <div class="next-action-text">View the recipe</div>
+      <div class="next-action-arrow">→</div>
+    </div>
+    <div class="next-action">
+      <div class="next-action-icon">⚖</div>
+      <div class="next-action-text">Send to Bench (convert / scale)</div>
+      <div class="next-action-arrow">→</div>
+    </div>
+    <div class="next-action">
+      <div class="next-action-icon">▣</div>
+      <div class="next-action-text">Add 4 missing items to shopping</div>
+      <div class="next-action-arrow">→</div>
+    </div>
+    <div class="next-action">
+      <div class="next-action-icon">↗</div>
+      <div class="next-action-text">Send to Course as a project</div>
+      <div class="next-action-arrow">→</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 24px; text-align: center;">
+    <div style="display: inline-block; padding: 12px 28px; background: var(--bg2); color: var(--text); border-radius: 12px; font-size: 14px; font-weight: 500;">
+      Add another
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 6: PIPELINE PROMOTION -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">6 · Pipeline → Recipe (alt entry)</div>
+<div class="device">
+<div class="screen" style="padding-bottom: 86px;">
+  <div class="status-bar">
+    <span>9:50</span>
+    <span class="status-right">●●● ▮▮▮</span>
+  </div>
+
+  <div class="nav-back">
+    <span class="back">← Pipeline</span>
+    <span class="nav-right primary">Save recipe</span>
+  </div>
+
+  <h1 class="screen-title" style="font-size: 22px;">You cooked it</h1>
+  <p class="screen-sub" style="margin-bottom: 16px;">Capture what you actually did. The idea card archives with a link to this recipe.</p>
+
+  <div class="promote-context">
+    <strong>Japanese-style salad, rice vinegar lean</strong>
+    Cucumber, daikon, sesame, shiso if I can find it. Dressing: rice vinegar, mirin, soy, neutral oil, ginger. Maybe a soft egg.
+    <div style="margin-top: 8px; font-size: 11px;">▸ 5 days in pipeline · 2 references</div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Title</span>
+    </div>
+    <div class="field-input title">Cucumber-daikon salad, rice vinegar</div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Source</span>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center; background: var(--bg2); border-radius: 10px; padding: 10px 14px;">
+      <span class="badge mine">mine</span>
+      <span style="font-size: 13px; color: var(--text-muted);">first cook · today</span>
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Ingredients</span>
+      <span class="confidence">what did you use?</span>
+    </div>
+    <div class="field-row-list">
+      <div class="ing-row-review">
+        <div class="amt">—</div>
+        <div class="name empty-prompt">tap to add ingredient…</div>
+      </div>
+    </div>
+    <div style="margin-top: 6px; font-size: 11px; color: var(--text-faint); font-style: italic;">
+      Type freely or paste — Bench will convert to grams when you save.
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>Method</span>
+      <span class="confidence">how'd you do it?</span>
+    </div>
+    <div class="field-row-list" style="padding: 10px 14px;">
+      <div class="empty-prompt">Walk through the steps as you made them. Brief is fine — "salt cucumbers 20 min, drain, combine, dress."</div>
+    </div>
+  </div>
+
+  <div class="field-block">
+    <div class="field-label">
+      <span>How'd it go?</span>
+      <span class="confidence">optional · saved as cook note</span>
+    </div>
+    <div class="intention-input" style="font-style: normal; color: var(--text);">
+      Came out good. Would up the ginger next time. Soft egg made it — don't skip.
+    </div>
+  </div>
+
+  <div class="refs-attached">
+    <div class="refs-attached-label">References carried over from Pipeline</div>
+    <a class="ref-link">→ youtube.com/watch?v=...  "japanese cucumber salad masterclass"</a>
+    <a class="ref-link">→ justonecookbook.com/sunomono</a>
+  </div>
+
+  <div class="action-bar">
+    <div class="action-btn secondary">Save draft</div>
+    <div class="action-btn primary">Save recipe</div>
+  </div>
+</div>
+</div>
+</div>
+
+
+</div>
+</div>
+</body>
+</html>

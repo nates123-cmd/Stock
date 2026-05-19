@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock — Modification History</title>
+<style>
+  :root {
+    --bg: #F5EDDD;
+    --bg2: #EDE2CC;
+    --bg3: #E4D7BB;
+    --accent: #CC3D2E;
+    --accent-deep: #A52E22;
+    --accent-soft: #E16252;
+    --text: #3D2B1F;
+    --text-muted: #8A6F5C;
+    --text-faint: #B19981;
+    --line: #DCC9A8;
+    --line-soft: #E4D5B8;
+    --ok: #5C7A3E;
+    --warn: #C28B2B;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  }
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body {
+    margin: 0;
+    background: #2a2620;
+    font-family: var(--sans);
+    color: var(--text);
+    padding: 40px 20px 80px;
+  }
+  .page { max-width: 1400px; margin: 0 auto; }
+  .page-title {
+    color: #d6c4a3;
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    text-align: center;
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .page-sub {
+    color: #8a7e69;
+    font-size: 13px;
+    text-align: center;
+    margin: 0 0 40px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 420px));
+    gap: 32px 24px;
+    justify-content: center;
+  }
+  .device {
+    width: 420px;
+    background: var(--bg);
+    border-radius: 28px;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+    position: relative;
+  }
+  .device-label {
+    color: #8a7e69;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: center;
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .screen {
+    padding: 18px 22px 28px;
+    min-height: 760px;
+    position: relative;
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 4px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* Nav */
+  .nav-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .back-link {
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .nav-right-text {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  /* Header */
+  .history-header {
+    margin-bottom: 18px;
+  }
+  .history-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
+  .history-title {
+    font-family: var(--serif);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.15;
+    margin: 0;
+    letter-spacing: -0.3px;
+  }
+  .history-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 4px 0 0;
+  }
+
+  /* View toggle */
+  .view-toggle {
+    display: flex;
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 3px;
+    margin: 14px 0 22px;
+  }
+  .view-option {
+    flex: 1;
+    padding: 8px 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: var(--text-muted);
+    border-radius: 7px;
+    letter-spacing: 0.3px;
+  }
+  .view-option.active {
+    background: var(--bg);
+    color: var(--accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+
+  /* Timeline */
+  .timeline {
+    position: relative;
+    padding-left: 22px;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 7px;
+    top: 6px;
+    bottom: 30px;
+    width: 1.5px;
+    background: var(--line);
+  }
+  .timeline-entry {
+    position: relative;
+    margin-bottom: 24px;
+  }
+  .timeline-entry::before {
+    content: "";
+    position: absolute;
+    left: -22px;
+    top: 8px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 2px solid var(--accent);
+  }
+  .timeline-entry.original::before {
+    background: var(--bg2);
+    border-color: var(--text-faint);
+    width: 12px;
+    height: 12px;
+    left: -21px;
+  }
+  .timeline-entry.edit-only::before {
+    background: var(--bg);
+    border-color: var(--text-muted);
+    width: 10px;
+    height: 10px;
+    left: -20px;
+    top: 10px;
+  }
+
+  .timeline-when {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  .timeline-cook-num {
+    font-family: var(--serif);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .timeline-cook-num .small {
+    color: var(--text-muted);
+    font-weight: 500;
+    font-size: 12px;
+    font-family: var(--sans);
+  }
+  .timeline-date {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+  }
+
+  .timeline-mods {
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  .mod-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    font-size: 13px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .mod-row:last-child { border-bottom: none; }
+  .mod-old {
+    font-family: var(--mono);
+    color: var(--text-faint);
+    text-decoration: line-through;
+    font-size: 11.5px;
+    min-width: 44px;
+  }
+  .mod-arrow { color: var(--text-faint); font-size: 11px; }
+  .mod-new {
+    font-family: var(--mono);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12.5px;
+    min-width: 44px;
+  }
+  .mod-name {
+    flex: 1;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .mod-undo {
+    color: var(--text-faint);
+    font-size: 14px;
+    padding: 2px 4px;
+  }
+  .mod-row.added {
+    background: rgba(92, 122, 62, 0.06);
+    border-radius: 4px;
+    padding: 5px 6px;
+    margin: -1px -6px;
+    border-bottom: none;
+  }
+  .mod-tag-added {
+    background: var(--ok);
+    color: var(--bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .timeline-note {
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.45;
+    margin-bottom: 8px;
+    font-style: italic;
+  }
+  .timeline-note::before {
+    content: "▸ ";
+    color: var(--accent);
+    font-style: normal;
+    font-weight: 700;
+  }
+  .timeline-meta-row {
+    display: flex;
+    gap: 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .timeline-meta-row .dot { color: var(--text-faint); }
+  .timeline-snapshot-link {
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .timeline-entry.edit-only .timeline-cook-num {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-family: var(--sans);
+    font-weight: 600;
+  }
+
+  .timeline-entry.original .timeline-cook-num {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-family: var(--sans);
+    font-weight: 600;
+  }
+  .timeline-original-card {
+    background: var(--bg2);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .timeline-original-card a {
+    color: var(--accent);
+    font-weight: 600;
+    margin-top: 6px;
+    display: inline-block;
+  }
+
+  /* Diff view */
+  .diff-summary {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 18px;
+  }
+  .diff-summary-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 3px 0;
+  }
+  .diff-summary-label {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+    font-size: 10px;
+  }
+  .diff-summary-value {
+    color: var(--text);
+    font-weight: 600;
+    font-size: 12px;
+  }
+
+  .diff-section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+
+  .diff-block {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+  }
+  .diff-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13.5px;
+  }
+  .diff-line:last-child { border-bottom: none; }
+  .diff-line-status {
+    width: 18px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .diff-line.changed .diff-line-status { color: var(--accent); }
+  .diff-line.added .diff-line-status { color: var(--ok); }
+  .diff-line.removed .diff-line-status { color: var(--text-faint); }
+  .diff-line-amts {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    min-width: 88px;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+  .diff-line-old {
+    color: var(--text-faint);
+    text-decoration: line-through;
+    font-size: 11px;
+  }
+  .diff-line-new {
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .diff-line-amt-only {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ok);
+    font-weight: 700;
+    min-width: 88px;
+  }
+  .diff-line-name { flex: 1; color: var(--text); font-size: 13px; }
+  .diff-line.removed .diff-line-name { color: var(--text-faint); text-decoration: line-through; }
+  .diff-line-when {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+
+  /* Snapshot view */
+  .snapshot-hero {
+    background: var(--bg2);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 18px;
+    border-left: 3px solid var(--accent);
+  }
+  .snapshot-cook-tag {
+    font-family: var(--serif);
+    font-size: 19px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .snapshot-date {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .snapshot-note {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+    font-style: italic;
+    padding-top: 8px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .snap-section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 16px 0 8px;
+  }
+
+  .snap-ing-list {
+    background: var(--bg2);
+    border-radius: 12px;
+    padding: 6px 14px;
+  }
+  .snap-ing-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 13.5px;
+  }
+  .snap-ing-row:last-child { border-bottom: none; }
+  .snap-ing-amt {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 700;
+    min-width: 56px;
+  }
+  .snap-ing-name { flex: 1; color: var(--text); }
+
+  .snap-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .snap-btn {
+    flex: 1;
+    padding: 11px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .snap-btn.primary {
+    background: var(--accent);
+    color: var(--bg);
+    flex: 2;
+  }
+  .snap-btn.secondary {
+    background: var(--bg2);
+    color: var(--text);
+  }
+
+  .snap-warning {
+    background: rgba(204, 61, 46, 0.06);
+    border: 1px dashed var(--accent);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-top: 14px;
+  }
+  .snap-warning strong { color: var(--accent); font-weight: 700; }
+
+</style>
+</head>
+<body>
+<div class="page">
+<h1 class="page-title">Modification history</h1>
+<p class="page-sub">timeline · diff · snapshot · the lineage of how you cook this dish</p>
+
+<div class="grid">
+
+<!-- ============================================================ -->
+<!-- SCREEN 1: TIMELINE VIEW -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">1 · Timeline · chronological</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar"><span>9:42</span><span>●●● ▮▮▮</span></div>
+
+  <div class="nav-bar">
+    <span class="back-link">← Recipe</span>
+    <span class="nav-right-text">Edit</span>
+  </div>
+
+  <div class="history-header">
+    <h2 class="history-title">Beet salad · history</h2>
+    <p class="history-sub">7 cooks · 5 modifications · from NYT</p>
+  </div>
+
+  <div class="view-toggle">
+    <div class="view-option active">Timeline</div>
+    <div class="view-option">Diff from original</div>
+  </div>
+
+  <div class="timeline">
+
+    <!-- Cook 7 - most recent -->
+    <div class="timeline-entry">
+      <div class="timeline-when">
+        <div class="timeline-cook-num">Cook #7 <span class="small">· you</span></div>
+        <div class="timeline-date">May 12</div>
+      </div>
+      <div class="timeline-note">The extra feta + honey is dialed in now. Next time: less yogurt, more lemon zest in the whip.</div>
+      <div class="timeline-meta-row">
+        <span>56 min</span>
+        <span class="dot">·</span>
+        <span>no new mods</span>
+        <span class="dot">·</span>
+        <a class="timeline-snapshot-link">View snapshot →</a>
+      </div>
+    </div>
+
+    <!-- Cook 6 -->
+    <div class="timeline-entry">
+      <div class="timeline-when">
+        <div class="timeline-cook-num">Cook #6 <span class="small">· you</span></div>
+        <div class="timeline-date">Apr 28</div>
+      </div>
+      <div class="timeline-mods">
+        <div class="mod-row added">
+          <span class="mod-tag-added">added</span>
+          <div class="mod-new">2 tsp</div>
+          <div class="mod-name">honey</div>
+          <span class="mod-undo">↺</span>
+        </div>
+      </div>
+      <div class="timeline-note">The honey is the unlock — original is too sharp. Will keep.</div>
+      <div class="timeline-meta-row">
+        <span>52 min</span>
+        <span class="dot">·</span>
+        <a class="timeline-snapshot-link">View snapshot →</a>
+      </div>
+    </div>
+
+    <!-- Cook 5 -->
+    <div class="timeline-entry">
+      <div class="timeline-when">
+        <div class="timeline-cook-num">Cook #5 <span class="small">· you</span></div>
+        <div class="timeline-date">Apr 14</div>
+      </div>
+      <div class="timeline-mods">
+        <div class="mod-row">
+          <div class="mod-old">150g</div>
+          <span class="mod-arrow">→</span>
+          <div class="mod-new">200g</div>
+          <div class="mod-name">feta</div>
+          <span class="mod-undo">↺</span>
+        </div>
+        <div class="mod-row">
+          <div class="mod-old">2 tbsp</div>
+          <span class="mod-arrow">→</span>
+          <div class="mod-new">3 tbsp</div>
+          <div class="mod-name">olive oil — the good stuff, not blend</div>
+          <span class="mod-undo">↺</span>
+        </div>
+      </div>
+      <div class="timeline-meta-row">
+        <span>48 min</span>
+        <span class="dot">·</span>
+        <a class="timeline-snapshot-link">View snapshot →</a>
+      </div>
+    </div>
+
+    <!-- Edit (no cook) -->
+    <div class="timeline-entry edit-only">
+      <div class="timeline-when">
+        <div class="timeline-cook-num">edited recipe</div>
+        <div class="timeline-date">Apr 10</div>
+      </div>
+      <div class="timeline-mods">
+        <div class="mod-row">
+          <div class="mod-old">¼ cup</div>
+          <span class="mod-arrow">→</span>
+          <div class="mod-new">¼ cup</div>
+          <div class="mod-name">pistachios → "toasted"</div>
+          <span class="mod-undo">↺</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cooks 1-4 collapsed -->
+    <div class="timeline-entry">
+      <div class="timeline-when">
+        <div class="timeline-cook-num">Cooks #1–4 <span class="small">· no mods</span></div>
+        <div class="timeline-date">Mar – Apr</div>
+      </div>
+      <div class="timeline-meta-row" style="margin-top: 8px;">
+        <a class="timeline-snapshot-link">Expand →</a>
+      </div>
+    </div>
+
+    <!-- Original -->
+    <div class="timeline-entry original">
+      <div class="timeline-when">
+        <div class="timeline-cook-num">original</div>
+        <div class="timeline-date">Mar 4</div>
+      </div>
+      <div class="timeline-original-card">
+        Imported from NYT Cooking · Andrea Nguyen<br>
+        <a>View original recipe →</a>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 2: DIFF VIEW -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">2 · Diff · cumulative changes</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar"><span>9:43</span><span>●●● ▮▮▮</span></div>
+
+  <div class="nav-bar">
+    <span class="back-link">← Recipe</span>
+    <span class="nav-right-text">Edit</span>
+  </div>
+
+  <div class="history-header">
+    <h2 class="history-title">Beet salad · diff</h2>
+    <p class="history-sub">your version vs the NYT original</p>
+  </div>
+
+  <div class="view-toggle">
+    <div class="view-option">Timeline</div>
+    <div class="view-option active">Diff from original</div>
+  </div>
+
+  <div class="diff-summary">
+    <div class="diff-summary-row">
+      <span class="diff-summary-label">Changes</span>
+      <span class="diff-summary-value">5 ingredients · 1 step note</span>
+    </div>
+    <div class="diff-summary-row">
+      <span class="diff-summary-label">Drift</span>
+      <span class="diff-summary-value">~18% by mass</span>
+    </div>
+    <div class="diff-summary-row">
+      <span class="diff-summary-label">Period</span>
+      <span class="diff-summary-value">Mar 4 → May 12 · 7 cooks</span>
+    </div>
+  </div>
+
+  <div class="diff-section-label">Ingredients</div>
+  <div class="diff-block">
+    <div class="diff-line changed">
+      <div class="diff-line-status">~</div>
+      <div class="diff-line-amts">
+        <span class="diff-line-old">150g</span>
+        <span class="diff-line-new">200g</span>
+      </div>
+      <div class="diff-line-name">feta</div>
+      <div class="diff-line-when">cook #5</div>
+    </div>
+    <div class="diff-line changed">
+      <div class="diff-line-status">~</div>
+      <div class="diff-line-amts">
+        <span class="diff-line-old">2 tbsp</span>
+        <span class="diff-line-new">3 tbsp</span>
+      </div>
+      <div class="diff-line-name">olive oil</div>
+      <div class="diff-line-when">cook #5</div>
+    </div>
+    <div class="diff-line added">
+      <div class="diff-line-status">+</div>
+      <div class="diff-line-amt-only">2 tsp</div>
+      <div class="diff-line-name">honey</div>
+      <div class="diff-line-when">cook #6</div>
+    </div>
+    <div class="diff-line removed">
+      <div class="diff-line-status">−</div>
+      <div class="diff-line-amts">
+        <span class="diff-line-old">2 tbsp</span>
+      </div>
+      <div class="diff-line-name">red wine vinegar</div>
+      <div class="diff-line-when">cook #5</div>
+    </div>
+    <div class="diff-line changed">
+      <div class="diff-line-status">~</div>
+      <div class="diff-line-amts">
+        <span class="diff-line-old">¼ cup</span>
+        <span class="diff-line-new">¼ cup</span>
+      </div>
+      <div class="diff-line-name">pistachios → "toasted"</div>
+      <div class="diff-line-when">Apr 10</div>
+    </div>
+  </div>
+
+  <div class="diff-section-label">Method</div>
+  <div class="diff-block">
+    <div class="diff-line changed">
+      <div class="diff-line-status">~</div>
+      <div class="diff-line-amts" style="min-width: 30px;"><span style="color: var(--text-muted); font-size: 11px;">step 6</span></div>
+      <div class="diff-line-name">added: "plate feta first, beets on top — juices pool"</div>
+      <div class="diff-line-when">cook #6</div>
+    </div>
+  </div>
+
+  <div style="margin-top: 20px; padding: 12px 14px; background: var(--bg2); border-radius: 10px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
+    <strong style="color: var(--text);">Reset to original?</strong> · You'd lose all 6 modifications.
+    <div style="margin-top: 6px;">
+      <span style="color: var(--accent); font-weight: 600;">Reset recipe →</span>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+
+<!-- ============================================================ -->
+<!-- SCREEN 3: SNAPSHOT OF A SPECIFIC COOK -->
+<!-- ============================================================ -->
+<div>
+<div class="device-label">3 · Snapshot · cook #5</div>
+<div class="device">
+<div class="screen">
+  <div class="status-bar"><span>9:44</span><span>●●● ▮▮▮</span></div>
+
+  <div class="nav-bar">
+    <span class="back-link">← History</span>
+    <span class="nav-right-text">Share</span>
+  </div>
+
+  <div class="snapshot-hero">
+    <div class="snapshot-cook-tag">Cook #5</div>
+    <div class="snapshot-date">April 14, 2026 · 48 min</div>
+    <div class="snapshot-note">
+      Trying the doubled feta. Way better — the original was too thin a layer. Should make this permanent.
+    </div>
+  </div>
+
+  <div class="snap-section-label">Ingredients · as cooked that day</div>
+  <div class="snap-ing-list">
+    <div class="snap-ing-row">
+      <div class="snap-ing-amt">680g</div>
+      <div class="snap-ing-name">red beets, scrubbed</div>
+    </div>
+    <div class="snap-ing-row">
+      <div class="snap-ing-amt" style="color: var(--accent);">200g</div>
+      <div class="snap-ing-name">feta <span style="color: var(--accent); font-size: 11px; font-style: italic;">· new this cook</span></div>
+    </div>
+    <div class="snap-ing-row">
+      <div class="snap-ing-amt">60g</div>
+      <div class="snap-ing-name">greek yogurt</div>
+    </div>
+    <div class="snap-ing-row">
+      <div class="snap-ing-amt" style="color: var(--accent);">3 tbsp</div>
+      <div class="snap-ing-name">olive oil <span style="color: var(--accent); font-size: 11px; font-style: italic;">· new this cook</span></div>
+    </div>
+    <div class="snap-ing-row">
+      <div class="snap-ing-amt">2 tbsp</div>
+      <div class="snap-ing-name">red wine vinegar</div>
+    </div>
+    <div class="snap-ing-row">
+      <div class="snap-ing-amt">1</div>
+      <div class="snap-ing-name">lemon, zest + juice</div>
+    </div>
+    <div class="snap-ing-row">
+      <div class="snap-ing-amt">¼ cup</div>
+      <div class="snap-ing-name">pistachios, toasted</div>
+    </div>
+    <div class="snap-ing-row">
+      <div class="snap-ing-amt">—</div>
+      <div class="snap-ing-name">salt, dill</div>
+    </div>
+  </div>
+
+  <div class="snap-actions">
+    <div class="snap-btn secondary">Cook this version</div>
+    <div class="snap-btn primary">Restore as current</div>
+  </div>
+
+  <div class="snap-warning">
+    <strong>Heads up</strong> — Restoring this snapshot as the current recipe will undo the honey (added cook #6) and any later changes. Your cook history stays intact either way.
+  </div>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>
