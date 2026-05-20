@@ -15,6 +15,8 @@ import {
   TimerStrip,
   AwakeIndicator,
   StepBody,
+  IngredientAmount,
+  IngredientName,
 } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -23,7 +25,8 @@ import { useCookTimers } from '@/lib/useCookTimers';
 import { tokenizeStep } from '@/lib/cookText';
 import { formatMinutes } from '@/lib/format';
 import { uid } from '@/lib/id';
-import type { Cook, Recipe, Step } from '@/types';
+import { makeMod } from '@/lib/recipe';
+import type { Cook, Ingredient, Modification, Recipe, Step } from '@/types';
 
 type Mode = 'focused' | 'glance' | 'notes';
 type Phase = 'cooking' | 'post';
@@ -64,6 +67,13 @@ export default function CookScreen() {
   const [note, setNote] = useState('');
   const startedAt = useRef(new Date());
 
+  // Cook identity is fixed at mount so any in-cook modifications can stamp
+  // their cookId — they need to reference this Cook even before it's saved.
+  const [cookId] = useState(() => uid('cook'));
+  const [pendingMods, setPendingMods] = useState<Modification[]>([]);
+  const [editingIng, setEditingIng] = useState<Ingredient | null>(null);
+  const [addingIng, setAddingIng] = useState(false);
+
   if (!recipe) {
     return (
       <SafeAreaView style={styles.root}>
@@ -87,14 +97,14 @@ export default function CookScreen() {
       Math.round((finishedAt.getTime() - startedAt.current.getTime()) / 60000),
     );
     const cook: Cook = {
-      id: uid('cook'),
+      id: cookId,
       recipeId: recipe.id,
       recipeVersionSnapshot: recipe,
       startedAt: startedAt.current,
       finishedAt,
       durationMinutes,
       note: note.trim() || undefined,
-      modifications: [], // in-cook scaling/edits arrive with Bench (spec §9)
+      modifications: pendingMods,
       // Cook.mode is the cooking style — if they happened to finish from the
       // Notes view, fall back to Glance (the default).
       mode: mode === 'notes' ? 'glance' : mode,
@@ -102,6 +112,101 @@ export default function CookScreen() {
     await recordCook(cook);
     await saveRecipe({ ...recipe, cookCount: recipe.cookCount + 1, modifiedAt: finishedAt });
     router.back();
+  };
+
+  /* ---- Ingredient edits (spec §6 Modification) ---- */
+
+  const saveIngredientEdit = (
+    ing: Ingredient,
+    next: { amount: number | null; unit: string | null; name: string },
+  ) => {
+    const mods: Modification[] = [];
+    if (next.amount !== ing.amount || next.unit !== ing.unit) {
+      mods.push(makeMod({ type: 'amount', before: ing.amount, after: next.amount, cookId }));
+    }
+    if (next.name.toLowerCase() !== ing.canonicalName.toLowerCase()) {
+      mods.push(makeMod({ type: 'name', before: ing.canonicalName, after: next.name, cookId }));
+    }
+    if (mods.length === 0) {
+      setEditingIng(null);
+      return;
+    }
+    const updated: Ingredient = {
+      ...ing,
+      amount: next.amount,
+      unit: next.unit,
+      canonicalName: next.name,
+      modificationHistory: [...ing.modificationHistory, ...mods],
+    };
+    void saveRecipe({
+      ...recipe,
+      ingredients: recipe.ingredients.map((i) => (i.id === ing.id ? updated : i)),
+      modifiedAt: new Date(),
+    });
+    setPendingMods((p) => [...p, ...mods]);
+    setEditingIng(null);
+  };
+
+  const skipIngredientThisCook = (ing: Ingredient) => {
+    // No recipe change — just a per-cook record so the cook log captures it.
+    setPendingMods((p) => [
+      ...p,
+      makeMod({
+        type: 'removed',
+        before: { id: ing.id, name: ing.canonicalName },
+        after: null,
+        cookId,
+        reason: 'skipped this cook',
+      }),
+    ]);
+    setEditingIng(null);
+  };
+
+  const removeIngredientForever = (ing: Ingredient) => {
+    const mod = makeMod({
+      type: 'removed',
+      before: { id: ing.id, name: ing.canonicalName },
+      after: null,
+      cookId,
+    });
+    void saveRecipe({
+      ...recipe,
+      ingredients: recipe.ingredients.filter((i) => i.id !== ing.id),
+      modifiedAt: new Date(),
+    });
+    setPendingMods((p) => [...p, mod]);
+    setEditingIng(null);
+  };
+
+  const addIngredient = (next: {
+    amount: number | null;
+    unit: string | null;
+    name: string;
+  }) => {
+    if (!next.name.trim()) {
+      setAddingIng(false);
+      return;
+    }
+    const mod = makeMod({
+      type: 'added',
+      before: null,
+      after: { amount: next.amount, unit: next.unit, name: next.name },
+      cookId,
+    });
+    const newIng: Ingredient = {
+      id: uid('ing'),
+      amount: next.amount,
+      unit: next.unit,
+      canonicalName: next.name.trim().toLowerCase(),
+      modificationHistory: [mod],
+    };
+    void saveRecipe({
+      ...recipe,
+      ingredients: [...recipe.ingredients, newIng],
+      modifiedAt: new Date(),
+    });
+    setPendingMods((p) => [...p, mod]);
+    setAddingIng(false);
   };
 
   // Ingredient is "used" if its name appears in a completed step (spec §7;
@@ -212,6 +317,8 @@ export default function CookScreen() {
           onStartTimer={startTimer}
           onClearTimer={clearTimer}
           onMarkCooked={finishCook}
+          onEditIngredient={setEditingIng}
+          onAddIngredient={() => setAddingIng(true)}
         />
       ) : (
         <NotesBody recipe={recipe} note={note} setNote={setNote} />
@@ -276,6 +383,27 @@ export default function CookScreen() {
             );
           })}
         </ScrollView>
+      </Overlay>
+
+      {/* Edit ingredient (in-cook modification) */}
+      <Overlay visible={!!editingIng} onClose={() => setEditingIng(null)}>
+        {editingIng ? (
+          <EditIngredientSheet
+            ing={editingIng}
+            onSave={(next) => saveIngredientEdit(editingIng, next)}
+            onSkip={() => skipIngredientThisCook(editingIng)}
+            onRemove={() => removeIngredientForever(editingIng)}
+            onCancel={() => setEditingIng(null)}
+          />
+        ) : null}
+      </Overlay>
+
+      {/* Add ingredient */}
+      <Overlay visible={addingIng} onClose={() => setAddingIng(false)}>
+        <AddIngredientSheet
+          onSave={addIngredient}
+          onCancel={() => setAddingIng(false)}
+        />
       </Overlay>
     </SafeAreaView>
   );
@@ -351,6 +479,8 @@ function GlanceBody({
   onStartTimer,
   onClearTimer,
   onMarkCooked,
+  onEditIngredient,
+  onAddIngredient,
 }: {
   recipe: Recipe;
   steps: Step[];
@@ -361,6 +491,8 @@ function GlanceBody({
   onStartTimer: (label: string, seconds: number, ord: number) => void;
   onClearTimer: (id: string) => void;
   onMarkCooked: () => void;
+  onEditIngredient: (ing: Ingredient) => void;
+  onAddIngredient: () => void;
 }) {
   const time = formatMinutes(recipe.yield.totalMinutes);
   return (
@@ -376,21 +508,23 @@ function GlanceBody({
 
         <Card style={styles.ingCard}>
           {recipe.ingredients.map((ing) => (
-            <View key={ing.id} style={styles.ingGrid}>
-              <Numeric color="text" style={styles.ingGridAmt}>
-                {ing.amount != null ? `${ing.amount}${ing.unit ?? ''}` : '—'}
-              </Numeric>
-              <Text style={styles.flex}>
-                {ing.canonicalName}
-                {ing.modificationHistory.length > 0 ? (
-                  <Text color="accent" style={styles.modTag}>
-                    {' '}
-                    ·mod
-                  </Text>
-                ) : null}
-              </Text>
-            </View>
+            <Pressable
+              key={ing.id}
+              onPress={() => onEditIngredient(ing)}
+              style={styles.ingGrid}
+              hitSlop={4}>
+              <IngredientAmount ing={ing} style={styles.ingGridAmt} />
+              <View style={styles.flex}>
+                <IngredientName ing={ing} />
+              </View>
+            </Pressable>
           ))}
+          <Pressable
+            onPress={onAddIngredient}
+            style={styles.addIngRow}
+            hitSlop={6}>
+            <Text color="accent">+ Add ingredient</Text>
+          </Pressable>
         </Card>
 
         <View style={styles.glanceSteps}>
@@ -548,6 +682,141 @@ function PostCook({
   );
 }
 
+/* ---------- Ingredient edit + add (spec §6 Modification) ---------- */
+
+function EditIngredientSheet({
+  ing,
+  onSave,
+  onSkip,
+  onRemove,
+  onCancel,
+}: {
+  ing: Ingredient;
+  onSave: (next: { amount: number | null; unit: string | null; name: string }) => void;
+  onSkip: () => void;
+  onRemove: () => void;
+  onCancel: () => void;
+}) {
+  const [amount, setAmount] = useState(ing.amount != null ? String(ing.amount) : '');
+  const [unit, setUnit] = useState(ing.unit ?? '');
+  const [name, setName] = useState(ing.canonicalName);
+  const submit = () => {
+    const parsed = amount.trim() === '' ? null : Number(amount.replace(',', '.'));
+    onSave({
+      amount: parsed != null && Number.isFinite(parsed) ? parsed : null,
+      unit: unit.trim() || null,
+      name: name.trim() || ing.canonicalName,
+    });
+  };
+  return (
+    <View style={styles.editSheet}>
+      <Text variant="recipeTitle">Edit ingredient</Text>
+      <Text color="textFaint" style={styles.editHint}>
+        Saved on the recipe — and recorded against this cook. The history is
+        shown inline next time you view the recipe.
+      </Text>
+      <View style={styles.editRow}>
+        <TextInput
+          value={amount}
+          onChangeText={setAmount}
+          keyboardType="decimal-pad"
+          placeholder="amt"
+          placeholderTextColor={colors.textFaint}
+          style={[styles.editField, styles.editFieldNum]}
+        />
+        <TextInput
+          value={unit}
+          onChangeText={setUnit}
+          placeholder="unit"
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          style={[styles.editField, styles.editFieldUnit]}
+        />
+      </View>
+      <TextInput
+        value={name}
+        onChangeText={setName}
+        placeholder="ingredient"
+        placeholderTextColor={colors.textFaint}
+        style={styles.editField}
+      />
+      <View style={styles.editButtons}>
+        <Button label="Save" glyph="done" flex onPress={submit} />
+      </View>
+      <View style={styles.editSecondary}>
+        <Pressable onPress={onSkip} hitSlop={6}>
+          <Text color="textMuted">Skip this cook</Text>
+        </Pressable>
+        <Pressable onPress={onRemove} hitSlop={6}>
+          <Text color="warn">Remove from recipe</Text>
+        </Pressable>
+        <Pressable onPress={onCancel} hitSlop={6}>
+          <Text color="textMuted">Cancel</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function AddIngredientSheet({
+  onSave,
+  onCancel,
+}: {
+  onSave: (next: { amount: number | null; unit: string | null; name: string }) => void;
+  onCancel: () => void;
+}) {
+  const [amount, setAmount] = useState('');
+  const [unit, setUnit] = useState('');
+  const [name, setName] = useState('');
+  const submit = () => {
+    if (!name.trim()) return;
+    const parsed = amount.trim() === '' ? null : Number(amount.replace(',', '.'));
+    onSave({
+      amount: parsed != null && Number.isFinite(parsed) ? parsed : null,
+      unit: unit.trim() || null,
+      name: name.trim(),
+    });
+  };
+  return (
+    <View style={styles.editSheet}>
+      <Text variant="recipeTitle">Add ingredient</Text>
+      <Text color="textFaint" style={styles.editHint}>
+        Added to the recipe and tagged as an in-cook addition.
+      </Text>
+      <View style={styles.editRow}>
+        <TextInput
+          value={amount}
+          onChangeText={setAmount}
+          keyboardType="decimal-pad"
+          placeholder="amt"
+          placeholderTextColor={colors.textFaint}
+          style={[styles.editField, styles.editFieldNum]}
+        />
+        <TextInput
+          value={unit}
+          onChangeText={setUnit}
+          placeholder="unit"
+          placeholderTextColor={colors.textFaint}
+          autoCapitalize="none"
+          style={[styles.editField, styles.editFieldUnit]}
+        />
+      </View>
+      <TextInput
+        value={name}
+        onChangeText={setName}
+        placeholder="ingredient"
+        placeholderTextColor={colors.textFaint}
+        style={styles.editField}
+        autoFocus
+      />
+      <View style={styles.editButtons}>
+        <Button label="Cancel" variant="secondary" flex onPress={onCancel} />
+        <Button label="Add" glyph="add" flex disabled={!name.trim()} onPress={submit} />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bgCook },
   flex: { flex: 1 },
@@ -636,8 +905,30 @@ const styles = StyleSheet.create({
   glanceContent: { padding: layout.screenPadding, gap: 14, paddingBottom: 30 },
   glanceTitle: { fontSize: 22 },
   ingCard: { gap: 8 },
-  ingGrid: { flexDirection: 'row', gap: 12 },
+  ingGrid: { flexDirection: 'row', gap: 12, paddingVertical: 2 },
   ingGridAmt: { minWidth: 58 },
+  addIngRow: { paddingTop: 6, paddingBottom: 2 },
+  editSheet: { gap: 12 },
+  editHint: { fontStyle: 'italic', lineHeight: 18 },
+  editRow: { flexDirection: 'row', gap: 10 },
+  editField: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.bg2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.text,
+  },
+  editFieldNum: { width: 90 },
+  editFieldUnit: { flex: 1 },
+  editButtons: { flexDirection: 'row', gap: 10, paddingTop: 4 },
+  editSecondary: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+  },
   modTag: { fontStyle: 'italic', fontSize: 12 },
   glanceSteps: { gap: 4 },
   glanceRow: {

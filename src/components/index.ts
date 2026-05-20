@@ -19,6 +19,7 @@ export { BottomActionBar } from './ActionBar';
 export { ProgressStepList } from './ProgressStepList';
 export type { ProgressStep, ProgressState } from './ProgressStepList';
 export { RecipeCard } from './RecipeCard';
+export { IngredientAmount, IngredientName } from './IngredientLine';
 export { StepBody } from './StepBody';
 export { Overlay } from './Overlay';
 export { TimerStrip } from './TimerStrip';

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button } from '@/components';
+import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, IngredientAmount, IngredientName } from '@/components';
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -154,22 +154,20 @@ export default function RecipeDetail() {
         <SectionLabel style={styles.sectionLabel}>Ingredients</SectionLabel>
         <View style={styles.ingredients}>
           {recipe.ingredients.map((ing) => {
-            const modified = ing.modificationHistory.length > 0;
             const annotation = clean ? null : ingredientAnnotation(ing);
             return (
               <View key={ing.id} style={styles.ingRow}>
-                <Numeric
-                  color={modified ? 'accent' : 'text'}
-                  style={[styles.amount, clean && styles.cleanAmount]}>
-                  {formatAmount(ing.amount, ing.unit)}
-                </Numeric>
+                <IngredientAmount
+                  ing={ing}
+                  style={[styles.amount, clean && styles.cleanAmount]}
+                />
                 <View style={styles.ingText}>
-                  <Text style={clean ? styles.cleanBody : undefined}>
-                    {ing.canonicalName}
+                  <View style={styles.ingNameRow}>
+                    <IngredientName ing={ing} style={clean ? styles.cleanBody : undefined} />
                     {ing.inlineNote ? (
-                      <Text color="textFaint"> · {ing.inlineNote}</Text>
+                      <Text color="textFaint">{`  · ${ing.inlineNote}`}</Text>
                     ) : null}
-                  </Text>
+                  </View>
                   {annotation ? (
                     <Text color="accent" style={styles.annotation}>
                       {annotation}
@@ -381,6 +379,7 @@ const styles = StyleSheet.create({
   sectionLabel: { paddingTop: 24, paddingBottom: 12 },
   ingredients: { gap: 10 },
   ingRow: { flexDirection: 'row', gap: 12 },
+  ingNameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline' },
   amount: { minWidth: 64, paddingTop: 1 },
   cleanAmount: { fontSize: 14 },
   ingText: { flex: 1, gap: 2 },
