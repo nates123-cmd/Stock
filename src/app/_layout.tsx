@@ -6,6 +6,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { colors } from '@/design';
@@ -15,6 +16,8 @@ import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
 import { useCookStore } from '@/store/cooks';
 import { useAuthStore } from '@/store/auth';
+import { useHaveStore } from '@/store/have';
+import { useExtrasStore } from '@/store/extras';
 // Side-effect import: cloud sync wires itself to auth-state changes the
 // moment this module loads. No-op when SUPABASE_* env vars are unset.
 import '@/lib/sync';
@@ -46,6 +49,8 @@ export default function RootLayout() {
   const hydratePipeline = usePipelineStore((s) => s.hydrate);
   const hydrateCooks = useCookStore((s) => s.hydrate);
   const hydrateAuth = useAuthStore((s) => s.hydrate);
+  const hydrateHave = useHaveStore((s) => s.hydrate);
+  const hydrateExtras = useExtrasStore((s) => s.hydrate);
   useEffect(() => {
     // Hydrate the local-first stores: native = SQLite (+ seed first run),
     // web = IndexedDB (+ seed first run) — Stock is a real PWA, see
@@ -57,9 +62,21 @@ export default function RootLayout() {
     hydratePipeline();
     hydrateCooks();
     hydrateAuth();
-  }, [hydrateRecipes, hydratePlan, hydratePantry, hydratePipeline, hydrateCooks, hydrateAuth]);
+    hydrateHave();
+    hydrateExtras();
+  }, [
+    hydrateRecipes,
+    hydratePlan,
+    hydratePantry,
+    hydratePipeline,
+    hydrateCooks,
+    hydrateAuth,
+    hydrateHave,
+    hydrateExtras,
+  ]);
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
         <ThemeProvider value={navTheme}>
@@ -103,5 +120,6 @@ export default function RootLayout() {
         </ThemeProvider>
       </SafeAreaProvider>
     </QueryClientProvider>
+    </GestureHandlerRootView>
   );
 }

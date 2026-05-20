@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import {
   Text,
   Heading,
@@ -15,15 +16,19 @@ import {
 import { colors, fonts, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
+import { useHaveStore } from '@/store/have';
+import { useExtrasStore, type ExtraItem } from '@/store/extras';
 import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
 import {
   consolidateSmart,
   consolidateLocalSmart,
   instacartText,
   CATEGORY_ORDER,
+  categorizeIngredient,
   type ShoppingLine,
   type ShoppingSource,
 } from '@/lib/shopping';
+import { formatAmount } from '@/lib/format';
 import type { Recipe, ShoppingCategory } from '@/types';
 
 const CAT_LABEL: Record<ShoppingCategory, string> = {
@@ -48,8 +53,16 @@ export default function ShoppingList() {
   );
   const entries = usePlanStore((s) => s.entries);
   const recipes = useRecipeStore((s) => s.recipes);
+  const extras = useExtrasStore((s) => s.items);
+  const removeExtra = useExtrasStore((s) => s.remove);
+  // Subscribe to have-state so rows re-render on tap (we use the Map directly
+  // for derived booleans below, but the selector keeps us reactive).
+  const haveByName = useHaveStore((s) => s.byName);
+  const markHave = useHaveStore((s) => s.mark);
+  const unmarkHave = useHaveStore((s) => s.unmark);
 
-  const [checked, setChecked] = useState<Set<string>>(new Set());
+  /** session-only dismissals — consolidated rows can be swiped off this run. */
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
   const [revealText, setRevealText] = useState(false);
@@ -87,17 +100,37 @@ export default function ShoppingList() {
     };
   }, [weekRecipes]);
 
-  const text = useMemo(() => instacartText(items), [items]);
+  const visibleItems = useMemo(
+    () => items.filter((i) => !dismissed.has(`item:${i.name}`)),
+    [items, dismissed],
+  );
+  const text = useMemo(() => instacartText(visibleItems), [visibleItems]);
 
-  const toggle = (set: typeof setChecked) => (name: string) =>
-    set((prev) => {
+  const haveCount = useMemo(() => {
+    let n = 0;
+    for (const i of visibleItems) if (isMarked(haveByName, i.name)) n++;
+    for (const e of extras) if (isMarked(haveByName, e.canonicalName)) n++;
+    return n;
+  }, [visibleItems, extras, haveByName]);
+
+  const buyCount = visibleItems.length + extras.length - haveCount;
+
+  const toggleExpand = (name: string) =>
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
       return next;
     });
-  const toggleCheck = toggle(setChecked);
-  const toggleExpand = toggle(setExpanded);
+
+  const toggleHave = (name: string) => {
+    if (isMarked(haveByName, name)) unmarkHave(name);
+    else markHave(name);
+  };
+
+  /** Dismiss a consolidated row for this run (session-local). */
+  const dismissItem = (name: string) =>
+    setDismissed((prev) => new Set(prev).add(`item:${name}`));
 
   const copy = async () => {
     const clip =
@@ -139,86 +172,84 @@ export default function ShoppingList() {
 
       <ScrollView contentContainerStyle={styles.body}>
         <Card style={styles.summary}>
-          <SummaryRow label="Items to buy" value={`${items.length}`} tone="accent" />
-          <SummaryRow label="Already in pantry" value="0" tone="ok" />
+          <SummaryRow label="To buy" value={`${buyCount}`} tone="accent" />
+          <SummaryRow label="Already have" value={`${haveCount}`} tone="ok" />
           <Text color="textFaint" style={styles.pantryNote}>
-            Quantities are estimates — merged across recipes, prep words and
-            juice/zest folded into the whole item. Tap a row for the math.
-            Pantry subtraction turns on with §10.
+            Tap the check on the left to mark items you already have at home —
+            before you head out. Swipe a row left to remove it from this run.
+            Items you mark often will show a “likely already have” hint next time.
           </Text>
         </Card>
 
-        {items.length === 0 ? (
+        {visibleItems.length === 0 && extras.length === 0 ? (
           <Text color="textMuted" style={styles.empty}>
             Nothing planned for this week yet. Pin recipes on the Plan tab.
           </Text>
         ) : (
-          CATEGORY_ORDER.filter((c) => items.some((i) => i.category === c)).map(
-            (cat) => (
-              <View key={cat} style={styles.section}>
-                <SectionLabel color="textMuted">{CAT_LABEL[cat]}</SectionLabel>
-                {items
-                  .filter((i) => i.category === cat)
-                  .map((item) => {
-                    const on = checked.has(item.name);
-                    const open = expanded.has(item.name);
-                    return (
-                      <Pressable
-                        key={item.name}
-                        style={styles.item}
-                        onPress={() => toggleExpand(item.name)}>
-                        <Pressable
-                          hitSlop={10}
-                          onPress={() => toggleCheck(item.name)}
-                          style={[styles.check, on && styles.checkOn]}>
-                          {on ? <Glyph name="done" size={12} color="bg" /> : null}
-                        </Pressable>
-                        <View style={styles.flex}>
-                          <Text
-                            style={on ? styles.struck : undefined}
-                            color={on ? 'textFaint' : 'text'}>
-                            {item.name}
-                          </Text>
-                          {item.math ? (
-                            <Numeric color="textFaint" style={styles.breakdown}>
-                              {item.math}
-                            </Numeric>
-                          ) : null}
-                          {open ? (
-                            <View style={styles.sources}>
-                              {item.sources.map((s, i) => (
-                                <Text
-                                  key={`${s.recipe}-${i}`}
-                                  color="textFaint"
-                                  style={styles.sourceLine}>
-                                  · {srcQty(s)} {s.text} — {s.recipe}
-                                </Text>
-                              ))}
-                            </View>
-                          ) : item.sources.length > 0 ? (
-                            <Text color="textFaint" style={styles.expandHint}>
-                              {item.sources.length} source
-                              {item.sources.length > 1 ? 's' : ''} · tap for the math
-                            </Text>
-                          ) : null}
-                        </View>
-                        <Numeric
-                          color={on ? 'textFaint' : 'text'}
-                          style={styles.qty}>
-                          {item.buy}
-                        </Numeric>
-                      </Pressable>
-                    );
-                  })}
-              </View>
-            ),
-          )
+          CATEGORY_ORDER.filter((c) =>
+            visibleItems.some((i) => i.category === c),
+          ).map((cat) => (
+            <View key={cat} style={styles.section}>
+              <SectionLabel color="textMuted">{CAT_LABEL[cat]}</SectionLabel>
+              {visibleItems
+                .filter((i) => i.category === cat)
+                .map((item) => (
+                  <ShoppingRow
+                    key={item.name}
+                    name={item.name}
+                    qty={item.buy}
+                    math={item.math ?? null}
+                    sources={item.sources}
+                    expanded={expanded.has(item.name)}
+                    onTap={() => toggleExpand(item.name)}
+                    onToggleHave={() => toggleHave(item.name)}
+                    onDelete={() => dismissItem(item.name)}
+                    marked={isMarked(haveByName, item.name)}
+                    likely={isLikelyHave(haveByName, item.name)}
+                  />
+                ))}
+            </View>
+          ))
         )}
 
+        {extras.length > 0 ? (
+          <View style={styles.section}>
+            <SectionLabel color="textMuted">Extras</SectionLabel>
+            <Text color="textFaint" style={styles.extrasCaption}>
+              Items you added outside the week’s recipes (from Pipeline ideas, etc.).
+            </Text>
+            {extras
+              .slice()
+              .sort(
+                (a, b) =>
+                  CATEGORY_ORDER.indexOf(categorizeIngredient(a.canonicalName)) -
+                    CATEGORY_ORDER.indexOf(categorizeIngredient(b.canonicalName)) ||
+                  a.canonicalName.localeCompare(b.canonicalName),
+              )
+              .map((ex) => (
+                <ShoppingRow
+                  key={ex.id}
+                  name={ex.canonicalName}
+                  qty={extraQty(ex)}
+                  math={null}
+                  origin={ex.originLabel}
+                  onTap={() => {
+                    /* extras are flat — nothing to expand */
+                  }}
+                  onToggleHave={() => toggleHave(ex.canonicalName)}
+                  onDelete={() => removeExtra(ex.id)}
+                  marked={isMarked(haveByName, ex.canonicalName)}
+                  likely={isLikelyHave(haveByName, ex.canonicalName)}
+                />
+              ))}
+          </View>
+        ) : null}
+
         <Card tone="bg2" style={styles.pantryCard}>
-          <SectionLabel color="ok">Already in pantry</SectionLabel>
+          <SectionLabel color="ok">Pantry subtraction (§10)</SectionLabel>
           <Text color="textMuted">
-            Nothing subtracted yet — the Pantry pillar (§10) feeds this.
+            “Already have” is the lightweight precursor — the Pantry pillar
+            replaces it with tracked stock and expiry.
           </Text>
         </Card>
 
@@ -256,12 +287,148 @@ export default function ShoppingList() {
           label={copied ? 'Copied ✓' : 'Copy for Instacart'}
           glyph="next"
           flex
-          disabled={items.length === 0}
+          disabled={visibleItems.length === 0}
           onPress={copy}
         />
       </BottomActionBar>
     </SafeAreaView>
   );
+}
+
+// ─── Row ────────────────────────────────────────────────────────────────────
+
+type RowProps = {
+  name: string;
+  qty: string;
+  math: string | null;
+  sources?: ShoppingSource[];
+  origin?: string | null;
+  expanded?: boolean;
+  marked: boolean;
+  likely: boolean;
+  onTap: () => void;
+  onToggleHave: () => void;
+  onDelete: () => void;
+};
+
+function ShoppingRow({
+  name,
+  qty,
+  math,
+  sources,
+  origin,
+  expanded,
+  marked,
+  likely,
+  onTap,
+  onToggleHave,
+  onDelete,
+}: RowProps) {
+  return (
+    <ReanimatedSwipeable
+      friction={2}
+      rightThreshold={32}
+      overshootRight={false}
+      renderRightActions={() => (
+        <Pressable
+          onPress={onDelete}
+          style={styles.deleteAction}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${name} from this run`}>
+          <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
+            Delete
+          </Text>
+        </Pressable>
+      )}>
+      <View style={styles.rowSurface}>
+        <Pressable style={styles.item} onPress={onTap}>
+          <Pressable
+            hitSlop={10}
+            onPress={onToggleHave}
+            style={[styles.check, marked && styles.checkOn]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: marked }}
+            accessibilityLabel={
+              marked ? `Mark not have ${name}` : `Mark already have ${name}`
+            }>
+            {marked ? <Glyph name="done" size={12} color="bg" /> : null}
+          </Pressable>
+          <View style={styles.flex}>
+            <View style={styles.nameRow}>
+              <Text
+                style={marked ? styles.struck : undefined}
+                color={marked ? 'textFaint' : 'text'}>
+                {name}
+              </Text>
+              {likely && !marked ? (
+                <Text color="textFaint" style={styles.likelyTag}>
+                  likely already have
+                </Text>
+              ) : null}
+            </View>
+            {origin ? (
+              <Text color="textFaint" style={styles.origin}>
+                {origin}
+              </Text>
+            ) : null}
+            {math ? (
+              <Numeric color="textFaint" style={styles.breakdown}>
+                {math}
+              </Numeric>
+            ) : null}
+            {expanded && sources ? (
+              <View style={styles.sources}>
+                {sources.map((s, i) => (
+                  <Text
+                    key={`${s.recipe}-${i}`}
+                    color="textFaint"
+                    style={styles.sourceLine}>
+                    · {srcQty(s)} {s.text} — {s.recipe}
+                  </Text>
+                ))}
+              </View>
+            ) : sources && sources.length > 0 ? (
+              <Text color="textFaint" style={styles.expandHint}>
+                {sources.length} source{sources.length > 1 ? 's' : ''} · tap for the math
+              </Text>
+            ) : null}
+          </View>
+          <Numeric color={marked ? 'textFaint' : 'text'} style={styles.qty}>
+            {qty}
+          </Numeric>
+        </Pressable>
+      </View>
+    </ReanimatedSwipeable>
+  );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Strikethrough state: "marked" within the current shop run (last 6h). */
+function isMarked(
+  byName: Record<string, { count: number; lastAt: Date }>,
+  name: string,
+): boolean {
+  const r = byName[name.toLowerCase().trim()];
+  if (!r) return false;
+  const at = r.lastAt instanceof Date ? r.lastAt.getTime() : new Date(r.lastAt).getTime();
+  return Date.now() - at < 6 * 60 * 60 * 1000;
+}
+
+/** Pre-shop hint: "you’ve marked this name ≥ 3× in the last 60 days." */
+function isLikelyHave(
+  byName: Record<string, { count: number; lastAt: Date }>,
+  name: string,
+): boolean {
+  const r = byName[name.toLowerCase().trim()];
+  if (!r) return false;
+  const at = r.lastAt instanceof Date ? r.lastAt.getTime() : new Date(r.lastAt).getTime();
+  const ageDays = (Date.now() - at) / 86_400_000;
+  return r.count >= 3 && ageDays <= 60;
+}
+
+function extraQty(ex: ExtraItem): string {
+  return formatAmount(ex.amount, ex.unit) || 'some';
 }
 
 function SummaryRow({
@@ -298,14 +465,18 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   pantryNote: { fontStyle: 'italic', lineHeight: 18, paddingTop: 2 },
   section: { gap: 4 },
+  rowSurface: { backgroundColor: colors.bg },
   item: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
     paddingVertical: 11,
+    paddingHorizontal: 0,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  origin: { fontSize: 11, fontStyle: 'italic', paddingTop: 2 },
   check: {
     width: 20,
     height: 20,
@@ -333,4 +504,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   hint: { fontStyle: 'italic', textAlign: 'center' },
+  extrasCaption: { fontSize: 11, fontStyle: 'italic', paddingBottom: 4 },
+  likelyTag: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    backgroundColor: colors.lineSoft,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  deleteAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    paddingHorizontal: 22,
+    gap: 6,
+  },
+  deleteLabel: { fontSize: 13 },
 });
