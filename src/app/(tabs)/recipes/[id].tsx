@@ -25,8 +25,10 @@ export default function RecipeDetail() {
   const [clean, setClean] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
 
-  const goBack = () =>
-    router.canGoBack() ? router.back() : router.replace('/recipes');
+  // Always land on the Recipes library — the back button is literally
+  // labeled "Recipes", and following history dropped users back into Plan
+  // when they tapped a meal cell to open a recipe.
+  const goBack = () => router.replace('/recipes');
 
   if (!recipe) {
     return (

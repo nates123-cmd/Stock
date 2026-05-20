@@ -198,6 +198,10 @@ export default function CaptureFlow() {
       ingredients: draft.ingredients ?? [],
       steps: draft.steps ?? [],
       tags: draft.tags ?? [],
+      // Carry the parser's extracted photo + per-serving nutrition through to
+      // the saved recipe — they were being silently dropped here.
+      imageUrl: draft.imageUrl,
+      nutrition: draft.nutrition,
       myNotes: refsNote,
       firstCookIntention: intention.trim() || undefined,
       linkedPipelineId: params.ideaId || undefined,
