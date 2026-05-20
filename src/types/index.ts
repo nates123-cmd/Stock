@@ -23,7 +23,10 @@ export type Unit =
   | (string & {}); // open set — parsers may emit others
 
 export type RecipeSource = {
-  type: 'nyt' | 'yt' | 'book' | 'mine';
+  /** Coarse category (drives the badge color); name carries the actual label. */
+  type: 'nyt' | 'yt' | 'book' | 'mine' | 'web';
+  /** Display label — derived at capture (hostname, JSON-LD publisher, etc.) and user-editable. */
+  name?: string;
   url?: string;
   author?: string;
   bookRef?: string;

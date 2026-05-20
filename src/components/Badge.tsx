@@ -9,15 +9,17 @@ const SOURCE: Record<RecipeSource['type'], { label: string; fill: ColorToken; fg
   yt: { label: 'YouTube', fill: 'accentSoft', fg: 'bg' }, // light tomato (≈pink)
   book: { label: 'Book', fill: 'ok', fg: 'bg' }, // olive/green
   mine: { label: 'Mine', fill: 'accent', fg: 'bg' }, // tomato
+  web: { label: 'Web', fill: 'lineSoft', fg: 'text' }, // muted
 };
 
-/** Source provenance pill (spec §6). */
+/** Source provenance pill (spec §6). Prefers source.name (e.g. "Bon Appétit",
+ *  "King Arthur Baking") when set; falls back to the type label. */
 export function SourceBadge({ source }: { source: RecipeSource }) {
   const s = SOURCE[source.type];
   return (
     <View style={[styles.badge, { backgroundColor: colors[s.fill] }]}>
       <Text variant="sectionLabel" color={s.fg} style={styles.badgeText}>
-        {s.label}
+        {source.name ?? s.label}
       </Text>
     </View>
   );

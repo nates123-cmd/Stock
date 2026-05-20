@@ -18,6 +18,10 @@ export type JsonLdRecipe = {
   serves?: number;
   totalMinutes?: number;
   tags: string[];
+  /** schema.org publisher.name — stronger source-label signal than hostname */
+  publisher?: string;
+  /** schema.org author.name — fallback when no publisher */
+  author?: string;
 };
 
 type Json = Record<string, unknown>;
@@ -49,6 +53,18 @@ function isoToMinutes(v: unknown): number | undefined {
   const m = String(v ?? '').match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?/);
   if (!m || (!m[1] && !m[2] && !m[3])) return undefined;
   return (+(m[1] ?? 0)) * 1440 + (+(m[2] ?? 0)) * 60 + +(m[3] ?? 0);
+}
+
+/** publisher / author can be a string, an Organization/Person, or an array. */
+function resolveName(v: unknown): string | undefined {
+  if (!v) return undefined;
+  if (typeof v === 'string') return decodeEntities(v) || undefined;
+  if (Array.isArray(v)) return resolveName(v[0]);
+  if (typeof v === 'object') {
+    const n = (v as Json).name;
+    return typeof n === 'string' ? decodeEntities(n) || undefined : undefined;
+  }
+  return undefined;
 }
 
 function resolveImage(img: unknown): string | undefined {
@@ -181,5 +197,7 @@ export function extractRecipeJsonLd(html: string): JsonLdRecipe | null {
         ? (isoToMinutes(r.cookTime) ?? 0) + (isoToMinutes(r.prepTime) ?? 0)
         : undefined),
     tags,
+    publisher: resolveName(r.publisher),
+    author: resolveName(r.author),
   };
 }

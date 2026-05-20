@@ -21,12 +21,49 @@ export function hasApiKey(): boolean {
   return !!process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
 }
 
+/**
+ * Friendly names for well-known cooking sites — recognized by hostname
+ * regardless of subdomain. Anything not in the map falls back to a
+ * tidied hostname (so a recipe from `homemade-pizza.com` becomes
+ * "homemade-pizza.com", not just generic "Mine").
+ */
+const KNOWN_SOURCES: { match: RegExp; name: string; type?: RecipeSource['type'] }[] = [
+  { match: /\bcooking\.nytimes\.com$/i, name: 'NYT Cooking', type: 'nyt' },
+  { match: /\bnytimes\.com$/i, name: 'The New York Times', type: 'nyt' },
+  { match: /\b(youtube\.com|youtu\.be)$/i, name: 'YouTube', type: 'yt' },
+  { match: /\bseriouseats\.com$/i, name: 'Serious Eats' },
+  { match: /\bbonappetit\.com$/i, name: 'Bon Appétit' },
+  { match: /\bkingarthurbaking\.com$/i, name: 'King Arthur Baking' },
+  { match: /\bfood52\.com$/i, name: 'Food52' },
+  { match: /\bsmittenkitchen\.com$/i, name: 'Smitten Kitchen' },
+  { match: /\bminimalistbaker\.com$/i, name: 'Minimalist Baker' },
+  { match: /\bbbcgoodfood\.com$/i, name: 'BBC Good Food' },
+  { match: /\bbbc\.co\.uk$/i, name: 'BBC Food' },
+  { match: /\ballrecipes\.com$/i, name: 'AllRecipes' },
+  { match: /\bfood\.com$/i, name: 'Food.com' },
+  { match: /\bepicurious\.com$/i, name: 'Epicurious' },
+  { match: /\bthekitchn\.com$/i, name: 'The Kitchn' },
+  { match: /\bfoodnetwork\.com$/i, name: 'Food Network' },
+  { match: /\bdelish\.com$/i, name: 'Delish' },
+  { match: /\bsimplyrecipes\.com$/i, name: 'Simply Recipes' },
+  { match: /\bnytcooking\.com$/i, name: 'NYT Cooking', type: 'nyt' },
+];
+
 /** Classify provenance from a URL (spec §6 "Detected" badge). */
 export function detectSource(url?: string): RecipeSource {
   if (!url) return { type: 'mine' };
-  if (/cooking\.nytimes\.com/i.test(url)) return { type: 'nyt', url };
-  if (/youtube\.com|youtu\.be/i.test(url)) return { type: 'yt', url };
-  return { type: 'mine', url };
+  let host: string;
+  try {
+    host = new URL(url).hostname.replace(/^www\./i, '');
+  } catch {
+    return { type: 'mine', url };
+  }
+  for (const k of KNOWN_SOURCES) {
+    if (k.match.test(host)) {
+      return { type: k.type ?? 'web', url, name: k.name };
+    }
+  }
+  return { type: 'web', url, name: host };
 }
 
 const SYSTEM = `You convert a recipe into STRICT JSON, no prose, no markdown.
@@ -153,7 +190,11 @@ export async function parseRecipeFromUrl(url: string): Promise<ParsedRecipeDraft
     const text =
       `${ld.title ?? ''}\n\nIngredients:\n${ld.ingredients.join('\n')}\n\n` +
       `Method:\n${ld.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}`;
-    const draft = await parseRecipeFromText(text, source);
+    // schema.org publisher/author is a stronger source label than hostname —
+    // upgrade the detected source with it before parsing.
+    const ldName = ld.publisher || ld.author;
+    const enhancedSource = ldName ? { ...source, name: ldName } : source;
+    const draft = await parseRecipeFromText(text, enhancedSource);
     return {
       ...draft,
       title: draft.title || ld.title,

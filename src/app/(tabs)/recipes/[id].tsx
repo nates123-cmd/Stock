@@ -15,6 +15,7 @@ const SOURCE_NAME: Record<RecipeSource['type'], string> = {
   yt: 'YouTube',
   book: 'the book',
   mine: 'mine',
+  web: 'the web',
 };
 
 export default function RecipeDetail() {
@@ -24,6 +25,9 @@ export default function RecipeDetail() {
   const save = useRecipeStore((s) => s.save);
   const [clean, setClean] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [editingSource, setEditingSource] = useState(false);
+  const [sourceNameInput, setSourceNameInput] = useState('');
+  const [sourceUrlInput, setSourceUrlInput] = useState('');
 
   // Always land on the Recipes library — the back button is literally
   // labeled "Recipes", and following history dropped users back into Plan
@@ -62,7 +66,15 @@ export default function RecipeDetail() {
         </Heading>
 
         <View style={styles.metaRow}>
-          <SourceBadge source={recipe.source} />
+          <Pressable
+            onPress={() => {
+              setSourceNameInput(recipe.source.name ?? '');
+              setSourceUrlInput(recipe.source.url ?? '');
+              setEditingSource(true);
+            }}
+            hitSlop={6}>
+            <SourceBadge source={recipe.source} />
+          </Pressable>
           {mods > 0 ? (
             <Numeric color="accent">
               {mods} {mods === 1 ? 'mod' : 'mods'}
@@ -72,6 +84,52 @@ export default function RecipeDetail() {
           {time ? <Numeric color="textMuted">~{time}</Numeric> : null}
           <Numeric color="textMuted">cooked {recipe.cookCount}×</Numeric>
         </View>
+
+        {editingSource ? (
+          <Card style={styles.sourceEdit}>
+            <SectionLabel color="textMuted">Source</SectionLabel>
+            <TextInput
+              value={sourceNameInput}
+              onChangeText={setSourceNameInput}
+              placeholder="e.g. NYT Cooking, Bon Appétit, Grandma"
+              placeholderTextColor={colors.textFaint}
+              style={styles.sourceField}
+            />
+            <TextInput
+              value={sourceUrlInput}
+              onChangeText={setSourceUrlInput}
+              placeholder="https://… (optional)"
+              placeholderTextColor={colors.textFaint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              style={styles.sourceField}
+            />
+            <View style={styles.sourceEditRow}>
+              <Pressable onPress={() => setEditingSource(false)} hitSlop={8}>
+                <Text variant="bodyStrong" color="textMuted">
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={async () => {
+                  const name = sourceNameInput.trim() || undefined;
+                  const url = sourceUrlInput.trim() || undefined;
+                  await save({
+                    ...recipe,
+                    source: { ...recipe.source, name, url },
+                    modifiedAt: new Date(),
+                  });
+                  setEditingSource(false);
+                }}
+                hitSlop={8}>
+                <Text variant="bodyStrong" color="accent">
+                  Save
+                </Text>
+              </Pressable>
+            </View>
+          </Card>
+        ) : null}
 
         {recipe.nutrition ? <NutritionCard n={recipe.nutrition} /> : null}
 
@@ -280,7 +338,7 @@ function SourceLink({ source }: { source: RecipeSource }) {
     return (
       <Pressable onPress={() => Linking.openURL(source.url as string)}>
         <Text color="accent" style={styles.link}>
-          → Original recipe ({SOURCE_NAME[source.type]})
+          → Original recipe ({source.name ?? SOURCE_NAME[source.type]})
         </Text>
       </Pressable>
     );
@@ -346,6 +404,23 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   link: { paddingTop: 22 },
+  sourceEdit: { marginTop: 8, gap: 10 },
+  sourceField: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.bg2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.text,
+  },
+  sourceEditRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 18,
+    paddingTop: 2,
+  },
   hero: {
     width: '100%',
     height: 200,
