@@ -580,9 +580,9 @@ function ShoppingRow({
                   likely already have
                 </Text>
               ) : null}
-              {sources && sources.length > 0 && !expanded ? (
-                <Text color="textFaint" style={styles.sourceCount}>
-                  ({sources.length})
+              {sources && sources.length > 0 ? (
+                <Text color="accent" style={styles.sourceCount}>
+                  ({sources.length}) {expanded ? 'hide' : 'details'}…
                 </Text>
               ) : null}
             </View>
