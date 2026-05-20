@@ -228,12 +228,6 @@ export default function ShoppingList() {
         <Card style={styles.summary}>
           <SummaryRow label="To buy" value={`${buyCount}`} tone="accent" />
           <SummaryRow label="Already have" value={`${haveCount}`} tone="ok" />
-          <Text color="textFaint" style={styles.pantryNote}>
-            Everything below is what you’re shopping for. Tap a row’s check —
-            or swipe right — to drop something you already have. Swipe left
-            to delete a row entirely. Long-press for more (incl. “Always
-            have” to keep an item out of every future list).
-          </Text>
         </Card>
 
         {visibleItems.length === 0 && extras.length === 0 ? (
@@ -744,7 +738,6 @@ const styles = StyleSheet.create({
   body: { padding: layout.screenPadding, paddingBottom: 30, gap: 16 },
   summary: { gap: 10 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  pantryNote: { fontStyle: 'italic', lineHeight: 18, paddingTop: 2 },
   section: { gap: 4 },
   rowSurface: { backgroundColor: colors.bg },
   item: {
