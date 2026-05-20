@@ -64,6 +64,7 @@ export default function ShoppingList() {
   /** session-only dismissals — consolidated rows can be swiped off this run. */
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [haveOpen, setHaveOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [revealText, setRevealText] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -207,12 +208,14 @@ export default function ShoppingList() {
           </Text>
         ) : (
           CATEGORY_ORDER.filter((c) =>
-            visibleItems.some((i) => i.category === c),
+            visibleItems.some(
+              (i) => i.category === c && !isMarked(haveByName, i.name),
+            ),
           ).map((cat) => (
             <View key={cat} style={styles.section}>
               <SectionLabel color="textMuted">{CAT_LABEL[cat]}</SectionLabel>
               {visibleItems
-                .filter((i) => i.category === cat)
+                .filter((i) => i.category === cat && !isMarked(haveByName, i.name))
                 .map((item) => (
                   <ShoppingRow
                     key={item.name}
@@ -224,7 +227,7 @@ export default function ShoppingList() {
                     onTap={() => toggleExpand(item.name)}
                     onToggleHave={() => toggleHave(item.name)}
                     onDelete={() => dismissItem(item.name)}
-                    marked={isMarked(haveByName, item.name)}
+                    marked={false}
                     likely={isLikelyHave(haveByName, item.name)}
                   />
                 ))}
@@ -232,13 +235,14 @@ export default function ShoppingList() {
           ))
         )}
 
-        {extras.length > 0 ? (
+        {extras.some((e) => !isMarked(haveByName, e.canonicalName)) ? (
           <View style={styles.section}>
             <SectionLabel color="textMuted">Extras</SectionLabel>
             <Text color="textFaint" style={styles.extrasCaption}>
               Items you added outside the week’s recipes (from Pipeline ideas, etc.).
             </Text>
             {extras
+              .filter((e) => !isMarked(haveByName, e.canonicalName))
               .slice()
               .sort(
                 (a, b) =>
@@ -258,18 +262,77 @@ export default function ShoppingList() {
                   }}
                   onToggleHave={() => toggleHave(ex.canonicalName)}
                   onDelete={() => removeExtra(ex.id)}
-                  marked={isMarked(haveByName, ex.canonicalName)}
+                  marked={false}
                   likely={isLikelyHave(haveByName, ex.canonicalName)}
                 />
               ))}
           </View>
         ) : null}
 
+        {haveCount > 0 ? (
+          <View style={styles.section}>
+            <Pressable
+              onPress={() => setHaveOpen((v) => !v)}
+              style={styles.haveHeader}
+              accessibilityRole="button"
+              accessibilityLabel={
+                haveOpen
+                  ? 'Collapse already-have list'
+                  : 'Expand already-have list'
+              }>
+              <SectionLabel color="ok">
+                Already have · {haveCount}
+              </SectionLabel>
+              <Glyph
+                name="expand"
+                size={14}
+                color="ok"
+                style={haveOpen ? undefined : styles.haveCaretClosed}
+              />
+            </Pressable>
+            {haveOpen ? (
+              <>
+                {visibleItems
+                  .filter((i) => isMarked(haveByName, i.name))
+                  .map((item) => (
+                    <ShoppingRow
+                      key={`have:${item.name}`}
+                      name={item.name}
+                      qty={item.buy}
+                      math={null}
+                      onTap={() => toggleHave(item.name)}
+                      onToggleHave={() => toggleHave(item.name)}
+                      onDelete={() => dismissItem(item.name)}
+                      marked
+                      likely={false}
+                    />
+                  ))}
+                {extras
+                  .filter((e) => isMarked(haveByName, e.canonicalName))
+                  .map((ex) => (
+                    <ShoppingRow
+                      key={`have:${ex.id}`}
+                      name={ex.canonicalName}
+                      qty={extraQty(ex)}
+                      math={null}
+                      origin={ex.originLabel}
+                      onTap={() => toggleHave(ex.canonicalName)}
+                      onToggleHave={() => toggleHave(ex.canonicalName)}
+                      onDelete={() => removeExtra(ex.id)}
+                      marked
+                      likely={false}
+                    />
+                  ))}
+              </>
+            ) : null}
+          </View>
+        ) : null}
+
         <Card tone="bg2" style={styles.pantryCard}>
           <SectionLabel color="ok">Pantry subtraction (§10)</SectionLabel>
           <Text color="textMuted">
-            “Already have” is the lightweight precursor — the Pantry pillar
-            replaces it with tracked stock and expiry.
+            The Pantry pillar replaces this with tracked stock + expiry —
+            “Already have” is its lightweight precursor.
           </Text>
         </Card>
 
@@ -525,6 +588,13 @@ const styles = StyleSheet.create({
   },
   hint: { fontStyle: 'italic', textAlign: 'center' },
   extrasCaption: { fontSize: 11, fontStyle: 'italic', paddingBottom: 4 },
+  haveHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  haveCaretClosed: { transform: [{ rotate: '-90deg' }] },
   likelyTag: {
     fontSize: 11,
     fontStyle: 'italic',
