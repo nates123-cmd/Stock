@@ -581,7 +581,7 @@ function ShoppingRow({
                 </Text>
               ) : null}
               {sources && sources.length > 0 ? (
-                <Text color="accent" style={styles.sourceCount}>
+                <Text color="textMuted" style={styles.sourceCount}>
                   ({sources.length})
                 </Text>
               ) : null}
