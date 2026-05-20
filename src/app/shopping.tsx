@@ -104,7 +104,27 @@ export default function ShoppingList() {
     () => items.filter((i) => !dismissed.has(`item:${i.name}`)),
     [items, dismissed],
   );
-  const text = useMemo(() => instacartText(visibleItems), [visibleItems]);
+
+  /** Lines actually destined for the cart — everything visible (consolidated
+   *  + extras) minus what the user has already marked as on-hand. Both the
+   *  Copy-for-Instacart text and the "To buy" counter read from this list,
+   *  so they always agree. */
+  const buyLines = useMemo<ShoppingLine[]>(() => {
+    const fromItems = visibleItems.filter((i) => !isMarked(haveByName, i.name));
+    const fromExtras: ShoppingLine[] = extras
+      .filter((e) => !isMarked(haveByName, e.canonicalName))
+      .map((e) => ({
+        name: e.canonicalName,
+        category: categorizeIngredient(e.canonicalName),
+        buy: extraQty(e),
+        math: '',
+        sources: [],
+        confidence: 'summed' as const,
+      }));
+    return [...fromItems, ...fromExtras];
+  }, [visibleItems, extras, haveByName]);
+
+  const text = useMemo(() => instacartText(buyLines), [buyLines]);
 
   const haveCount = useMemo(() => {
     let n = 0;
@@ -113,7 +133,7 @@ export default function ShoppingList() {
     return n;
   }, [visibleItems, extras, haveByName]);
 
-  const buyCount = visibleItems.length + extras.length - haveCount;
+  const buyCount = buyLines.length;
 
   const toggleExpand = (name: string) =>
     setExpanded((prev) => {
@@ -287,7 +307,7 @@ export default function ShoppingList() {
           label={copied ? 'Copied ✓' : 'Copy for Instacart'}
           glyph="next"
           flex
-          disabled={visibleItems.length === 0}
+          disabled={buyLines.length === 0}
           onPress={copy}
         />
       </BottomActionBar>
