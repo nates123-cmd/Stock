@@ -15,6 +15,7 @@ import {
 import { colors, layout, type ColorToken } from '@/design';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
+import { useAuthStore } from '@/store/auth';
 import type { Meal, PlanEntry, Recipe } from '@/types';
 import {
   addWeeks,
@@ -79,6 +80,7 @@ export default function PlanScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
+      <AccountBar />
       {/* Week nav */}
       <View style={styles.weeknav}>
         <Pressable onPress={() => setWeekStart((w) => addWeeks(w, -1))} hitSlop={10}>
@@ -196,6 +198,30 @@ export default function PlanScreen() {
         ) : null}
       </Overlay>
     </SafeAreaView>
+  );
+}
+
+function AccountBar() {
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  return (
+    <Pressable
+      // Cast: expo's typedRoutes generates .expo/types/router.d.ts only on
+      // `expo start`; `expo export` doesn't refresh it, so a newly-added route
+      // isn't in the typed Href union yet. Runtime resolution works fine.
+      onPress={() => router.push('/sign-in' as never)}
+      hitSlop={8}
+      style={styles.accountBar}>
+      {user ? (
+        <Text variant="sectionLabel" color="textMuted">
+          ✓ {user.email}
+        </Text>
+      ) : (
+        <Text variant="sectionLabel" color="accent">
+          Sign in to sync →
+        </Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -326,6 +352,11 @@ function ManageSheet({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  accountBar: {
+    alignItems: 'flex-end',
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: 10,
+  },
   weeknav: {
     flexDirection: 'row',
     alignItems: 'center',

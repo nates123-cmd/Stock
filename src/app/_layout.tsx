@@ -14,6 +14,10 @@ import { usePlanStore } from '@/store/plan';
 import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
 import { useCookStore } from '@/store/cooks';
+import { useAuthStore } from '@/store/auth';
+// Side-effect import: cloud sync wires itself to auth-state changes the
+// moment this module loads. No-op when SUPABASE_* env vars are unset.
+import '@/lib/sync';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -41,16 +45,19 @@ export default function RootLayout() {
   const hydratePantry = usePantryStore((s) => s.hydrate);
   const hydratePipeline = usePipelineStore((s) => s.hydrate);
   const hydrateCooks = useCookStore((s) => s.hydrate);
+  const hydrateAuth = useAuthStore((s) => s.hydrate);
   useEffect(() => {
     // Hydrate the local-first stores: native = SQLite (+ seed first run),
     // web = IndexedDB (+ seed first run) — Stock is a real PWA, see
-    // project_stock_is_a_pwa.
+    // project_stock_is_a_pwa. hydrateAuth pulls the persisted Supabase
+    // session and subscribes to auth changes; sync layer rides on top.
     hydrateRecipes();
     hydratePlan();
     hydratePantry();
     hydratePipeline();
     hydrateCooks();
-  }, [hydrateRecipes, hydratePlan, hydratePantry, hydratePipeline, hydrateCooks]);
+    hydrateAuth();
+  }, [hydrateRecipes, hydratePlan, hydratePantry, hydratePipeline, hydrateCooks, hydrateAuth]);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -80,6 +87,10 @@ export default function RootLayout() {
             />
             <Stack.Screen
               name="pantry-paste"
+              options={{ headerShown: false, presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="sign-in"
               options={{ headerShown: false, presentation: 'modal' }}
             />
             <Stack.Screen
