@@ -3,6 +3,10 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+// Inside a Swipeable, RN's Pressable consumes pointer events before the Pan
+// handler can pick them up — swaps below use gesture-handler's Pressable so
+// the swipe actually registers on web.
+import { Pressable as GHPressable } from 'react-native-gesture-handler';
 import {
   Text,
   Heading,
@@ -371,7 +375,7 @@ function MealCell({
   const tone = entry.status === 'planned' && !experimental ? 'primary' : experimental ? 'warn' : 'muted';
 
   return (
-    <Pressable
+    <GHPressable
       onPress={onPress}
       style={[styles.cell, stateStyle, small && styles.cellSmall]}>
       <MealMarker meal={meal} tone={tone} />
@@ -384,7 +388,7 @@ function MealCell({
         {title}
       </Text>
       {experimental ? <Text variant="sectionLabel" color="warn">exp</Text> : null}
-    </Pressable>
+    </GHPressable>
   );
 }
 

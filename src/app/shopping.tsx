@@ -3,6 +3,10 @@ import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 're
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+// Inside a Swipeable, use gesture-handler's Pressable instead of RN's — the
+// RN one consumes pointer events before Pan can pick them up, so swipes
+// silently no-op on web.
+import { Pressable as GHPressable } from 'react-native-gesture-handler';
 import {
   Text,
   Heading,
@@ -535,12 +539,12 @@ function ShoppingRow({
         </Pressable>
       )}>
       <View style={styles.rowSurface}>
-        <Pressable
+        <GHPressable
           style={styles.item}
           onPress={onTap}
           onLongPress={onLongPress}
           delayLongPress={350}>
-          <Pressable
+          <GHPressable
             hitSlop={10}
             onPress={onToggleHave}
             // Polarity: filled = "shopping for it" (the default), empty =
@@ -555,7 +559,7 @@ function ShoppingRow({
                 : `Drop ${name} — already have it`
             }>
             {!marked ? <Glyph name="done" size={12} color="bg" /> : null}
-          </Pressable>
+          </GHPressable>
           <View style={styles.flex}>
             <View style={styles.nameRow}>
               <Text color={marked ? 'textFaint' : 'text'}>
@@ -601,7 +605,7 @@ function ShoppingRow({
           <Numeric color={marked ? 'textFaint' : 'text'} style={styles.qty}>
             {qty}
           </Numeric>
-        </Pressable>
+        </GHPressable>
       </View>
     </ReanimatedSwipeable>
   );
