@@ -1,8 +1,10 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import ReanimatedSwipeable, {
+  type SwipeableMethods,
+} from 'react-native-gesture-handler/ReanimatedSwipeable';
 // Inside a Swipeable, RN's Pressable consumes pointer events before the Pan
 // handler can pick them up — swaps below use gesture-handler's Pressable so
 // the swipe actually registers on web.
@@ -287,22 +289,28 @@ function SwipeableMeal({
   onDelete?: () => void;
   children: ReactNode;
 }) {
+  const swipeRef = useRef<SwipeableMethods | null>(null);
   if (!onDelete) return <>{children}</>;
   return (
     <ReanimatedSwipeable
-      friction={2}
-      rightThreshold={32}
+      ref={swipeRef}
+      friction={1.5}
+      rightThreshold={48}
       overshootRight={false}
+      onSwipeableOpen={() => {
+        // Snap back first so the row animation finishes cleanly even though
+        // the parent will unmount us when removeEntry runs.
+        swipeRef.current?.close();
+        onDelete();
+      }}
       renderRightActions={() => (
-        <Pressable
-          onPress={onDelete}
+        <View
           style={styles.deleteAction}
-          accessibilityRole="button"
-          accessibilityLabel="Delete meal from plan">
+          accessibilityLabel="Swipe to delete meal from plan">
           <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
             Delete
           </Text>
-        </Pressable>
+        </View>
       )}>
       {children}
     </ReanimatedSwipeable>

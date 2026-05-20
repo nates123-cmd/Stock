@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import ReanimatedSwipeable, {
+  type SwipeableMethods,
+} from 'react-native-gesture-handler/ReanimatedSwipeable';
 // Inside a Swipeable, use gesture-handler's Pressable instead of RN's — the
 // RN one consumes pointer events before Pan can pick them up, so swipes
 // silently no-op on web.
@@ -505,38 +507,48 @@ function ShoppingRow({
   onDelete,
   onLongPress,
 }: RowProps) {
+  // Swipe-to-commit: a sufficient swipe in either direction fires the action
+  // and snaps the row closed. The labels in the action panels are the
+  // affordance, not the trigger — no second tap required.
+  const swipeRef = useRef<SwipeableMethods | null>(null);
+  const handleOpen = (dir: 'left' | 'right') => {
+    // Close first so the row animates back; the action fires once the
+    // close has had a chance to start (avoids the panel "hanging" open
+    // when the parent re-renders after the state change).
+    swipeRef.current?.close();
+    if (dir === 'left') onToggleHave();
+    else onDelete();
+  };
   return (
     <ReanimatedSwipeable
-      friction={2}
-      leftThreshold={32}
-      rightThreshold={32}
+      ref={swipeRef}
+      friction={1.5}
+      leftThreshold={48}
+      rightThreshold={48}
       overshootLeft={false}
       overshootRight={false}
+      onSwipeableOpen={handleOpen}
       renderLeftActions={() => (
-        <Pressable
-          onPress={onToggleHave}
+        <View
           style={styles.haveAction}
-          accessibilityRole="button"
           accessibilityLabel={
             marked
-              ? `Move ${name} back to the shopping list`
-              : `Drop ${name} — already have it`
+              ? `Swipe to move ${name} back to the shopping list`
+              : `Swipe to drop ${name} — already have it`
           }>
           <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
             {marked ? 'To buy' : 'Have'}
           </Text>
-        </Pressable>
+        </View>
       )}
       renderRightActions={() => (
-        <Pressable
-          onPress={onDelete}
+        <View
           style={styles.deleteAction}
-          accessibilityRole="button"
-          accessibilityLabel={`Delete ${name} from this run`}>
+          accessibilityLabel={`Swipe to delete ${name} from this run`}>
           <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
             Delete
           </Text>
-        </Pressable>
+        </View>
       )}>
       <View style={styles.rowSurface}>
         <GHPressable
