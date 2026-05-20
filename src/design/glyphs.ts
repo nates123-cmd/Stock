@@ -29,4 +29,5 @@ export type GlyphName = keyof typeof glyph;
 export const mealMarker = {
   dinner: 'D', // primary — espresso-filled disk
   breakfast: 'B', // secondary — cream/outlined disk
+  lunch: 'L', // secondary — cream/outlined disk (sibling of breakfast)
 } as const;

@@ -34,7 +34,10 @@ export default function PlanPicker() {
   const router = useRouter();
   const params = useLocalSearchParams<{ date: string; meal: Meal }>();
   const date = useMemo(() => new Date(params.date), [params.date]);
-  const meal: Meal = params.meal === 'breakfast' ? 'breakfast' : 'dinner';
+  const meal: Meal =
+    params.meal === 'breakfast' || params.meal === 'lunch'
+      ? params.meal
+      : 'dinner';
 
   const recipes = useRecipeStore((s) => s.recipes);
   const setRecipe = usePlanStore((s) => s.setRecipe);

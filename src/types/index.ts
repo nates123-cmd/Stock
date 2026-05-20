@@ -169,7 +169,7 @@ export type PantryItem = {
   originalInstacartText?: string;
 };
 
-export type Meal = 'breakfast' | 'dinner';
+export type Meal = 'breakfast' | 'lunch' | 'dinner';
 
 export type PlanEntry = {
   id: string;

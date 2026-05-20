@@ -114,6 +114,7 @@ export default function PlanScreen() {
           const today = isSameDay(day, new Date());
           const key = dateKey(day);
           const breakfast = entryFor(key, 'breakfast');
+          const lunch = entryFor(key, 'lunch');
           const dinner = entryFor(key, 'dinner');
           const { dow, date } = dayLabel(day);
           return (
@@ -142,9 +143,27 @@ export default function PlanScreen() {
                   </SwipeableMeal>
                 ) : !readOnly ? (
                   <Pressable
-                    style={styles.addBreakfast}
+                    style={styles.addSide}
                     onPress={() => openPicker(day, 'breakfast')}>
                     <Text color="textFaint">+ breakfast</Text>
+                  </Pressable>
+                ) : null}
+
+                {lunch ? (
+                  <SwipeableMeal
+                    onDelete={readOnly ? undefined : () => removeEntry(lunch.id)}>
+                    <MealCell
+                      entry={lunch}
+                      meal="lunch"
+                      recipe={recipeById.get(lunch.recipeId ?? '')}
+                      onPress={() => setManage(lunch)}
+                    />
+                  </SwipeableMeal>
+                ) : !readOnly ? (
+                  <Pressable
+                    style={styles.addSide}
+                    onPress={() => openPicker(day, 'lunch')}>
+                    <Text color="textFaint">+ lunch</Text>
                   </Pressable>
                 ) : null}
 
@@ -287,18 +306,20 @@ function SwipeableMeal({
 }
 
 function MealMarker({ meal, tone }: { meal: Meal; tone: 'primary' | 'muted' | 'warn' }) {
-  const letter = meal === 'dinner' ? 'D' : 'B';
+  // B / L are secondary (cream/outlined); D is primary (espresso-filled).
+  const letter = meal === 'dinner' ? 'D' : meal === 'lunch' ? 'L' : 'B';
+  const isPrimary = meal === 'dinner';
   const bg =
     tone === 'warn'
       ? colors.warn
       : tone === 'muted'
         ? 'transparent'
-        : meal === 'dinner'
+        : isPrimary
           ? colors.text
           : 'transparent';
-  const border = tone === 'muted' ? colors.textFaint : meal === 'breakfast' ? colors.line : bg;
+  const border = tone === 'muted' ? colors.textFaint : !isPrimary ? colors.line : bg;
   const fg: ColorToken =
-    meal === 'dinner' && tone === 'primary' ? 'bg' : tone === 'muted' ? 'textFaint' : 'text';
+    isPrimary && tone === 'primary' ? 'bg' : tone === 'muted' ? 'textFaint' : 'text';
   return (
     <View style={[styles.marker, { backgroundColor: bg, borderColor: border }]}>
       <Text variant="sectionLabel" color={fg}>
@@ -321,7 +342,8 @@ function MealCell({
   onPress: () => void;
   readOnly?: boolean;
 }) {
-  const small = meal === 'breakfast';
+  // Breakfast + lunch are the small/secondary cells; dinner is the main row.
+  const small = meal !== 'dinner';
 
   if (!entry) {
     return (
@@ -471,7 +493,7 @@ const styles = StyleSheet.create({
   emptyText: { fontStyle: 'italic' },
   cellTitle: { flex: 1 },
   strike: { textDecorationLine: 'line-through' },
-  addBreakfast: {
+  addSide: {
     minHeight: 32,
     justifyContent: 'center',
     paddingHorizontal: 14,
