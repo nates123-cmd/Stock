@@ -25,7 +25,7 @@ import { formatMinutes } from '@/lib/format';
 import { uid } from '@/lib/id';
 import type { Cook, Recipe, Step } from '@/types';
 
-type Mode = 'focused' | 'glance';
+type Mode = 'focused' | 'glance' | 'notes';
 type Phase = 'cooking' | 'post';
 
 function contextLine(cookNumber: number): string {
@@ -52,9 +52,9 @@ export default function CookScreen() {
   );
   const cookNumber = (recipe?.cookCount ?? 0) + 1;
 
-  // Auto-routing (spec §7): ≤2 → Focused, ≥3 → Glance. Toggle overrides;
-  // auto-routing wins each fresh entry (not remembered).
-  const [mode, setMode] = useState<Mode>(cookNumber >= 3 ? 'glance' : 'focused');
+  // Default to Glance; user toggles to Focused for step-by-step or Notes
+  // for jotting observations during the cook (saved as Cook.note on finish).
+  const [mode, setMode] = useState<Mode>('glance');
   const [stepIndex, setStepIndex] = useState(0);
   const [doneSteps, setDoneSteps] = useState<Set<number>>(new Set());
   const [scrubOpen, setScrubOpen] = useState(false);
@@ -95,7 +95,9 @@ export default function CookScreen() {
       durationMinutes,
       note: note.trim() || undefined,
       modifications: [], // in-cook scaling/edits arrive with Bench (spec §9)
-      mode,
+      // Cook.mode is the cooking style — if they happened to finish from the
+      // Notes view, fall back to Glance (the default).
+      mode: mode === 'notes' ? 'glance' : mode,
     };
     await recordCook(cook);
     await saveRecipe({ ...recipe, cookCount: recipe.cookCount + 1, modifiedAt: finishedAt });
@@ -156,6 +158,13 @@ export default function CookScreen() {
       <View style={styles.modeBar}>
         <View style={styles.toggle}>
           <Pressable
+            onPress={() => setMode('glance')}
+            style={[styles.toggleBtn, mode === 'glance' && styles.toggleOn]}>
+            <Text variant="bodyStrong" color={mode === 'glance' ? 'bg' : 'textMuted'}>
+              Glance
+            </Text>
+          </Pressable>
+          <Pressable
             onPress={() => setMode('focused')}
             style={[styles.toggleBtn, mode === 'focused' && styles.toggleOn]}>
             <Text variant="bodyStrong" color={mode === 'focused' ? 'bg' : 'textMuted'}>
@@ -163,10 +172,10 @@ export default function CookScreen() {
             </Text>
           </Pressable>
           <Pressable
-            onPress={() => setMode('glance')}
-            style={[styles.toggleBtn, mode === 'glance' && styles.toggleOn]}>
-            <Text variant="bodyStrong" color={mode === 'glance' ? 'bg' : 'textMuted'}>
-              Glance
+            onPress={() => setMode('notes')}
+            style={[styles.toggleBtn, mode === 'notes' && styles.toggleOn]}>
+            <Text variant="bodyStrong" color={mode === 'notes' ? 'bg' : 'textMuted'}>
+              Notes
             </Text>
           </Pressable>
         </View>
@@ -192,7 +201,7 @@ export default function CookScreen() {
             else setStepIndex((i) => i + 1);
           }}
         />
-      ) : (
+      ) : mode === 'glance' ? (
         <GlanceBody
           recipe={recipe}
           steps={steps}
@@ -204,6 +213,8 @@ export default function CookScreen() {
           onClearTimer={clearTimer}
           onMarkCooked={finishCook}
         />
+      ) : (
+        <NotesBody recipe={recipe} note={note} setNote={setNote} />
       )}
 
       {/* Scrub overlay */}
@@ -445,6 +456,42 @@ function GlanceBody({
 }
 
 /* ---------- Post-cook ---------- */
+/* ---------- Notes (in-cook) ---------- */
+function NotesBody({
+  recipe,
+  note,
+  setNote,
+}: {
+  recipe: Recipe;
+  note: string;
+  setNote: (s: string) => void;
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.notesBody} keyboardShouldPersistTaps="handled">
+      {recipe.myNotes ? (
+        <Card style={styles.notesRecipeCard}>
+          <SectionLabel color="textMuted">My notes on this recipe</SectionLabel>
+          <Text color="textMuted" style={styles.notesRecipeText}>
+            {recipe.myNotes}
+          </Text>
+        </Card>
+      ) : null}
+      <SectionLabel color="textMuted">This cook</SectionLabel>
+      <Text color="textFaint" style={styles.notesHint}>
+        Jot down what's working or what to change next time — saved with this cook when you mark it done.
+      </Text>
+      <TextInput
+        value={note}
+        onChangeText={setNote}
+        multiline
+        placeholder="More garlic. Underbaked by 2 minutes. Doubled the lemon."
+        placeholderTextColor={colors.textFaint}
+        style={styles.notesInput}
+      />
+    </ScrollView>
+  );
+}
+
 function PostCook({
   recipe,
   stepCount,
@@ -526,8 +573,29 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     padding: 3,
   },
-  toggleBtn: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 999 },
+  toggleBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999 },
   toggleOn: { backgroundColor: colors.accent },
+  notesBody: {
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: 16,
+    paddingBottom: 40,
+    gap: 12,
+  },
+  notesRecipeCard: { gap: 8 },
+  notesRecipeText: { lineHeight: 20 },
+  notesHint: { fontStyle: 'italic', lineHeight: 18 },
+  notesInput: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.bg2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 180,
+    fontSize: 15,
+    color: colors.text,
+    textAlignVertical: 'top',
+  },
   context: {
     paddingHorizontal: layout.screenPadding,
     paddingTop: 8,
