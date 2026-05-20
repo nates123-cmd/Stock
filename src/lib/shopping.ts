@@ -99,9 +99,31 @@ buy-list. MERGE every line that refers to the same purchasable item:
 - the juice OR zest of a fruit, or "X, juiced", means you buy the fruit X
 - merge synonyms ("salted pistachios" = "chopped pistachio nuts" =
   "pistachios"; "loosely packed mint leaves" = "mint leaves")
-- do NOT merge genuinely different items (parsley vs basil vs mint)
+- MERGE grade/variety qualifiers that don't change what you'd put in the
+  cart. The shopper has ONE bottle of olive oil, ONE box of salt at home —
+  don't list two:
+    · "salt" = "kosher salt" = "sea salt" = "table salt" = "fine sea salt"
+      = "coarse salt"  →  name: "salt"
+    · "olive oil" = "extra-virgin olive oil" = "EVOO" = "virgin olive oil"
+      →  name: "olive oil"
+    · "black pepper" = "freshly ground black pepper" = "cracked pepper"
+      = "ground black pepper"  →  name: "black pepper"
+    · "sugar" = "granulated sugar" = "white sugar" = "cane sugar"
+      →  name: "sugar"
+    · "butter" = "unsalted butter" = "salted butter"  →  name: "butter"
+    · "flour" = "all-purpose flour" = "AP flour" = "plain flour"
+      →  name: "flour"
+  Only the BASE name is what gets bought; the recipes still get the variant
+  they wrote down. Roll all variants into one item with one merged 'buy'.
+- KEEP separate when the qualifier names a distinct product:
+    · "brown sugar" ≠ "sugar"; "powdered sugar" ≠ "sugar"
+    · "white pepper" ≠ "black pepper"
+    · "balsamic vinegar" ≠ "rice vinegar" ≠ "apple cider vinegar"
+    · "soy sauce" ≠ "tamari" ≠ "fish sauce"
+    · "parsley" ≠ "basil" ≠ "mint" ≠ "cilantro"
 For each merged item output:
-  name     what you'd buy, simple and plural ("lemons", "mint", "pistachios")
+  name     what you'd buy, simple and plural ("lemons", "mint", "pistachios",
+           "olive oil", "salt"); the BASE name when variants were merged
   category one of: produce, meat, dairy, bakery, pantry, frozen, other
   buy      a short human purchase quantity ("3-5 lemons", "a bunch",
            "about 250 g", "1 bag"); a range is good when estimating
@@ -193,7 +215,36 @@ export async function consolidateSmart(recipes: Recipe[]): Promise<ShoppingLine[
 /* ------------------------------------------------------------------ */
 
 const PREP =
-  /\b(chopped|minced|diced|sliced|thinly|thickly|finely|roughly|freshly|fresh|loosely|packed|torn|shaved|grated|ground|whole|ripe|large|medium|small|halved|quartered|peeled|seeded|pitted|drained|rinsed|cooked|raw|toasted|salted|unsalted|roasted|crushed|softened|melted|cold|warm|plus|more|as|needed|to|taste|for|serving|garnish|divided|optional)\b/g;
+  /\b(chopped|minced|diced|sliced|thinly|thickly|finely|roughly|freshly|fresh|loosely|packed|torn|shaved|grated|ground|whole|ripe|large|medium|small|halved|quartered|peeled|seeded|pitted|drained|rinsed|cooked|raw|toasted|salted|unsalted|roasted|crushed|softened|melted|cold|warm|plus|more|as|needed|to|taste|for|serving|garnish|divided|optional|kosher|coarse|granulated|cane|all[- ]purpose|ap|plain|extra[- ]virgin|virgin|flake|flaky)\b/gi;
+
+/**
+ * Grade-qualifier collapses applied AFTER PREP/singular normalization.
+ * Each entry says: "if the base key starts/equals X (set), rewrite to Y."
+ * The point isn't full taxonomy — it's catching the handful of pantry
+ * staples the consolidator's prompt also folds. Keeps the local fallback
+ * and the Claude pass roughly agreeing.
+ */
+const GRADE_FOLDS: { match: RegExp; canonical: string }[] = [
+  // salt: kosher salt, sea salt, table salt, fine salt → salt
+  // (after PREP strips kosher/coarse, that may already be "sea salt" or
+  // "salt" or "table salt" — match all of them.)
+  { match: /^(sea|table|fine sea|fine|flake|flaky)\s+salt$|^salt$/, canonical: 'salt' },
+  // olive oil: variants → olive oil
+  { match: /^olive oil$|^evoo$/, canonical: 'olive oil' },
+  // black pepper variants → black pepper (white pepper kept separate)
+  { match: /^(black\s+)?pepper$/, canonical: 'black pepper' },
+  // plain "sugar" (variants stripped by PREP); brown/powdered keep their prefix.
+  { match: /^sugar$/, canonical: 'sugar' },
+  // butter — unsalted/salted stripped already.
+  { match: /^butter$/, canonical: 'butter' },
+  // flour — AP/plain stripped already.
+  { match: /^flour$/, canonical: 'flour' },
+];
+
+function gradeFold(key: string): string {
+  for (const f of GRADE_FOLDS) if (f.match.test(key)) return f.canonical;
+  return key;
+}
 
 function singular(w: string): string {
   if (w.length <= 3) return w;
@@ -217,6 +268,7 @@ function baseKey(name: string): string {
     .replace(/\s+/g, ' ')
     .trim();
   s = s.split(' ').filter(Boolean).map(singular).join(' ');
+  s = gradeFold(s);
   return s || name.toLowerCase();
 }
 
