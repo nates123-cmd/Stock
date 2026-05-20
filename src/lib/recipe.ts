@@ -13,13 +13,20 @@ export function isModified(r: Recipe): boolean {
   return modCount(r) > 0;
 }
 
+/** Bench-style conversions aren't edits — they shouldn't render as diffs. */
+const isBenchConversion = (m: { reason?: string }) =>
+  m.reason?.startsWith('bench:') === true;
+
 /**
  * Inline annotation for a modified ingredient (spec §6):
  *   "· upped from 150g (Apr)"  /  "· reduced from 1¼ tsp (Apr)"
- * Uses the most recent modification.
+ * Uses the most recent modification — but skips bench/unit-conversion
+ * entries, which are data transformations, not edits.
  */
 export function ingredientAnnotation(ing: Ingredient): string | null {
-  const m = ing.modificationHistory.at(-1);
+  const m = [...ing.modificationHistory]
+    .reverse()
+    .find((x) => !isBenchConversion(x));
   if (!m) return null;
   const when = m.date instanceof Date ? ` (${monthShort(m.date)})` : '';
   const unit = ing.unit ?? '';
@@ -64,7 +71,9 @@ export function ingredientAnnotation(ing: Ingredient): string | null {
 export function priorAmount(
   ing: Ingredient,
 ): { amount: number | null; unit: string | null } | null {
-  const m = ing.modificationHistory.find((x) => x.type === 'amount');
+  const m = ing.modificationHistory.find(
+    (x) => x.type === 'amount' && !isBenchConversion(x),
+  );
   if (!m) return null;
   if (typeof m.before === 'number') {
     return { amount: m.before, unit: ing.unit };
@@ -78,7 +87,9 @@ export function priorAmount(
 
 /** The recipe's original ingredient name, for inline-diff display. */
 export function priorName(ing: Ingredient): string | null {
-  const m = ing.modificationHistory.find((x) => x.type === 'name');
+  const m = ing.modificationHistory.find(
+    (x) => x.type === 'name' && !isBenchConversion(x),
+  );
   return m && typeof m.before === 'string' ? m.before : null;
 }
 

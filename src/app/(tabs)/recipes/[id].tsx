@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Overlay } from '@/components';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, IngredientAmount, IngredientName } from '@/components';
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
-import { modCount, ingredientAnnotation, makeMod } from '@/lib/recipe';
+import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { convertToGrams } from '@/lib/parsing';
+import type { Ingredient } from '@/types';
 import { formatMinutes, formatAmount } from '@/lib/format';
 import type { Nutrition, RecipeSource } from '@/types';
 
@@ -27,6 +29,12 @@ export default function RecipeDetail() {
   const [clean, setClean] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
+  /** Conversion preview — each candidate is the ingredient + its proposed grams. */
+  const [convertPreview, setConvertPreview] = useState<
+    Array<{ ing: Ingredient; grams: number }> | null
+  >(null);
+  /** ids the user has unchecked in the preview (default = all on). */
+  const [convertOff, setConvertOff] = useState<Set<string>>(new Set());
   const [editingSource, setEditingSource] = useState(false);
   const [sourceNameInput, setSourceNameInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
@@ -51,42 +59,59 @@ export default function RecipeDetail() {
   const time = formatMinutes(recipe.yield.totalMinutes);
   const steps = [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal);
 
-  const runConvertToGrams = async () => {
+  const previewConvertToGrams = async () => {
     setConverting(true);
     setHint(null);
     try {
       const results = await convertToGrams(recipe.ingredients);
       if (results.length === 0) {
-        setHint('Nothing to convert — all amounts are already in grams (or are counted items / to-taste).');
+        setHint(
+          'Nothing to convert — all amounts are already in grams (or are counted items / to-taste).',
+        );
         return;
       }
       const byId = new Map(results.map((r) => [r.id, r.grams]));
-      const updated = recipe.ingredients.map((ing) => {
-        const grams = byId.get(ing.id);
-        if (grams == null) return ing;
-        const mod = makeMod({
-          type: 'amount',
-          before: { amount: ing.amount, unit: ing.unit },
-          after: { amount: grams, unit: 'g' },
-          reason: 'bench: converted to grams',
-        });
-        return {
-          ...ing,
-          amount: grams,
-          unit: 'g',
-          modificationHistory: [...ing.modificationHistory, mod],
-        };
-      });
-      await save({ ...recipe, ingredients: updated, modifiedAt: new Date() });
-      setHint(
-        `Converted ${results.length} ${results.length === 1 ? 'ingredient' : 'ingredients'} to grams. Tap any row to fine-tune.`,
-      );
+      const candidates = recipe.ingredients
+        .filter((i) => byId.has(i.id))
+        .map((ing) => ({ ing, grams: byId.get(ing.id) as number }));
+      setConvertPreview(candidates);
+      setConvertOff(new Set());
     } catch (e) {
       setHint(e instanceof Error ? e.message : 'Conversion failed.');
     } finally {
       setConverting(false);
     }
   };
+
+  const applyConversionPreview = async () => {
+    if (!convertPreview) return;
+    const toApply = convertPreview.filter((c) => !convertOff.has(c.ing.id));
+    if (toApply.length === 0) {
+      setConvertPreview(null);
+      return;
+    }
+    const byId = new Map(toApply.map((c) => [c.ing.id, c.grams]));
+    // Pure data update — unit conversion is a transformation, not an edit,
+    // so don't push a Modification (no strikethrough diff).
+    const updated = recipe.ingredients.map((ing) => {
+      const grams = byId.get(ing.id);
+      if (grams == null) return ing;
+      return { ...ing, amount: grams, unit: 'g' };
+    });
+    await save({ ...recipe, ingredients: updated, modifiedAt: new Date() });
+    setHint(
+      `Converted ${toApply.length} ${toApply.length === 1 ? 'ingredient' : 'ingredients'} to grams.`,
+    );
+    setConvertPreview(null);
+  };
+
+  const toggleConvertCandidate = (id: string) =>
+    setConvertOff((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -187,7 +212,7 @@ export default function RecipeDetail() {
             variant="secondary"
             flex
             disabled={converting}
-            onPress={runConvertToGrams}
+            onPress={previewConvertToGrams}
           />
           <Button label="Scale" variant="secondary" flex onPress={() => setHint('Scaling slider lands with Bench — spec §6/§9.')} />
         </View>
@@ -265,6 +290,53 @@ export default function RecipeDetail() {
           <SourceLink source={recipe.source} />
         ) : null}
       </ScrollView>
+
+      <Overlay
+        visible={convertPreview != null}
+        onClose={() => setConvertPreview(null)}>
+        {convertPreview ? (
+          <View style={styles.convertSheet}>
+            <Text variant="recipeTitle">Convert to grams</Text>
+            <Text color="textFaint" style={styles.convertHint}>
+              Uncheck anything you'd rather keep in its original units.
+            </Text>
+            <ScrollView style={styles.convertList}>
+              {convertPreview.map(({ ing, grams }) => {
+                const on = !convertOff.has(ing.id);
+                return (
+                  <Pressable
+                    key={ing.id}
+                    onPress={() => toggleConvertCandidate(ing.id)}
+                    style={styles.convertRow}>
+                    <View style={[styles.convertCheck, on && styles.convertCheckOn]}>
+                      {on ? <Glyph name="done" size={12} color="bg" /> : null}
+                    </View>
+                    <Text style={styles.convertName}>{ing.canonicalName}</Text>
+                    <Numeric color="textMuted">
+                      {formatAmount(ing.amount, ing.unit)} → {grams} g
+                    </Numeric>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <View style={styles.convertButtons}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                flex
+                onPress={() => setConvertPreview(null)}
+              />
+              <Button
+                label={`Convert ${convertPreview.length - convertOff.size}`}
+                glyph="done"
+                flex
+                disabled={convertPreview.length - convertOff.size === 0}
+                onPress={applyConversionPreview}
+              />
+            </View>
+          </View>
+        ) : null}
+      </Overlay>
     </SafeAreaView>
   );
 }
@@ -449,6 +521,29 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   link: { paddingTop: 22 },
+  convertSheet: { gap: 10 },
+  convertHint: { fontStyle: 'italic', lineHeight: 18 },
+  convertList: { maxHeight: 320 },
+  convertRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  convertCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  convertCheckOn: { backgroundColor: colors.ok, borderColor: colors.ok },
+  convertButtons: { flexDirection: 'row', gap: 10, paddingTop: 6 },
+  convertName: { flex: 1 },
   sourceEdit: { marginTop: 8, gap: 10 },
   sourceField: {
     borderWidth: 1,
