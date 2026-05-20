@@ -64,3 +64,31 @@ export async function claudePdf(
     maxTokens: 3000,
   });
 }
+
+/**
+ * Server-side URL fetch — same Edge Function, sidesteps the browser CORS
+ * wall recipe sites set so JSON-LD parsing works on web.
+ */
+export async function proxyFetch(url: string): Promise<string> {
+  if (!PROXY_URL) {
+    throw new Error('URL fetch needs the Claude proxy (EXPO_PUBLIC_CLAUDE_PROXY_URL).');
+  }
+  const res = await fetch(PROXY_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(PROXY_SECRET ? { 'x-stock-proxy-secret': PROXY_SECRET } : {}),
+    },
+    body: JSON.stringify({ fetchUrl: url }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    html?: string;
+    error?: string;
+  };
+  if (!res.ok || typeof data.html !== 'string') {
+    throw new Error(
+      `URL fetch proxy ${res.status}: ${data.error ?? 'unknown error'}`,
+    );
+  }
+  return data.html;
+}

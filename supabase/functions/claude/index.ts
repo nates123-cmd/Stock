@@ -1,24 +1,17 @@
 /**
- * Stock — Claude proxy (spec §11 / §14.2).
+ * Stock — multipurpose server-side proxy (spec §11 / §14.2).
  *
- * Why this exists: the web build must not embed EXPO_PUBLIC_ANTHROPIC_API_KEY
- * (it would be lifted from the public Pages bundle), and api.anthropic.com
- * does not allow direct browser calls (CORS). This Edge Function holds the
- * key in function secrets and forwards a constrained request shape.
+ * Why this exists: the browser can't reach api.anthropic.com OR cross-origin
+ * recipe sites (both block CORS), and the Anthropic key must not embed in
+ * the public Pages bundle. Two server-side relays in one function:
+ *   1) Claude:  POST { task, system, input, model?, maxTokens?, pdfBase64? }
+ *                  → { text }
+ *   2) URL fetch: POST { fetchUrl }
+ *                  → { html, status }
  *
- * Contract — POST JSON:
- *   { task: string, system: string, input: string,
- *     model?: "claude-haiku-4-5" | "claude-sonnet-4-6", maxTokens?: number }
- * Returns: { text: string }  |  { error: string }
- *
- * Secrets (supabase secrets set ...):
- *   ANTHROPIC_API_KEY   required — your Anthropic key
- *   STOCK_PROXY_SECRET  optional — if set, callers must send it in
- *                       `x-stock-proxy-secret`. NOTE: on a public Pages
- *                       deploy this lands in the client bundle too, so treat
- *                       it as throttling/obscurity, not real auth. The real
- *                       win is that the Anthropic key never leaves the server
- *                       — set an Anthropic spend limit as the backstop.
+ * Secrets:
+ *   ANTHROPIC_API_KEY   required for Claude branch
+ *   STOCK_PROXY_SECRET  optional shared secret; gates both branches
  */
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
@@ -63,12 +56,20 @@ Deno.serve(async (req) => {
     maxTokens?: number;
     /** base64 application/pdf — when present, sent as a document block */
     pdfBase64?: string;
+    /** URL fetch branch — when present, do a server-side GET and return html */
+    fetchUrl?: string;
   };
   try {
     body = await req.json();
   } catch {
     return json({ error: 'invalid JSON body' }, 400);
   }
+
+  // -------- URL fetch branch (sidesteps browser CORS for recipe sites). --
+  if (typeof body.fetchUrl === 'string' && body.fetchUrl) {
+    return await handleFetch(body.fetchUrl);
+  }
+  // -----------------------------------------------------------------------
 
   const system = (body.system ?? '').trim();
   const input = (body.input ?? '').trim();
@@ -138,3 +139,80 @@ Deno.serve(async (req) => {
 
   return json({ text });
 });
+
+/**
+ * Server-side URL fetch — bypasses the browser CORS wall recipe sites set.
+ * Constrained against open-relay abuse: https only, 10s timeout, 2 MB body
+ * cap, browser-shaped User-Agent so recipe sites serve the public page.
+ */
+async function handleFetch(rawUrl: string): Promise<Response> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return json({ error: 'invalid URL' }, 400);
+  }
+  if (url.protocol !== 'https:') {
+    return json({ error: 'https only' }, 400);
+  }
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  let upstream: Response;
+  try {
+    upstream = await fetch(url.toString(), {
+      headers: {
+        // Many recipe sites serve a different (or 403) payload to obvious
+        // bots — a normal-looking desktop UA gets the JSON-LD-rich page.
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      redirect: 'follow',
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    clearTimeout(timer);
+    return json(
+      { error: `fetch failed: ${e instanceof Error ? e.message : e}` },
+      502,
+    );
+  }
+  clearTimeout(timer);
+
+  const reader = upstream.body?.getReader();
+  if (!reader) return json({ error: 'empty response body' }, 502);
+
+  const CAP = 2 * 1024 * 1024;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > CAP) {
+        await reader.cancel();
+        return json({ error: 'response too large' }, 413);
+      }
+      chunks.push(value);
+    }
+  } catch (e) {
+    return json(
+      { error: `body read failed: ${e instanceof Error ? e.message : e}` },
+      502,
+    );
+  }
+
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    buf.set(c, offset);
+    offset += c.length;
+  }
+  // Best-effort UTF-8 decode; covers the vast majority of recipe sites.
+  const html = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+  return json({ html, status: upstream.status });
+}

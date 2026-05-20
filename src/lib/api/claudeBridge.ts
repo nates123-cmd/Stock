@@ -43,3 +43,10 @@ export async function claudePdf(
     cache: makeAiCache(task),
   });
 }
+
+/** Direct page fetch — native has no browser CORS to dodge. */
+export async function proxyFetch(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`URL fetch failed (HTTP ${res.status})`);
+  return await res.text();
+}

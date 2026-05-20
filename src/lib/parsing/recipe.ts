@@ -8,7 +8,7 @@
  */
 import type { Ingredient, Nutrition, Recipe, RecipeSource, Step } from '@/types';
 import { uid } from '@/lib/id';
-import { CLAUDE_AVAILABLE, claudeText, claudePdf } from '@/lib/api/claudeBridge';
+import { CLAUDE_AVAILABLE, claudeText, claudePdf, proxyFetch } from '@/lib/api/claudeBridge';
 import { localParseRecipe } from './localRecipe';
 import { extractRecipeJsonLd } from './jsonld';
 
@@ -137,8 +137,9 @@ export async function parseRecipeFromUrl(url: string): Promise<ParsedRecipeDraft
   const source = detectSource(url);
   let html = '';
   try {
-    const res = await fetch(url);
-    html = await res.text();
+    // Server-side via the proxy on web (browser blocks cross-origin recipe
+    // sites with CORS); direct fetch on native.
+    html = await proxyFetch(url);
   } catch (e) {
     console.warn('[stock] URL fetch failed', e);
     throw new Error('Could not fetch that URL. Paste the recipe text instead.');
