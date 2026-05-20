@@ -580,24 +580,26 @@ function ShoppingRow({
                   likely already have
                 </Text>
               ) : null}
-              {sources && sources.length > 0 ? (
-                <Text color="textMuted" style={styles.sourceCount}>
-                  ({sources.length})
-                </Text>
-              ) : null}
             </View>
             {origin ? (
               <Text color="textFaint" style={styles.origin}>
                 {origin}
               </Text>
             ) : null}
-            {math ? (
-              <Numeric color="textFaint" style={styles.breakdown}>
-                {math}
-              </Numeric>
+            {sources && sources.length > 0 && !expanded ? (
+              // Recipe names only — unit-free, since qty is on the right
+              // and the full breakdown is one tap away.
+              <Text color="textFaint" style={styles.recipeList} numberOfLines={2}>
+                {dedupeRecipes(sources).join(' · ')}
+              </Text>
             ) : null}
             {expanded && sources ? (
               <View style={styles.sources}>
+                {math ? (
+                  <Numeric color="textFaint" style={styles.breakdown}>
+                    {math}
+                  </Numeric>
+                ) : null}
                 {sources.map((s, i) => (
                   <Text
                     key={`${s.recipe}-${i}`}
@@ -641,6 +643,18 @@ function isLikelyHave(
   const at = r.lastAt instanceof Date ? r.lastAt.getTime() : new Date(r.lastAt).getTime();
   const ageDays = (Date.now() - at) / 86_400_000;
   return r.count >= 3 && ageDays <= 60;
+}
+
+/** Recipe names contributing to a row, in original order, deduped. */
+function dedupeRecipes(sources: ShoppingSource[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of sources) {
+    if (seen.has(s.recipe)) continue;
+    seen.add(s.recipe);
+    out.push(s.recipe);
+  }
+  return out;
 }
 
 function extraQty(ex: ExtraItem): string {
@@ -766,7 +780,7 @@ const styles = StyleSheet.create({
   breakdown: { fontSize: 12, paddingTop: 2, lineHeight: 16 },
   sources: { paddingTop: 6, gap: 3 },
   sourceLine: { fontSize: 12, lineHeight: 16 },
-  sourceCount: { fontSize: 11 },
+  recipeList: { fontSize: 12, paddingTop: 2, lineHeight: 16 },
   qty: { fontSize: 14, fontWeight: '700', marginTop: 1 },
   pantryCard: { gap: 6 },
   empty: { textAlign: 'center', paddingVertical: 40 },
