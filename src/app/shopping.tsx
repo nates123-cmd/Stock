@@ -196,9 +196,10 @@ export default function ShoppingList() {
           <SummaryRow label="To buy" value={`${buyCount}`} tone="accent" />
           <SummaryRow label="Already have" value={`${haveCount}`} tone="ok" />
           <Text color="textFaint" style={styles.pantryNote}>
-            Tap the check on the left to mark items you already have at home —
-            before you head out. Swipe a row left to remove it from this run.
-            Items you mark often will show a “likely already have” hint next time.
+            Everything below is what you’re shopping for. Tap the check to
+            drop an item you already have at home — it’ll move to the
+            “Already have” bucket. Swipe left to delete a row entirely.
+            Items you drop often will show a “likely already have” hint next time.
           </Text>
         </Card>
 
@@ -428,19 +429,22 @@ function ShoppingRow({
           <Pressable
             hitSlop={10}
             onPress={onToggleHave}
-            style={[styles.check, marked && styles.checkOn]}
+            // Polarity: filled = "shopping for it" (the default), empty =
+            // "already have it" (the user dropped it). The list IS the buy
+            // list, so the rest state is checked.
+            style={[styles.check, !marked && styles.checkOn]}
             accessibilityRole="checkbox"
-            accessibilityState={{ checked: marked }}
+            accessibilityState={{ checked: !marked }}
             accessibilityLabel={
-              marked ? `Mark not have ${name}` : `Mark already have ${name}`
+              marked
+                ? `Move ${name} back to the shopping list`
+                : `Drop ${name} — already have it`
             }>
-            {marked ? <Glyph name="done" size={12} color="bg" /> : null}
+            {!marked ? <Glyph name="done" size={12} color="bg" /> : null}
           </Pressable>
           <View style={styles.flex}>
             <View style={styles.nameRow}>
-              <Text
-                style={marked ? styles.struck : undefined}
-                color={marked ? 'textFaint' : 'text'}>
+              <Text color={marked ? 'textFaint' : 'text'}>
                 {name}
               </Text>
               {likely && !marked ? (
@@ -571,7 +575,6 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   checkOn: { backgroundColor: colors.ok, borderColor: colors.ok },
-  struck: { textDecorationLine: 'line-through' },
   breakdown: { fontSize: 12, paddingTop: 2, lineHeight: 16 },
   sources: { paddingTop: 6, gap: 3 },
   sourceLine: { fontSize: 12, lineHeight: 16 },
