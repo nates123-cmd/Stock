@@ -18,7 +18,7 @@ export function IngredientAmount({
   style?: StyleProp<TextStyle>;
 }) {
   const prior = priorAmount(ing);
-  if (prior == null) {
+  if (!prior) {
     return (
       <Numeric color="text" style={style}>
         {formatAmount(ing.amount, ing.unit) || '—'}
@@ -28,7 +28,7 @@ export function IngredientAmount({
   return (
     <Numeric color="accent" style={style}>
       <Text color="textFaint" style={styles.strike}>
-        {formatAmount(prior, ing.unit)}
+        {formatAmount(prior.amount, prior.unit) || '—'}
       </Text>
       {'  '}
       {formatAmount(ing.amount, ing.unit) || '—'}

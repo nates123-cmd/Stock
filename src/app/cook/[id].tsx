@@ -122,7 +122,16 @@ export default function CookScreen() {
   ) => {
     const mods: Modification[] = [];
     if (next.amount !== ing.amount || next.unit !== ing.unit) {
-      mods.push(makeMod({ type: 'amount', before: ing.amount, after: next.amount, cookId }));
+      // Store the full {amount, unit} pair so a unit change (cup→g) renders
+      // its diff correctly — see IngredientAmount + priorAmount.
+      mods.push(
+        makeMod({
+          type: 'amount',
+          before: { amount: ing.amount, unit: ing.unit },
+          after: { amount: next.amount, unit: next.unit },
+          cookId,
+        }),
+      );
     }
     if (next.name.toLowerCase() !== ing.canonicalName.toLowerCase()) {
       mods.push(makeMod({ type: 'name', before: ing.canonicalName, after: next.name, cookId }));

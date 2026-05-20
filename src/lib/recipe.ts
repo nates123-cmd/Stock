@@ -24,9 +24,28 @@ export function ingredientAnnotation(ing: Ingredient): string | null {
   const when = m.date instanceof Date ? ` (${monthShort(m.date)})` : '';
   const unit = ing.unit ?? '';
   if (m.type === 'amount') {
-    const before = `${m.before as number}${unit}`;
-    const verb = (m.after as number) > (m.before as number) ? 'upped' : 'reduced';
-    return `· ${verb} from ${before}${when}`;
+    // before/after may be a bare number (legacy) or {amount, unit} (current).
+    const num = (v: unknown): number | null =>
+      typeof v === 'number'
+        ? v
+        : v && typeof v === 'object' && typeof (v as { amount?: unknown }).amount === 'number'
+          ? ((v as { amount: number }).amount)
+          : null;
+    const unitOf = (v: unknown, fallback: string): string =>
+      v && typeof v === 'object' && typeof (v as { unit?: unknown }).unit === 'string'
+        ? ((v as { unit: string }).unit)
+        : fallback;
+    const beforeAmt = num(m.before);
+    const afterAmt = num(m.after);
+    const beforeUnit = unitOf(m.before, unit);
+    const beforeStr = beforeAmt != null ? `${beforeAmt}${beforeUnit}` : 'before';
+    const verb =
+      beforeAmt != null && afterAmt != null && afterAmt > beforeAmt
+        ? 'upped'
+        : beforeAmt != null && afterAmt != null && afterAmt < beforeAmt
+          ? 'reduced'
+          : 'changed';
+    return `· ${verb} from ${beforeStr}${when}`;
   }
   if (m.type === 'name') return `· renamed${when}`;
   if (m.type === 'added') return `· added${when}`;
@@ -34,10 +53,27 @@ export function ingredientAnnotation(ing: Ingredient): string | null {
   return `· edited${when}`;
 }
 
-/** The recipe's original amount, for inline-diff display (~~45g~~ 60g). */
-export function priorAmount(ing: Ingredient): number | null {
+/**
+ * The recipe's original amount + unit, for inline-diff display
+ * (~~45g~~ 60g, or ~~1 cup~~ 220g when units change too).
+ *
+ * Backwards-compatible: legacy modifications stored a bare number in
+ * `before` (with same unit); newer ones store {amount, unit} so a
+ * conversion from "1 cup" → "220g" shows both correctly.
+ */
+export function priorAmount(
+  ing: Ingredient,
+): { amount: number | null; unit: string | null } | null {
   const m = ing.modificationHistory.find((x) => x.type === 'amount');
-  return m && typeof m.before === 'number' ? m.before : null;
+  if (!m) return null;
+  if (typeof m.before === 'number') {
+    return { amount: m.before, unit: ing.unit };
+  }
+  if (m.before && typeof m.before === 'object') {
+    const b = m.before as { amount?: number | null; unit?: string | null };
+    return { amount: b.amount ?? null, unit: b.unit ?? null };
+  }
+  return null;
 }
 
 /** The recipe's original ingredient name, for inline-diff display. */

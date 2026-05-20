@@ -6,7 +6,8 @@ import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, IngredientAm
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
-import { modCount, ingredientAnnotation } from '@/lib/recipe';
+import { modCount, ingredientAnnotation, makeMod } from '@/lib/recipe';
+import { convertToGrams } from '@/lib/parsing';
 import { formatMinutes, formatAmount } from '@/lib/format';
 import type { Nutrition, RecipeSource } from '@/types';
 
@@ -25,6 +26,7 @@ export default function RecipeDetail() {
   const save = useRecipeStore((s) => s.save);
   const [clean, setClean] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [converting, setConverting] = useState(false);
   const [editingSource, setEditingSource] = useState(false);
   const [sourceNameInput, setSourceNameInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
@@ -48,6 +50,43 @@ export default function RecipeDetail() {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
   const steps = [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal);
+
+  const runConvertToGrams = async () => {
+    setConverting(true);
+    setHint(null);
+    try {
+      const results = await convertToGrams(recipe.ingredients);
+      if (results.length === 0) {
+        setHint('Nothing to convert — all amounts are already in grams (or are counted items / to-taste).');
+        return;
+      }
+      const byId = new Map(results.map((r) => [r.id, r.grams]));
+      const updated = recipe.ingredients.map((ing) => {
+        const grams = byId.get(ing.id);
+        if (grams == null) return ing;
+        const mod = makeMod({
+          type: 'amount',
+          before: { amount: ing.amount, unit: ing.unit },
+          after: { amount: grams, unit: 'g' },
+          reason: 'bench: converted to grams',
+        });
+        return {
+          ...ing,
+          amount: grams,
+          unit: 'g',
+          modificationHistory: [...ing.modificationHistory, mod],
+        };
+      });
+      await save({ ...recipe, ingredients: updated, modifiedAt: new Date() });
+      setHint(
+        `Converted ${results.length} ${results.length === 1 ? 'ingredient' : 'ingredients'} to grams. Tap any row to fine-tune.`,
+      );
+    } catch (e) {
+      setHint(e instanceof Error ? e.message : 'Conversion failed.');
+    } finally {
+      setConverting(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -142,7 +181,14 @@ export default function RecipeDetail() {
               router.push({ pathname: '/cook/[id]', params: { id: recipe.id } })
             }
           />
-          <Button label="Bench" glyph="bench" variant="secondary" flex onPress={() => setHint('Bench (convert / sub) is spec §9.')} />
+          <Button
+            label={converting ? 'Converting…' : 'To grams'}
+            glyph="bench"
+            variant="secondary"
+            flex
+            disabled={converting}
+            onPress={runConvertToGrams}
+          />
           <Button label="Scale" variant="secondary" flex onPress={() => setHint('Scaling slider lands with Bench — spec §6/§9.')} />
         </View>
         {hint ? (
