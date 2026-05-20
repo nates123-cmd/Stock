@@ -35,6 +35,8 @@ export default function RecipeDetail() {
   >(null);
   /** ids the user has unchecked in the preview (default = all on). */
   const [convertOff, setConvertOff] = useState<Set<string>>(new Set());
+  /** Non-null while the Scale overlay is open; carries the proposed serves. */
+  const [scalingTo, setScalingTo] = useState<number | null>(null);
   const [editingSource, setEditingSource] = useState(false);
   const [sourceNameInput, setSourceNameInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
@@ -112,6 +114,27 @@ export default function RecipeDetail() {
       else next.add(id);
       return next;
     });
+
+  const applyScale = async () => {
+    if (scalingTo == null || scalingTo === recipe.yield.serves || scalingTo < 1) {
+      setScalingTo(null);
+      return;
+    }
+    const ratio = scalingTo / recipe.yield.serves;
+    const updated = recipe.ingredients.map((ing) =>
+      ing.amount == null
+        ? ing
+        : { ...ing, amount: Math.round(ing.amount * ratio * 100) / 100 },
+    );
+    await save({
+      ...recipe,
+      ingredients: updated,
+      yield: { ...recipe.yield, serves: scalingTo },
+      modifiedAt: new Date(),
+    });
+    setHint(`Scaled to ${scalingTo} servings.`);
+    setScalingTo(null);
+  };
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -214,7 +237,12 @@ export default function RecipeDetail() {
             disabled={converting}
             onPress={previewConvertToGrams}
           />
-          <Button label="Scale" variant="secondary" flex onPress={() => setHint('Scaling slider lands with Bench — spec §6/§9.')} />
+          <Button
+            label="Scale"
+            variant="secondary"
+            flex
+            onPress={() => setScalingTo(recipe.yield.serves)}
+          />
         </View>
         {hint ? (
           <Text color="textMuted" style={styles.hint}>
@@ -290,6 +318,80 @@ export default function RecipeDetail() {
           <SourceLink source={recipe.source} />
         ) : null}
       </ScrollView>
+
+      <Overlay
+        visible={scalingTo != null}
+        onClose={() => setScalingTo(null)}>
+        {scalingTo != null ? (
+          <View style={styles.scaleSheet}>
+            <Text variant="recipeTitle">Scale recipe</Text>
+            <Text color="textFaint" style={styles.scaleHint}>
+              Multiplies all amounts. Tweak anything weird afterward (tap an
+              ingredient to fine-tune).
+            </Text>
+            <View style={styles.scaleControl}>
+              <Pressable
+                onPress={() => setScalingTo(Math.max(1, scalingTo - 1))}
+                style={styles.scaleBtn}
+                hitSlop={8}>
+                <Text variant="recipeTitle">−</Text>
+              </Pressable>
+              <View style={styles.scaleNumWrap}>
+                <Numeric color="text" style={styles.scaleNum}>
+                  {scalingTo}
+                </Numeric>
+                <Text color="textMuted">servings</Text>
+              </View>
+              <Pressable
+                onPress={() => setScalingTo(Math.min(99, scalingTo + 1))}
+                style={styles.scaleBtn}
+                hitSlop={8}>
+                <Text variant="recipeTitle">+</Text>
+              </Pressable>
+            </View>
+            <Text color="textMuted" style={styles.scaleRatio}>
+              {scalingTo === recipe.yield.serves
+                ? `Same as current (${recipe.yield.serves})`
+                : `${(scalingTo / recipe.yield.serves).toFixed(scalingTo / recipe.yield.serves >= 1 ? 2 : 2).replace(/\.?0+$/, '')}× from ${recipe.yield.serves}`}
+            </Text>
+            <ScrollView style={styles.scaleList}>
+              {recipe.ingredients.map((ing) => {
+                if (ing.amount == null) return null;
+                const newAmt =
+                  Math.round(
+                    ing.amount * (scalingTo / recipe.yield.serves) * 100,
+                  ) / 100;
+                return (
+                  <View key={ing.id} style={styles.scaleRow}>
+                    <Text style={styles.convertName} numberOfLines={1}>
+                      {ing.canonicalName}
+                    </Text>
+                    <Numeric color="textMuted">
+                      {formatAmount(ing.amount, ing.unit)} →{' '}
+                      {formatAmount(newAmt, ing.unit)}
+                    </Numeric>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <View style={styles.convertButtons}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                flex
+                onPress={() => setScalingTo(null)}
+              />
+              <Button
+                label="Apply"
+                glyph="done"
+                flex
+                disabled={scalingTo === recipe.yield.serves}
+                onPress={applyScale}
+              />
+            </View>
+          </View>
+        ) : null}
+      </Overlay>
 
       <Overlay
         visible={convertPreview != null}
@@ -544,6 +646,36 @@ const styles = StyleSheet.create({
   convertCheckOn: { backgroundColor: colors.ok, borderColor: colors.ok },
   convertButtons: { flexDirection: 'row', gap: 10, paddingTop: 6 },
   convertName: { flex: 1 },
+  scaleSheet: { gap: 14 },
+  scaleHint: { fontStyle: 'italic', lineHeight: 18 },
+  scaleControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 22,
+    paddingTop: 4,
+  },
+  scaleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scaleNumWrap: { alignItems: 'center', minWidth: 90 },
+  scaleNum: { fontSize: 28 },
+  scaleRatio: { textAlign: 'center', fontStyle: 'italic' },
+  scaleList: { maxHeight: 240 },
+  scaleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 7,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
   sourceEdit: { marginTop: 8, gap: 10 },
   sourceField: {
     borderWidth: 1,
