@@ -12,6 +12,7 @@ import {
   Card,
   Button,
   BottomActionBar,
+  Overlay,
 } from '@/components';
 import { colors, fonts, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
@@ -58,8 +59,10 @@ export default function ShoppingList() {
   // Subscribe to have-state so rows re-render on tap (we use the Map directly
   // for derived booleans below, but the selector keeps us reactive).
   const haveByName = useHaveStore((s) => s.byName);
+  const alwaysHaveMap = useHaveStore((s) => s.alwaysHave);
   const markHave = useHaveStore((s) => s.mark);
   const unmarkHave = useHaveStore((s) => s.unmark);
+  const setAlways = useHaveStore((s) => s.setAlways);
 
   /** session-only dismissals — consolidated rows can be swiped off this run. */
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -68,6 +71,11 @@ export default function ShoppingList() {
   const [copied, setCopied] = useState(false);
   const [revealText, setRevealText] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  /** {name, isExtraId?} for the long-press action sheet. Null = closed. */
+  const [menu, setMenu] = useState<{
+    name: string;
+    extraId: string | null;
+  } | null>(null);
 
   const weekRecipes = useMemo(() => {
     const keys = new Set(weekDays(weekStart).map(dateKey));
@@ -106,14 +114,18 @@ export default function ShoppingList() {
     [items, dismissed],
   );
 
+  /** Should this canonical name appear in the Already-have bucket? True if
+   *  the user marked it this run OR they've pinned it as "always have." */
+  const inHave = (name: string) =>
+    isMarked(haveByName, name) || alwaysHaveMap[name.toLowerCase().trim()] === true;
+
   /** Lines actually destined for the cart — everything visible (consolidated
-   *  + extras) minus what the user has already marked as on-hand. Both the
-   *  Copy-for-Instacart text and the "To buy" counter read from this list,
-   *  so they always agree. */
+   *  + extras) minus what's routed to Already-have. Both the Copy-for-Instacart
+   *  text and the "To buy" counter read from this list, so they always agree. */
   const buyLines = useMemo<ShoppingLine[]>(() => {
-    const fromItems = visibleItems.filter((i) => !isMarked(haveByName, i.name));
+    const fromItems = visibleItems.filter((i) => !inHave(i.name));
     const fromExtras: ShoppingLine[] = extras
-      .filter((e) => !isMarked(haveByName, e.canonicalName))
+      .filter((e) => !inHave(e.canonicalName))
       .map((e) => ({
         name: e.canonicalName,
         category: categorizeIngredient(e.canonicalName),
@@ -123,16 +135,31 @@ export default function ShoppingList() {
         confidence: 'summed' as const,
       }));
     return [...fromItems, ...fromExtras];
-  }, [visibleItems, extras, haveByName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems, extras, haveByName, alwaysHaveMap]);
 
   const text = useMemo(() => instacartText(buyLines), [buyLines]);
 
+  /** Always-have names NOT already represented by a row in the week's plan
+   *  or extras. We surface these as ghost rows in the Already-have bucket
+   *  so the user can verify the pinned set and remove pins from items the
+   *  current week doesn't touch. */
+  const ghostAlways = useMemo(() => {
+    const seen = new Set<string>();
+    for (const i of visibleItems) seen.add(i.name.toLowerCase().trim());
+    for (const e of extras) seen.add(e.canonicalName.toLowerCase().trim());
+    return Object.keys(alwaysHaveMap)
+      .filter((k) => !seen.has(k))
+      .sort();
+  }, [visibleItems, extras, alwaysHaveMap]);
+
   const haveCount = useMemo(() => {
-    let n = 0;
-    for (const i of visibleItems) if (isMarked(haveByName, i.name)) n++;
-    for (const e of extras) if (isMarked(haveByName, e.canonicalName)) n++;
+    let n = ghostAlways.length;
+    for (const i of visibleItems) if (inHave(i.name)) n++;
+    for (const e of extras) if (inHave(e.canonicalName)) n++;
     return n;
-  }, [visibleItems, extras, haveByName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems, extras, haveByName, alwaysHaveMap, ghostAlways]);
 
   const buyCount = buyLines.length;
 
@@ -196,10 +223,10 @@ export default function ShoppingList() {
           <SummaryRow label="To buy" value={`${buyCount}`} tone="accent" />
           <SummaryRow label="Already have" value={`${haveCount}`} tone="ok" />
           <Text color="textFaint" style={styles.pantryNote}>
-            Everything below is what you’re shopping for. Tap the check to
-            drop an item you already have at home — it’ll move to the
-            “Already have” bucket. Swipe left to delete a row entirely.
-            Items you drop often will show a “likely already have” hint next time.
+            Everything below is what you’re shopping for. Tap a row’s check —
+            or swipe right — to drop something you already have. Swipe left
+            to delete a row entirely. Long-press for more (incl. “Always
+            have” to keep an item out of every future list).
           </Text>
         </Card>
 
@@ -209,14 +236,12 @@ export default function ShoppingList() {
           </Text>
         ) : (
           CATEGORY_ORDER.filter((c) =>
-            visibleItems.some(
-              (i) => i.category === c && !isMarked(haveByName, i.name),
-            ),
+            visibleItems.some((i) => i.category === c && !inHave(i.name)),
           ).map((cat) => (
             <View key={cat} style={styles.section}>
               <SectionLabel color="textMuted">{CAT_LABEL[cat]}</SectionLabel>
               {visibleItems
-                .filter((i) => i.category === cat && !isMarked(haveByName, i.name))
+                .filter((i) => i.category === cat && !inHave(i.name))
                 .map((item) => (
                   <ShoppingRow
                     key={item.name}
@@ -228,7 +253,9 @@ export default function ShoppingList() {
                     onTap={() => toggleExpand(item.name)}
                     onToggleHave={() => toggleHave(item.name)}
                     onDelete={() => dismissItem(item.name)}
+                    onLongPress={() => setMenu({ name: item.name, extraId: null })}
                     marked={false}
+                    always={false}
                     likely={isLikelyHave(haveByName, item.name)}
                   />
                 ))}
@@ -236,14 +263,14 @@ export default function ShoppingList() {
           ))
         )}
 
-        {extras.some((e) => !isMarked(haveByName, e.canonicalName)) ? (
+        {extras.some((e) => !inHave(e.canonicalName)) ? (
           <View style={styles.section}>
             <SectionLabel color="textMuted">Extras</SectionLabel>
             <Text color="textFaint" style={styles.extrasCaption}>
               Items you added outside the week’s recipes (from Pipeline ideas, etc.).
             </Text>
             {extras
-              .filter((e) => !isMarked(haveByName, e.canonicalName))
+              .filter((e) => !inHave(e.canonicalName))
               .slice()
               .sort(
                 (a, b) =>
@@ -263,7 +290,11 @@ export default function ShoppingList() {
                   }}
                   onToggleHave={() => toggleHave(ex.canonicalName)}
                   onDelete={() => removeExtra(ex.id)}
+                  onLongPress={() =>
+                    setMenu({ name: ex.canonicalName, extraId: ex.id })
+                  }
                   marked={false}
+                  always={false}
                   likely={isLikelyHave(haveByName, ex.canonicalName)}
                 />
               ))}
@@ -294,36 +325,71 @@ export default function ShoppingList() {
             {haveOpen ? (
               <>
                 {visibleItems
-                  .filter((i) => isMarked(haveByName, i.name))
-                  .map((item) => (
-                    <ShoppingRow
-                      key={`have:${item.name}`}
-                      name={item.name}
-                      qty={item.buy}
-                      math={null}
-                      onTap={() => toggleHave(item.name)}
-                      onToggleHave={() => toggleHave(item.name)}
-                      onDelete={() => dismissItem(item.name)}
-                      marked
-                      likely={false}
-                    />
-                  ))}
+                  .filter((i) => inHave(i.name))
+                  .map((item) => {
+                    const isAlways =
+                      alwaysHaveMap[item.name.toLowerCase().trim()] === true;
+                    return (
+                      <ShoppingRow
+                        key={`have:${item.name}`}
+                        name={item.name}
+                        qty={item.buy}
+                        math={null}
+                        onTap={() => toggleHave(item.name)}
+                        onToggleHave={() => toggleHave(item.name)}
+                        onDelete={() => dismissItem(item.name)}
+                        onLongPress={() =>
+                          setMenu({ name: item.name, extraId: null })
+                        }
+                        marked
+                        always={isAlways}
+                        likely={false}
+                      />
+                    );
+                  })}
                 {extras
-                  .filter((e) => isMarked(haveByName, e.canonicalName))
-                  .map((ex) => (
-                    <ShoppingRow
-                      key={`have:${ex.id}`}
-                      name={ex.canonicalName}
-                      qty={extraQty(ex)}
-                      math={null}
-                      origin={ex.originLabel}
-                      onTap={() => toggleHave(ex.canonicalName)}
-                      onToggleHave={() => toggleHave(ex.canonicalName)}
-                      onDelete={() => removeExtra(ex.id)}
-                      marked
-                      likely={false}
-                    />
-                  ))}
+                  .filter((e) => inHave(e.canonicalName))
+                  .map((ex) => {
+                    const isAlways =
+                      alwaysHaveMap[ex.canonicalName.toLowerCase().trim()] === true;
+                    return (
+                      <ShoppingRow
+                        key={`have:${ex.id}`}
+                        name={ex.canonicalName}
+                        qty={extraQty(ex)}
+                        math={null}
+                        origin={ex.originLabel}
+                        onTap={() => toggleHave(ex.canonicalName)}
+                        onToggleHave={() => toggleHave(ex.canonicalName)}
+                        onDelete={() => removeExtra(ex.id)}
+                        onLongPress={() =>
+                          setMenu({ name: ex.canonicalName, extraId: ex.id })
+                        }
+                        marked
+                        always={isAlways}
+                        likely={false}
+                      />
+                    );
+                  })}
+                {ghostAlways.map((name) => (
+                  <ShoppingRow
+                    key={`ghost:${name}`}
+                    name={name}
+                    qty="—"
+                    math={null}
+                    onTap={() => setMenu({ name, extraId: null })}
+                    onToggleHave={() => {
+                      // Ghost row toggle = unpin always-have. (Session-mark
+                      // would be meaningless here — no buy row exists.)
+                      setAlways(name, false);
+                    }}
+                    onDelete={() => setAlways(name, false)}
+                    onLongPress={() => setMenu({ name, extraId: null })}
+                    marked
+                    always
+                    likely={false}
+                  />
+                ))}
               </>
             ) : null}
           </View>
@@ -358,6 +424,27 @@ export default function ShoppingList() {
         ) : null}
       </ScrollView>
 
+      <Overlay visible={menu !== null} onClose={() => setMenu(null)}>
+        {menu ? (
+          <RowMenu
+            name={menu.name}
+            extraId={menu.extraId}
+            isAlways={alwaysHaveMap[menu.name.toLowerCase().trim()] === true}
+            onToggleAlways={() => {
+              const k = menu.name.toLowerCase().trim();
+              setAlways(menu.name, !(alwaysHaveMap[k] === true));
+              setMenu(null);
+            }}
+            onDelete={() => {
+              if (menu.extraId) removeExtra(menu.extraId);
+              else dismissItem(menu.name);
+              setMenu(null);
+            }}
+            onClose={() => setMenu(null)}
+          />
+        ) : null}
+      </Overlay>
+
       <BottomActionBar>
         <Button
           label="Edit list"
@@ -389,10 +476,14 @@ type RowProps = {
   origin?: string | null;
   expanded?: boolean;
   marked: boolean;
+  /** Pinned by the user as "always have." Forces the row into the Already-
+   *  have bucket regardless of session state, and shows a small tag. */
+  always: boolean;
   likely: boolean;
   onTap: () => void;
   onToggleHave: () => void;
   onDelete: () => void;
+  onLongPress?: () => void;
 };
 
 function ShoppingRow({
@@ -403,16 +494,35 @@ function ShoppingRow({
   origin,
   expanded,
   marked,
+  always,
   likely,
   onTap,
   onToggleHave,
   onDelete,
+  onLongPress,
 }: RowProps) {
   return (
     <ReanimatedSwipeable
       friction={2}
+      leftThreshold={32}
       rightThreshold={32}
+      overshootLeft={false}
       overshootRight={false}
+      renderLeftActions={() => (
+        <Pressable
+          onPress={onToggleHave}
+          style={styles.haveAction}
+          accessibilityRole="button"
+          accessibilityLabel={
+            marked
+              ? `Move ${name} back to the shopping list`
+              : `Drop ${name} — already have it`
+          }>
+          <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
+            {marked ? 'To buy' : 'Have'}
+          </Text>
+        </Pressable>
+      )}
       renderRightActions={() => (
         <Pressable
           onPress={onDelete}
@@ -425,7 +535,11 @@ function ShoppingRow({
         </Pressable>
       )}>
       <View style={styles.rowSurface}>
-        <Pressable style={styles.item} onPress={onTap}>
+        <Pressable
+          style={styles.item}
+          onPress={onTap}
+          onLongPress={onLongPress}
+          delayLongPress={350}>
           <Pressable
             hitSlop={10}
             onPress={onToggleHave}
@@ -447,7 +561,11 @@ function ShoppingRow({
               <Text color={marked ? 'textFaint' : 'text'}>
                 {name}
               </Text>
-              {likely && !marked ? (
+              {always ? (
+                <Text color="ok" style={styles.alwaysTag}>
+                  always
+                </Text>
+              ) : likely && !marked ? (
                 <Text color="textFaint" style={styles.likelyTag}>
                   likely already have
                 </Text>
@@ -516,6 +634,66 @@ function isLikelyHave(
 
 function extraQty(ex: ExtraItem): string {
   return formatAmount(ex.amount, ex.unit) || 'some';
+}
+
+// ─── Long-press action sheet ────────────────────────────────────────────────
+
+function RowMenu({
+  name,
+  extraId,
+  isAlways,
+  onToggleAlways,
+  onDelete,
+  onClose,
+}: {
+  name: string;
+  extraId: string | null;
+  isAlways: boolean;
+  onToggleAlways: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <View style={styles.menu}>
+      <Text variant="bodyStrong" style={styles.menuTitle}>
+        {name}
+      </Text>
+      <Text color="textFaint" style={styles.menuHint}>
+        {isAlways
+          ? 'Pinned as “always have.” Auto-routes to the Already-have bucket every run.'
+          : 'Pin items you always have at home (salt, oil, tahini, parmesan…) so they stop landing on the buy list.'}
+      </Text>
+      <Pressable
+        style={styles.menuItem}
+        onPress={onToggleAlways}
+        accessibilityRole="button">
+        <Text variant="bodyStrong" color={isAlways ? 'accent' : 'text'}>
+          {isAlways ? 'Remove “always have” pin' : 'Always have'}
+        </Text>
+        <Text color="textFaint" style={styles.menuItemHint}>
+          {isAlways
+            ? 'Will surface as a regular buy item again.'
+            : 'Will surface as already-have on every shopping list.'}
+        </Text>
+      </Pressable>
+      <Pressable
+        style={styles.menuItem}
+        onPress={onDelete}
+        accessibilityRole="button">
+        <Text variant="bodyStrong" color="accent">
+          {extraId ? 'Delete from extras' : 'Delete from this run'}
+        </Text>
+        <Text color="textFaint" style={styles.menuItemHint}>
+          {extraId
+            ? 'Permanent — removes the row from your Extras store.'
+            : 'Hides the row for this shopping run only.'}
+        </Text>
+      </Pressable>
+      <Pressable style={styles.menuCancel} onPress={onClose}>
+        <Text color="textMuted">Cancel</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 function SummaryRow({
@@ -614,5 +792,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     gap: 6,
   },
+  haveAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.ok,
+    paddingHorizontal: 22,
+    gap: 6,
+  },
   deleteLabel: { fontSize: 13 },
+  alwaysTag: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    backgroundColor: colors.bg2,
+    borderWidth: 1,
+    borderColor: colors.ok,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  menu: { gap: 6, paddingTop: 4 },
+  menuTitle: { fontSize: 16, paddingBottom: 2 },
+  menuHint: { fontStyle: 'italic', lineHeight: 18, paddingBottom: 6 },
+  menuItem: {
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    gap: 2,
+  },
+  menuItemHint: { fontSize: 12, fontStyle: 'italic' },
+  menuCancel: {
+    paddingTop: 16,
+    paddingBottom: 2,
+    alignItems: 'center',
+  },
 });

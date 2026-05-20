@@ -18,28 +18,40 @@ export type HaveRecord = { count: number; lastAt: Date };
 
 type HaveState = {
   byName: Record<string, HaveRecord>;
+  /** Canonical names the user has pinned as "I always have this." These
+   *  auto-route to the Already-have bucket on every shopping list and never
+   *  surface as buy items. Per-canonical-name; persists across runs. */
+  alwaysHave: Record<string, true>;
   hydrated: boolean;
   hydrate: () => Promise<void>;
   mark: (name: string) => void;
   unmark: (name: string) => void;
   isMarked: (name: string) => boolean;
   likelyHave: (name: string) => boolean;
+  setAlways: (name: string, on: boolean) => void;
+  isAlways: (name: string) => boolean;
 };
 
 const key = (s: string) => s.toLowerCase().trim();
 
 export const useHaveStore = create<HaveState>((set, get) => ({
   byName: {},
+  alwaysHave: {},
   hydrated: false,
 
   hydrate: async () => {
     if (get().hydrated) return;
     if (!NATIVE) {
-      const saved = await webPersist.load<Record<string, HaveRecord>>('have-counts');
-      if (saved) {
-        set({ byName: saved, hydrated: true });
-        return;
-      }
+      const [saved, alw] = await Promise.all([
+        webPersist.load<Record<string, HaveRecord>>('have-counts'),
+        webPersist.load<Record<string, true>>('always-have'),
+      ]);
+      set({
+        byName: saved ?? {},
+        alwaysHave: alw ?? {},
+        hydrated: true,
+      });
+      return;
     }
     set({ hydrated: true });
   },
@@ -83,8 +95,23 @@ export const useHaveStore = create<HaveState>((set, get) => ({
     const ageDays = (Date.now() - r.lastAt.getTime()) / 86_400_000;
     return r.count >= 3 && ageDays <= 60;
   },
+
+  setAlways: (name, on) => {
+    const k = key(name);
+    set((s) => {
+      const next = { ...s.alwaysHave };
+      if (on) next[k] = true;
+      else delete next[k];
+      return { alwaysHave: next };
+    });
+  },
+
+  isAlways: (name) => get().alwaysHave[key(name)] === true,
 }));
 
 if (!NATIVE) {
-  useHaveStore.subscribe((s) => void webPersist.save('have-counts', s.byName));
+  useHaveStore.subscribe((s) => {
+    void webPersist.save('have-counts', s.byName);
+    void webPersist.save('always-have', s.alwaysHave);
+  });
 }
