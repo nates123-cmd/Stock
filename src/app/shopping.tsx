@@ -580,6 +580,11 @@ function ShoppingRow({
                   likely already have
                 </Text>
               ) : null}
+              {sources && sources.length > 0 && !expanded ? (
+                <Text color="textFaint" style={styles.sourceCount}>
+                  ({sources.length})
+                </Text>
+              ) : null}
             </View>
             {origin ? (
               <Text color="textFaint" style={styles.origin}>
@@ -602,10 +607,6 @@ function ShoppingRow({
                   </Text>
                 ))}
               </View>
-            ) : sources && sources.length > 0 ? (
-              <Text color="textFaint" style={styles.expandHint}>
-                {sources.length} source{sources.length > 1 ? 's' : ''} · tap for the math
-              </Text>
             ) : null}
           </View>
           <Numeric color={marked ? 'textFaint' : 'text'} style={styles.qty}>
@@ -765,7 +766,7 @@ const styles = StyleSheet.create({
   breakdown: { fontSize: 12, paddingTop: 2, lineHeight: 16 },
   sources: { paddingTop: 6, gap: 3 },
   sourceLine: { fontSize: 12, lineHeight: 16 },
-  expandHint: { fontSize: 11, paddingTop: 3, fontStyle: 'italic' },
+  sourceCount: { fontSize: 11 },
   qty: { fontSize: 14, fontWeight: '700', marginTop: 1 },
   pantryCard: { gap: 6 },
   empty: { textAlign: 'center', paddingVertical: 40 },
