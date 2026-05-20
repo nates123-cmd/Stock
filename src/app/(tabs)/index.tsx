@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import {
   Text,
   Heading,
@@ -40,7 +41,17 @@ export default function PlanScreen() {
   const [manage, setManage] = useState<PlanEntry | null>(null);
 
   const readOnly = isPastWeek(weekStart);
-  const days = useMemo(() => weekDays(weekStart), [weekStart]);
+  // For the current week, hide already-past days — today should always be
+  // the first row. Other weeks (past read-only, future planning) show all
+  // 7 days so the grid is still a complete week-at-a-glance.
+  const days = useMemo(() => {
+    const all = weekDays(weekStart);
+    const isCurrentWeek =
+      startOfWeek(new Date()).getTime() === weekStart.getTime();
+    if (!isCurrentWeek) return all;
+    const todayKey = dateKey(new Date());
+    return all.filter((d) => dateKey(d) >= todayKey);
+  }, [weekStart]);
   const recipeById = useMemo(() => {
     const m = new Map<string, Recipe>();
     recipes.forEach((r) => m.set(r.id, r));
@@ -111,7 +122,7 @@ export default function PlanScreen() {
                 <Text
                   variant="sectionLabel"
                   color={today ? 'accent' : 'textMuted'}>
-                  {dow}
+                  {today ? 'TODAY' : dow}
                 </Text>
                 <Numeric color={today ? 'accent' : 'text'} style={styles.dayNum}>
                   {date}
@@ -120,12 +131,15 @@ export default function PlanScreen() {
 
               <View style={styles.cells}>
                 {breakfast ? (
-                  <MealCell
-                    entry={breakfast}
-                    meal="breakfast"
-                    recipe={recipeById.get(breakfast.recipeId ?? '')}
-                    onPress={() => setManage(breakfast)}
-                  />
+                  <SwipeableMeal
+                    onDelete={readOnly ? undefined : () => removeEntry(breakfast.id)}>
+                    <MealCell
+                      entry={breakfast}
+                      meal="breakfast"
+                      recipe={recipeById.get(breakfast.recipeId ?? '')}
+                      onPress={() => setManage(breakfast)}
+                    />
+                  </SwipeableMeal>
                 ) : !readOnly ? (
                   <Pressable
                     style={styles.addBreakfast}
@@ -134,19 +148,34 @@ export default function PlanScreen() {
                   </Pressable>
                 ) : null}
 
-                <MealCell
-                  entry={dinner}
-                  meal="dinner"
-                  recipe={dinner ? recipeById.get(dinner.recipeId ?? '') : undefined}
-                  onPress={() =>
-                    dinner ? setManage(dinner) : openPicker(day, 'dinner')
-                  }
-                  readOnly={readOnly}
-                />
+                {dinner ? (
+                  <SwipeableMeal
+                    onDelete={readOnly ? undefined : () => removeEntry(dinner.id)}>
+                    <MealCell
+                      entry={dinner}
+                      meal="dinner"
+                      recipe={recipeById.get(dinner.recipeId ?? '')}
+                      onPress={() => setManage(dinner)}
+                      readOnly={readOnly}
+                    />
+                  </SwipeableMeal>
+                ) : (
+                  <MealCell
+                    entry={undefined}
+                    meal="dinner"
+                    onPress={() => openPicker(day, 'dinner')}
+                    readOnly={readOnly}
+                  />
+                )}
               </View>
             </View>
           );
         })}
+        {days.length === 0 ? (
+          <Text color="textMuted" style={styles.emptyWeek}>
+            Nothing left in this week. Tap → for next week.
+          </Text>
+        ) : null}
       </ScrollView>
 
       <BottomActionBar
@@ -222,6 +251,38 @@ function AccountBar() {
         </Text>
       )}
     </Pressable>
+  );
+}
+
+/** Wraps a pinned MealCell with the swipe-left → Delete affordance. When
+ *  `onDelete` is omitted (e.g., a read-only past week) the swipe is a no-op
+ *  — children render bare so we don't pay the Reanimated overhead. */
+function SwipeableMeal({
+  onDelete,
+  children,
+}: {
+  onDelete?: () => void;
+  children: ReactNode;
+}) {
+  if (!onDelete) return <>{children}</>;
+  return (
+    <ReanimatedSwipeable
+      friction={2}
+      rightThreshold={32}
+      overshootRight={false}
+      renderRightActions={() => (
+        <Pressable
+          onPress={onDelete}
+          style={styles.deleteAction}
+          accessibilityRole="button"
+          accessibilityLabel="Delete meal from plan">
+          <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
+            Delete
+          </Text>
+        </Pressable>
+      )}>
+      {children}
+    </ReanimatedSwipeable>
   );
 }
 
@@ -425,4 +486,15 @@ const styles = StyleSheet.create({
   },
   sheet: { gap: 12 },
   removeRow: { alignItems: 'center', paddingVertical: 8 },
+  deleteAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    paddingHorizontal: 22,
+    borderRadius: 12,
+    marginLeft: 6,
+  },
+  deleteLabel: { fontSize: 13 },
+  emptyWeek: { textAlign: 'center', paddingVertical: 24, fontStyle: 'italic' },
 });
