@@ -22,6 +22,8 @@ import { usePlanStore } from '@/store/plan';
 import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
 import { useCookStore } from '@/store/cooks';
+import { useHaveStore, type HaveRecord } from '@/store/have';
+import { useExtrasStore, type ExtraItem } from '@/store/extras';
 import { reviveRecipeDates } from './db/repositories';
 import type { Cook, PantryItem, PipelineIdea, PlanEntry } from '@/types';
 
@@ -30,7 +32,9 @@ type CloudTable =
   | 'plan_entries'
   | 'pantry_items'
   | 'pipeline_ideas'
-  | 'cooks';
+  | 'cooks'
+  | 'have_records'
+  | 'extras';
 
 /* ---------- Date revivers (JSON → Date; mirrors repositories.ts) ---------- */
 
@@ -70,6 +74,85 @@ function reviveCook(c: Cook): Cook {
   });
   if (c.recipeVersionSnapshot) reviveRecipeDates(c.recipeVersionSnapshot);
   return c;
+}
+
+function reviveExtraItem(e: ExtraItem): ExtraItem {
+  e.addedAt = new Date(e.addedAt as unknown as string);
+  return e;
+}
+
+/**
+ * Have store cloud shape: one row per canonical name, carrying the count,
+ * the last-marked timestamp, and the always-have pin flag. byName +
+ * alwaysHave in the store get rebuilt from these on cloud → local.
+ */
+type HaveRow = {
+  id: string;
+  count: number;
+  lastAt: Date;
+  always: boolean;
+};
+
+function reviveHaveRow(r: HaveRow): HaveRow {
+  r.lastAt = new Date(r.lastAt as unknown as string);
+  return r;
+}
+
+// Item-shaped projection of useHaveStore state, cached so unchanged rows
+// keep their reference identity (the sync diff is ref-equality based).
+const haveRowCache = new Map<string, HaveRow>();
+
+function readHaveRows(): HaveRow[] {
+  const s = useHaveStore.getState();
+  const out: HaveRow[] = [];
+  const seen = new Set<string>();
+
+  for (const [id, rec] of Object.entries(s.byName)) {
+    seen.add(id);
+    const always = s.alwaysHave[id] === true;
+    const cached = haveRowCache.get(id);
+    if (
+      cached &&
+      cached.count === rec.count &&
+      cached.lastAt.getTime() === rec.lastAt.getTime() &&
+      cached.always === always
+    ) {
+      out.push(cached);
+    } else {
+      const next: HaveRow = { id, count: rec.count, lastAt: rec.lastAt, always };
+      haveRowCache.set(id, next);
+      out.push(next);
+    }
+  }
+  // Always-pinned names that have no count entry (pinned but never marked).
+  for (const id of Object.keys(s.alwaysHave)) {
+    if (seen.has(id)) continue;
+    const cached = haveRowCache.get(id);
+    if (cached && cached.count === 0 && cached.always === true) {
+      out.push(cached);
+    } else {
+      const next: HaveRow = { id, count: 0, lastAt: new Date(0), always: true };
+      haveRowCache.set(id, next);
+      out.push(next);
+    }
+  }
+  // Evict cache entries that no longer exist in either map.
+  for (const id of Array.from(haveRowCache.keys())) {
+    if (!s.byName[id] && !s.alwaysHave[id]) haveRowCache.delete(id);
+  }
+  return out;
+}
+
+function replaceHaveRows(next: HaveRow[]): void {
+  const byName: Record<string, HaveRecord> = {};
+  const alwaysHave: Record<string, true> = {};
+  haveRowCache.clear();
+  for (const row of next) {
+    haveRowCache.set(row.id, row);
+    if (row.count > 0) byName[row.id] = { count: row.count, lastAt: row.lastAt };
+    if (row.always) alwaysHave[row.id] = true;
+  }
+  useHaveStore.setState({ byName, alwaysHave });
 }
 
 /* ---------- Per-collection wiring ---------- */
@@ -124,6 +207,21 @@ const collections: Collection[] = [
     subscribe: (l) => useCookStore.subscribe(l),
     revive: (raw) => reviveCook(raw as Cook),
   },
+  {
+    table: 'have_records',
+    read: readHaveRows,
+    replace: (next) => replaceHaveRows(next as HaveRow[]),
+    subscribe: (l) => useHaveStore.subscribe(l),
+    revive: (raw) => reviveHaveRow(raw as HaveRow),
+  },
+  {
+    table: 'extras',
+    read: () => useExtrasStore.getState().items,
+    replace: (next) =>
+      useExtrasStore.setState({ items: next as ExtraItem[] }),
+    subscribe: (l) => useExtrasStore.subscribe(l),
+    revive: (raw) => reviveExtraItem(raw as ExtraItem),
+  },
 ];
 
 /* ---------- State ---------- */
@@ -140,6 +238,8 @@ const refCache: Record<CloudTable, Map<string, Item>> = {
   pantry_items: new Map(),
   pipeline_ideas: new Map(),
   cooks: new Map(),
+  have_records: new Map(),
+  extras: new Map(),
 };
 
 // Echo guard: when Realtime delivers a change, we add its id to suppress
