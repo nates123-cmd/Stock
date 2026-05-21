@@ -1,3 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Parchment backdrop on the html + body so the overscroll area (iOS Safari
+ * elastic bounce + the strip behind the address bar before scroll) doesn't
+ * flash white. Matches design token --bg (spec §2). Without this, scrolling
+ * the Plan view past the top exposed the browser-default white body bg.
+ */
+html,
+body {
+  background-color: #F5EDDD;
+}

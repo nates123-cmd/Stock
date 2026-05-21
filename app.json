@@ -7,7 +7,7 @@
     "icon": "./assets/icons/icon-1024.png",
     "scheme": "stock",
     "userInterfaceStyle": "light",
-    "backgroundColor": "#ede1c4",
+    "backgroundColor": "#F5EDDD",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
@@ -16,7 +16,7 @@
     "android": {
       "userInterfaceStyle": "light",
       "adaptiveIcon": {
-        "backgroundColor": "#ede1c4",
+        "backgroundColor": "#F5EDDD",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -27,7 +27,7 @@
     "web": {
       "output": "single",
       "favicon": "./assets/icons/icon-192.png",
-      "themeColor": "#ede1c4"
+      "themeColor": "#F5EDDD"
     },
     "plugins": [
       "expo-router",
@@ -37,7 +37,7 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ede1c4"
+          "backgroundColor": "#F5EDDD"
         }
       ],
       "expo-sqlite"
