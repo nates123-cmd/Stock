@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { create } from 'zustand';
-import type { PantryItem, PantryLocation, ShoppingCategory } from '@/types';
+import type { PantryItem, PantryLocation, PantryStatus, ShoppingCategory } from '@/types';
 import { migrate, pantryRepo } from '@/lib/db';
 import { webPersist } from '@/lib/db/webStore';
 import { uid } from '@/lib/id';
@@ -52,7 +52,17 @@ type PantryState = {
   applyPaste: (rows: PasteInput[], at?: Date) => Promise<PasteResult>;
   toggleStaple: (id: string) => Promise<void>;
   setLocation: (id: string, location: PantryLocation) => Promise<void>;
+  /** spec §10 running-low signal — sets status (+ optional note), stamps statusUpdatedAt. */
+  setStatus: (id: string, status: PantryStatus, note?: string) => Promise<void>;
+  /** Cycle fine → low → out → fine on tap. */
+  cycleStatus: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
+};
+
+const NEXT_STATUS: Record<PantryStatus, PantryStatus> = {
+  fine: 'low',
+  low: 'out',
+  out: 'fine',
 };
 
 async function persist(item: PantryItem): Promise<void> {
@@ -85,7 +95,12 @@ export const usePantryStore = create<PantryState>((set, get) => ({
       }
     }
     const saved = await webPersist.load<PantryItem[]>('pantry');
-    set({ items: saved ?? seedPantry(), hydrated: true });
+    // Backfill `status` on older persisted rows that pre-date the field
+    // (spec §10 open question #10). Leaves modern rows alone.
+    const items = (saved ?? seedPantry()).map((p) =>
+      p.status ? p : { ...p, status: 'fine' as PantryStatus, statusUpdatedAt: p.acquiredAt },
+    );
+    set({ items, hydrated: true });
   },
 
   applyPaste: async (rows, at = new Date()) => {
@@ -116,6 +131,10 @@ export const usePantryStore = create<PantryState>((set, get) => ({
           purchaseHistory,
           cycleEstimateDays: after,
           originalInstacartText: row.originalInstacartText,
+          // Restocking clears 'out' / 'low' — the user just bought more.
+          // Preserve the note (it's about the item, not the state).
+          status: 'fine',
+          statusUpdatedAt: at,
         };
         items[idx] = next;
         restocks++;
@@ -138,6 +157,8 @@ export const usePantryStore = create<PantryState>((set, get) => ({
           expiresAt: computeExpiry(at, freshness),
           purchaseHistory: [at],
           originalInstacartText: row.originalInstacartText,
+          status: 'fine',
+          statusUpdatedAt: at,
         };
         items.push(item);
         added++;
@@ -171,6 +192,29 @@ export const usePantryStore = create<PantryState>((set, get) => ({
       }),
     }));
     if (updated) await persist(updated);
+  },
+
+  setStatus: async (id, status, note) => {
+    let updated: PantryItem | undefined;
+    set((s) => ({
+      items: s.items.map((p) => {
+        if (p.id !== id) return p;
+        updated = {
+          ...p,
+          status,
+          statusNote: note !== undefined ? note || undefined : p.statusNote,
+          statusUpdatedAt: new Date(),
+        };
+        return updated;
+      }),
+    }));
+    if (updated) await persist(updated);
+  },
+
+  cycleStatus: async (id) => {
+    const item = get().items.find((p) => p.id === id);
+    if (!item) return;
+    await get().setStatus(id, NEXT_STATUS[item.status ?? 'fine']);
   },
 
   remove: async (id) => {

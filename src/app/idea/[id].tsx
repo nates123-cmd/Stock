@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -35,7 +35,7 @@ const STATUS_TONE: Record<PipelineIdea['status'], PillTone> = {
 
 export default function IdeaDetail() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, openCart } = useLocalSearchParams<{ id: string; openCart?: string }>();
   const idea = usePipelineStore((s) => s.ideas.find((i) => i.id === id));
   const setStatus = usePipelineStore((s) => s.setStatus);
   const setBestGuess = usePipelineStore((s) => s.setBestGuess);
@@ -57,6 +57,15 @@ export default function IdeaDetail() {
   const [captureText, setCaptureText] = useState('');
   const [busy, setBusy] = useState(false);
   const [pushed, setPushed] = useState<number | null>(null);
+
+  // Pipeline list-card "+ Cart" → opens here with openCart=1 when the idea
+  // has no best-guess yet (spec §8). Auto-open the capture sheet so the
+  // user lands directly in the parse-and-add flow.
+  useEffect(() => {
+    if (openCart === '1' && idea && (idea.bestGuessIngredients ?? []).length === 0) {
+      setCaptureOpen(true);
+    }
+  }, [openCart, idea]);
 
   if (!idea) {
     return (

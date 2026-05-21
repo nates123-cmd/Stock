@@ -47,6 +47,25 @@ export function RecipeCard({ recipe, onPress }: { recipe: Recipe; onPress?: () =
             </>
           ) : null}
         </View>
+
+        {recipe.tags.length > 0 ? (
+          <View style={styles.tagRow}>
+            {recipe.tags.slice(0, 3).map((t) => (
+              <View key={t} style={styles.tag}>
+                <Text variant="sectionLabel" color="textMuted" style={styles.tagText}>
+                  {t}
+                </Text>
+              </View>
+            ))}
+            {recipe.tags.length > 3 ? (
+              <View style={styles.tag}>
+                <Text variant="sectionLabel" color="textFaint" style={styles.tagText}>
+                  +{recipe.tags.length - 3}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
       </Card>
     </Pressable>
   );
@@ -65,6 +84,14 @@ const styles = StyleSheet.create({
   title: { flex: 1 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   statRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  tagRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 },
+  tag: {
+    backgroundColor: colors.bg3,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  tagText: { letterSpacing: 0.4 },
 });
 
 export default RecipeCard;

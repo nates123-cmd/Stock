@@ -21,6 +21,7 @@ export const glyph = {
   pageLeft: '‹', // Pagination / week-nav
   pageRight: '›',
   timer: '⏱', // Timer prefix in step text
+  close: '✕', // Dismiss / close overlay
 } as const;
 
 export type GlyphName = keyof typeof glyph;

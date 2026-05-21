@@ -148,6 +148,9 @@ export type PipelineIdea = {
 
 export type PantryLocation = 'pantry' | 'fridge' | 'freezer';
 
+/** Running-low signal — spec §10. Defaults to 'fine'. */
+export type PantryStatus = 'fine' | 'low' | 'out';
+
 export type PantryItem = {
   id: string;
   /** matches Ingredient.canonicalName */
@@ -167,6 +170,12 @@ export type PantryItem = {
   /** computed from purchaseHistory */
   cycleEstimateDays?: number;
   originalInstacartText?: string;
+  /** spec §10 running-low signal. Optional on the wire — missing reads as 'fine'. */
+  status?: PantryStatus;
+  /** free-text note about the item, persisted across status changes */
+  statusNote?: string;
+  /** when status last changed; used for stale 'out' aging */
+  statusUpdatedAt?: Date;
 };
 
 export type Meal = 'breakfast' | 'lunch' | 'dinner';

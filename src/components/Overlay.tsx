@@ -1,11 +1,14 @@
-import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, type ReactNode } from 'react';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { colors, layout } from '@/design';
+import { Glyph } from './Glyph';
 
 /**
- * Sheet-up / scrub overlay primitive (spec §2 "Sheet-up overlays", §7). Dim
- * backdrop dismisses on tap; a grab handle signals draggability. (Pan-to-
- * dismiss uses gesture-handler — deferred; tap-backdrop covers v1.)
+ * Sheet-up / scrub overlay primitive (spec §2 "Sheet-up overlays", §7).
+ * Three dismissal paths, all wired (spec §6 scaler exit):
+ * - tap-backdrop (the dim area outside the panel)
+ * - Escape key on web
+ * - visible ✕ close button in the panel top-right
  */
 export function Overlay({
   visible,
@@ -18,13 +21,42 @@ export function Overlay({
   children: ReactNode;
   anchor?: 'bottom' | 'center';
 }) {
+  // ESC key dismiss on web. Listener is attached only while visible and
+  // torn down on close/unmount — no risk of leaking handlers.
+  useEffect(() => {
+    if (!visible || Platform.OS !== 'web') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [visible, onClose]);
+
   if (!visible) return null;
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <Pressable style={styles.backdrop} onPress={onClose} />
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityLabel="Close overlay"
+        accessibilityRole="button"
+      />
       <View style={[styles.panelWrap, anchor === 'center' && styles.center]}>
         <View style={[styles.panel, anchor === 'center' && styles.panelCenter]}>
           <View style={styles.handle} />
+          <Pressable
+            onPress={onClose}
+            style={styles.closeBtn}
+            hitSlop={12}
+            accessibilityLabel="Close"
+            accessibilityRole="button">
+            <Glyph name="close" size={18} color="textMuted" />
+          </Pressable>
           {children}
         </View>
       </View>
@@ -53,6 +85,16 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: colors.line,
     marginBottom: 14,
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 12,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
   },
 });
 

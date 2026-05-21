@@ -33,20 +33,39 @@ export default function RecipesLibrary() {
   const pantry = usePantryStore((s) => s.items);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('All');
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+
+  // User-tag chips, generated from the library. Ordered by frequency desc
+  // (spec §6). Excludes the canned filter tags so the two strips don't
+  // duplicate labels.
+  const userTags = useMemo(() => {
+    const cannedTagSet = new Set(Object.values(TAG_FILTER));
+    const counts = new Map<string, number>();
+    for (const r of recipes) {
+      if (r.status === 'archived') continue;
+      for (const t of r.tags) {
+        if (cannedTagSet.has(t)) continue;
+        counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  }, [recipes]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return recipes.filter((r) => {
       if (q && !r.title.toLowerCase().includes(q) && !r.tags.some((t) => t.includes(q)))
         return false;
-      if (filter === 'Modified') return isModified(r);
-      if (filter === 'Have it')
-        return canMakeNow(recipeCoverage(r.ingredients, pantry));
-      const tag = TAG_FILTER[filter];
-      if (tag) return r.tags.includes(tag);
-      return true; // All
+      if (filter === 'Modified' && !isModified(r)) return false;
+      if (filter === 'Have it' && !canMakeNow(recipeCoverage(r.ingredients, pantry)))
+        return false;
+      const cannedTag = TAG_FILTER[filter];
+      if (cannedTag && !r.tags.includes(cannedTag)) return false;
+      // User-tag filter ANDs with the canned filter (spec §6).
+      if (activeTag && !r.tags.includes(activeTag)) return false;
+      return true;
     });
-  }, [recipes, query, filter, pantry]);
+  }, [recipes, query, filter, activeTag, pantry]);
 
   const byRecent = (a: Recipe, b: Recipe) =>
     b.modifiedAt.getTime() - a.modifiedAt.getTime();
@@ -77,6 +96,22 @@ export default function RecipesLibrary() {
             ))}
           </ChipRow>
         </View>
+
+        {userTags.length > 0 ? (
+          <View style={styles.chips}>
+            <ChipRow>
+              {userTags.map((t) => (
+                <FilterChip
+                  key={t}
+                  label={t}
+                  variant="tag"
+                  active={activeTag === t}
+                  onPress={() => setActiveTag(activeTag === t ? null : t)}
+                />
+              ))}
+            </ChipRow>
+          </View>
+        ) : null}
 
         {filter === 'Have it' ? (
           <View style={styles.notice}>

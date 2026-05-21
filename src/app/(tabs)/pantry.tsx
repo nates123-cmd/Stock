@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   Screen,
@@ -11,6 +11,7 @@ import {
   Button,
   Pill,
   Glyph,
+  Overlay,
 } from '@/components';
 import { colors } from '@/design';
 import { usePantryStore } from '@/store/pantry';
@@ -22,7 +23,52 @@ import {
   isRecentlyAdded,
   shortDate,
 } from '@/lib/pantry';
-import type { PantryItem } from '@/types';
+import type { PantryItem, PantryStatus } from '@/types';
+
+/**
+ * Pantry status pill (spec §10). The right-side affordance: 'fine' renders
+ * nothing (clean default), 'low' a warn pill, 'out' an accent pill. Includes
+ * the stale-out hint ('out · 30d+') once an out flag is 30+ days old.
+ */
+function StatusPill({ status, since }: { status: PantryStatus; since?: Date }) {
+  if (!status || status === 'fine') return null;
+  const isStale =
+    status === 'out' &&
+    since &&
+    Date.now() - since.getTime() > 30 * 86_400_000;
+  return (
+    <View style={[statusStyles.pill, status === 'out' ? statusStyles.out : statusStyles.low]}>
+      <Text
+        variant="sectionLabel"
+        color={status === 'out' ? 'accent' : 'warn'}
+        style={statusStyles.label}>
+        {status}{isStale ? ' · 30d+' : ''}
+      </Text>
+    </View>
+  );
+}
+
+const statusStyles = StyleSheet.create({
+  pill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+    backgroundColor: colors.bg3,
+  },
+  out: {},
+  low: {},
+  label: { letterSpacing: 0.6 },
+});
+
+const STATUS_RANK: Record<PantryStatus, number> = { out: 0, low: 1, fine: 2 };
+function sortByStatus(items: PantryItem[]): PantryItem[] {
+  return [...items].sort((a, b) => {
+    const ra = STATUS_RANK[a.status ?? 'fine'];
+    const rb = STATUS_RANK[b.status ?? 'fine'];
+    if (ra !== rb) return ra - rb;
+    return a.canonicalName.localeCompare(b.canonicalName);
+  });
+}
 
 /**
  * Pantry list (spec §10). Sectioned by Always-have · Recently-added · Fridge ·
@@ -33,6 +79,19 @@ export default function PantryScreen() {
   const router = useRouter();
   const items = usePantryStore((s) => s.items);
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
+  const cycleStatus = usePantryStore((s) => s.cycleStatus);
+  const setStatus = usePantryStore((s) => s.setStatus);
+  const removeItem = usePantryStore((s) => s.remove);
+  const [menu, setMenu] = useState<PantryItem | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const openMenu = (it: PantryItem) => {
+    setMenu(it);
+    setNoteDraft(it.statusNote ?? '');
+  };
+  const closeMenu = () => {
+    setMenu(null);
+    setNoteDraft('');
+  };
 
   const last = useMemo(() => {
     if (items.length === 0) return null;
@@ -45,13 +104,15 @@ export default function PantryScreen() {
     return { date: latest, count };
   }, [items]);
 
-  const staples = items.filter((i) => i.isStaple);
+  // Within each section, sort by status descending (out → low → fine) so the
+  // actionable items land at the top (spec §10).
+  const staples = sortByStatus(items.filter((i) => i.isStaple));
   const loose = items.filter((i) => !i.isStaple);
-  const recent = loose.filter((i) => isRecentlyAdded(i));
+  const recent = sortByStatus(loose.filter((i) => isRecentlyAdded(i)));
   const olderThanWindow = loose.filter((i) => !isRecentlyAdded(i));
-  const fridge = olderThanWindow.filter((i) => i.location === 'fridge');
-  const freezer = olderThanWindow.filter((i) => i.location === 'freezer');
-  const shelf = olderThanWindow.filter((i) => i.location === 'pantry');
+  const fridge = sortByStatus(olderThanWindow.filter((i) => i.location === 'fridge'));
+  const freezer = sortByStatus(olderThanWindow.filter((i) => i.location === 'freezer'));
+  const shelf = sortByStatus(olderThanWindow.filter((i) => i.location === 'pantry'));
 
   return (
     <View style={styles.root}>
@@ -88,7 +149,12 @@ export default function PantryScreen() {
         {staples.length > 0 ? (
           <Section label="Always have">
             {staples.map((it) => (
-              <StapleRow key={it.id} item={it} />
+              <StapleRow
+                key={it.id}
+                item={it}
+                onCycle={() => cycleStatus(it.id)}
+                onMenu={() => openMenu(it)}
+              />
             ))}
           </Section>
         ) : null}
@@ -96,7 +162,12 @@ export default function PantryScreen() {
         {recent.length > 0 ? (
           <Section label={`Recently added · ${recent.length}`}>
             {recent.map((it) => (
-              <LooseRow key={it.id} item={it} onStaple={() => toggleStaple(it.id)} />
+              <LooseRow
+                key={it.id}
+                item={it}
+                onCycle={() => cycleStatus(it.id)}
+                onMenu={() => openMenu(it)}
+              />
             ))}
           </Section>
         ) : null}
@@ -104,7 +175,12 @@ export default function PantryScreen() {
         {fridge.length > 0 ? (
           <Section label="Fridge">
             {fridge.map((it) => (
-              <LooseRow key={it.id} item={it} onStaple={() => toggleStaple(it.id)} />
+              <LooseRow
+                key={it.id}
+                item={it}
+                onCycle={() => cycleStatus(it.id)}
+                onMenu={() => openMenu(it)}
+              />
             ))}
           </Section>
         ) : null}
@@ -112,7 +188,12 @@ export default function PantryScreen() {
         {freezer.length > 0 ? (
           <Section label="Freezer">
             {freezer.map((it) => (
-              <LooseRow key={it.id} item={it} onStaple={() => toggleStaple(it.id)} />
+              <LooseRow
+                key={it.id}
+                item={it}
+                onCycle={() => cycleStatus(it.id)}
+                onMenu={() => openMenu(it)}
+              />
             ))}
           </Section>
         ) : null}
@@ -120,7 +201,12 @@ export default function PantryScreen() {
         {shelf.length > 0 ? (
           <Section label="Pantry shelf">
             {shelf.map((it) => (
-              <LooseRow key={it.id} item={it} onStaple={() => toggleStaple(it.id)} />
+              <LooseRow
+                key={it.id}
+                item={it}
+                onCycle={() => cycleStatus(it.id)}
+                onMenu={() => openMenu(it)}
+              />
             ))}
           </Section>
         ) : null}
@@ -132,17 +218,115 @@ export default function PantryScreen() {
           </View>
         ) : null}
       </Screen>
+
+      <Overlay visible={menu != null} onClose={closeMenu}>
+        {menu ? (
+          <View style={styles.menu}>
+            <Text variant="recipeTitle" numberOfLines={1}>
+              {menu.canonicalName}
+            </Text>
+            <Text color="textFaint" style={styles.menuHint}>
+              Tap the row to cycle status (fine → low → out → fine). Use this
+              menu for direct selection, notes, or to manage the item.
+            </Text>
+
+            <View style={styles.menuStatusRow}>
+              {(['fine', 'low', 'out'] as PantryStatus[]).map((s) => {
+                const active = (menu.status ?? 'fine') === s;
+                return (
+                  <Pressable
+                    key={s}
+                    onPress={async () => {
+                      await setStatus(menu.id, s, noteDraft);
+                      closeMenu();
+                    }}
+                    style={[
+                      styles.menuStatusBtn,
+                      active && styles.menuStatusBtnActive,
+                    ]}>
+                    <Text
+                      variant="bodyStrong"
+                      color={active ? 'bg' : 'text'}>
+                      {s === 'fine' ? 'Fine' : s === 'low' ? 'Running low' : 'Out'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.noteWrap}>
+              <SectionLabel color="textMuted">Note</SectionLabel>
+              <TextInput
+                value={noteDraft}
+                onChangeText={setNoteDraft}
+                placeholder="brand: Maldon · almost gone · etc."
+                placeholderTextColor={colors.textFaint}
+                style={styles.noteInput}
+                multiline
+                onBlur={async () => {
+                  if (noteDraft !== (menu.statusNote ?? '')) {
+                    await setStatus(menu.id, menu.status ?? 'fine', noteDraft);
+                  }
+                }}
+              />
+            </View>
+
+            <Pressable
+              style={styles.menuItem}
+              onPress={async () => {
+                await toggleStaple(menu.id);
+                closeMenu();
+              }}>
+              <Text variant="bodyStrong">
+                {menu.isStaple ? 'Remove always-have' : 'Mark as always-have'}
+              </Text>
+              <Text color="textFaint" style={styles.menuItemHint}>
+                {menu.isStaple
+                  ? 'Treats this as a normal pantry item.'
+                  : 'Pin to the Always-have section.'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.menuItem}
+              onPress={async () => {
+                await removeItem(menu.id);
+                closeMenu();
+              }}>
+              <Text variant="bodyStrong" color="accent">
+                Remove from pantry
+              </Text>
+              <Text color="textFaint" style={styles.menuItemHint}>
+                Forgets this item entirely (purchase history, cycle, status).
+              </Text>
+            </Pressable>
+
+            <Pressable style={styles.menuCancel} onPress={closeMenu}>
+              <Text color="textMuted">Cancel</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </Overlay>
     </View>
   );
 }
 
-/* ---------- staple row: cycle estimate, tap for history ---------- */
-function StapleRow({ item }: { item: PantryItem }) {
+/* ---------- staple row: cycle estimate; tap = status cycle; long-press = menu ---------- */
+function StapleRow({
+  item,
+  onCycle,
+  onMenu,
+}: {
+  item: PantryItem;
+  onCycle: () => void;
+  onMenu: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const est = cycleEstimateDays(item.purchaseHistory);
   const stable = isCycleStable(item.purchaseHistory);
   const cycle = formatCycle(est);
   const expandable = !stable && item.purchaseHistory.length >= 3;
+  const status = item.status ?? 'fine';
 
   const gaps = useMemo(() => {
     const sorted = [...item.purchaseHistory].sort((a, b) => a.getTime() - b.getTime());
@@ -158,16 +342,16 @@ function StapleRow({ item }: { item: PantryItem }) {
   }, [item.purchaseHistory]);
 
   return (
-    <Pressable
-      disabled={!expandable}
-      onPress={() => setOpen((v) => !v)}
-      style={styles.row}>
+    <Pressable onPress={onCycle} onLongPress={onMenu} delayLongPress={350} style={styles.row}>
       <View style={styles.rowMain}>
         <View style={styles.nameLine}>
           <Text style={styles.flexShrink} numberOfLines={1}>
             {item.canonicalName}
           </Text>
           <Pill label="always" tone="ok" />
+          <View style={styles.rightPill}>
+            <StatusPill status={status} since={item.statusUpdatedAt} />
+          </View>
         </View>
         <View style={styles.subLine}>
           {cycle ? (
@@ -180,17 +364,28 @@ function StapleRow({ item }: { item: PantryItem }) {
                 </Text>
               ) : null}
               {expandable ? (
-                <Glyph
-                  name="expand"
-                  size={12}
-                  color="textFaint"
-                  style={styles.chev}
-                />
+                <Pressable
+                  onPress={() => setOpen((v) => !v)}
+                  hitSlop={8}
+                  accessibilityLabel="Show purchase history">
+                  <Glyph
+                    name="expand"
+                    size={12}
+                    color="textFaint"
+                    style={styles.chev}
+                  />
+                </Pressable>
               ) : null}
             </>
           ) : (
             <Text color="textFaint">building cycle</Text>
           )}
+          {item.statusNote ? (
+            <Text color="textFaint" style={styles.statusNote}>
+              {' · '}
+              {item.statusNote}
+            </Text>
+          ) : null}
         </View>
       </View>
 
@@ -210,24 +405,42 @@ function StapleRow({ item }: { item: PantryItem }) {
   );
 }
 
-/* ---------- loose row: acquired date + freshness warning ---------- */
-function LooseRow({ item, onStaple }: { item: PantryItem; onStaple: () => void }) {
-  const status = freshnessStatus(item);
+/* ---------- loose row: tap = status cycle; long-press = menu ---------- */
+function LooseRow({
+  item,
+  onCycle,
+  onMenu,
+}: {
+  item: PantryItem;
+  onCycle: () => void;
+  onMenu: () => void;
+}) {
+  const fresh = freshnessStatus(item);
+  const status = item.status ?? 'fine';
   return (
-    <Pressable onLongPress={onStaple} style={styles.row}>
+    <Pressable onPress={onCycle} onLongPress={onMenu} delayLongPress={350} style={styles.row}>
       <View style={styles.rowMain}>
         <View style={styles.nameLine}>
           <Text style={styles.flexShrink} numberOfLines={1}>
             {item.canonicalName}
           </Text>
-          {status === 'wilting' ? (
+          {fresh === 'wilting' ? (
             <Pill label="wilting?" tone="warn" />
-          ) : status === 'aging' ? (
+          ) : fresh === 'aging' ? (
             <Pill label="use soon" tone="muted" />
           ) : null}
+          <View style={styles.rightPill}>
+            <StatusPill status={status} since={item.statusUpdatedAt} />
+          </View>
         </View>
         <View style={styles.subLine}>
           <Numeric color="textFaint">added {shortDate(item.acquiredAt)}</Numeric>
+          {item.statusNote ? (
+            <Text color="textFaint" style={styles.statusNote}>
+              {' · '}
+              {item.statusNote}
+            </Text>
+          ) : null}
         </View>
       </View>
     </Pressable>
@@ -284,4 +497,47 @@ const styles = StyleSheet.create({
   },
   histRow: { flexDirection: 'row', justifyContent: 'space-between' },
   empty: { paddingTop: 60, alignItems: 'center', gap: 6 },
+  rightPill: { marginLeft: 'auto' },
+  statusNote: { fontSize: 12, fontStyle: 'italic' },
+  menu: { gap: 10, paddingTop: 4 },
+  menuHint: { fontStyle: 'italic', lineHeight: 18, paddingBottom: 6 },
+  menuStatusRow: { flexDirection: 'row', gap: 8 },
+  menuStatusBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    alignItems: 'center',
+  },
+  menuStatusBtnActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  noteWrap: { gap: 6, paddingTop: 6 },
+  noteInput: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.bg2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.text,
+    minHeight: 56,
+    textAlignVertical: 'top',
+  },
+  menuItem: {
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    gap: 2,
+  },
+  menuItemHint: { fontSize: 12, fontStyle: 'italic' },
+  menuCancel: {
+    paddingTop: 14,
+    paddingBottom: 2,
+    alignItems: 'center',
+  },
 });

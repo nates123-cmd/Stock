@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import ReanimatedSwipeable, {
@@ -25,6 +25,9 @@ import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { useHaveStore } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
+import { usePantryStore } from '@/store/pantry';
+import type { PantryStatus } from '@/types';
+import { matchKey } from '@/lib/pantry';
 import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
 import {
   consolidateSmart,
@@ -69,6 +72,30 @@ export default function ShoppingList() {
   const markHave = useHaveStore((s) => s.mark);
   const unmarkHave = useHaveStore((s) => s.unmark);
   const setAlways = useHaveStore((s) => s.setAlways);
+
+  // Pantry-status lookup (spec §5 pantry-status integration). Builds a map
+  // keyed on the canonical-match key so a row's name matches even when the
+  // exact string differs ("kosher salt" vs "salt").
+  const pantryItems = usePantryStore((s) => s.items);
+  const statusByKey = useMemo(() => {
+    const m = new Map<string, PantryStatus>();
+    for (const p of pantryItems) {
+      const s = p.status ?? 'fine';
+      if (s === 'fine') continue; // skip the default; only flag interesting states
+      m.set(matchKey(p.canonicalName), s);
+    }
+    return m;
+  }, [pantryItems]);
+  const statusFor = (name: string): PantryStatus | undefined => {
+    const k = matchKey(name);
+    if (statusByKey.has(k)) return statusByKey.get(k);
+    // Allow loose match: pantry record's key is a substring of the shopping
+    // canonical (or vice versa). Mirrors the applyPaste/restock logic.
+    for (const [pk, s] of statusByKey) {
+      if (pk.startsWith(k) || k.startsWith(pk)) return s;
+    }
+    return undefined;
+  };
 
   /** session-only dismissals — consolidated rows can be swiped off this run. */
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -121,9 +148,13 @@ export default function ShoppingList() {
   );
 
   /** Should this canonical name appear in the Already-have bucket? True if
-   *  the user marked it this run OR they've pinned it as "always have." */
-  const inHave = (name: string) =>
-    isMarked(haveByName, name) || alwaysHaveMap[name.toLowerCase().trim()] === true;
+   *  the user marked it this run OR they've pinned it as "always have".
+   *  Pantry-status 'out' overrides everything else — out items are auto-
+   *  promoted to the buy list and the have toggle is suppressed (spec §5). */
+  const inHave = (name: string) => {
+    if (statusFor(name) === 'out') return false;
+    return isMarked(haveByName, name) || alwaysHaveMap[name.toLowerCase().trim()] === true;
+  };
 
   /** Lines actually destined for the cart — everything visible (consolidated
    *  + extras) minus what's routed to Already-have. Both the Copy-for-Instacart
@@ -186,25 +217,55 @@ export default function ShoppingList() {
   const dismissItem = (name: string) =>
     setDismissed((prev) => new Set(prev).add(`item:${name}`));
 
-  const copy = async () => {
+  // Shortcut Instacart path (spec §11 cross-app integrations — Developer
+  // Platform path replaced with a copy-and-open until the API actually
+  // accepts a key): copy the consolidated buy list to the clipboard and
+  // open Instacart in a new tab / the native app. The user pastes
+  // item-by-item into Instacart's search.
+  // Instacart's Lists surface is where the user actually inputs ingredients
+  // one-by-one (storefront opens you onto a retailer search, which is the
+  // wrong starting point). Falls back to the storefront if the deep link
+  // ever 404s.
+  const INSTACART_URL = 'https://www.instacart.com/lists';
+  const copyAndOpen = async () => {
     const clip =
       typeof navigator !== 'undefined'
         ? (navigator as unknown as {
             clipboard?: { writeText(t: string): Promise<void> };
           }).clipboard
         : undefined;
+    let didCopy = false;
     if (Platform.OS === 'web' && clip?.writeText) {
       try {
         await clip.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-        return;
+        didCopy = true;
       } catch {
-        /* fall through to reveal */
+        // Clipboard blocked (e.g. permissions) — fall through to reveal.
       }
     }
-    // No clipboard dep on native in v1 — reveal selectable text instead.
-    setRevealText(true);
+    if (!didCopy && Platform.OS !== 'web') {
+      // Native v1 has no clipboard dep — reveal the selectable text so
+      // the user can long-press copy before we punch out to Instacart.
+      setRevealText(true);
+    }
+    // Open Instacart even if the copy failed — the user can paste from
+    // the revealed text or re-tap once they grant clipboard access.
+    if (Platform.OS === 'web') {
+      try {
+        window.open(INSTACART_URL, '_blank', 'noopener');
+      } catch {
+        // popup-blocked — surface a hint, the user can tap the link.
+        setHint(`Couldn't open Instacart automatically — go to ${INSTACART_URL}.`);
+      }
+    } else {
+      await Linking.openURL(INSTACART_URL).catch(() => {
+        setHint(`Couldn't open Instacart — go to ${INSTACART_URL}.`);
+      });
+    }
+    if (didCopy) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (
@@ -242,23 +303,31 @@ export default function ShoppingList() {
               <SectionLabel color="textMuted">{CAT_LABEL[cat]}</SectionLabel>
               {visibleItems
                 .filter((i) => i.category === cat && !inHave(i.name))
-                .map((item) => (
-                  <ShoppingRow
-                    key={item.name}
-                    name={item.name}
-                    qty={item.buy}
-                    math={item.math ?? null}
-                    sources={item.sources}
-                    expanded={expanded.has(item.name)}
-                    onTap={() => toggleExpand(item.name)}
-                    onToggleHave={() => toggleHave(item.name)}
-                    onDelete={() => dismissItem(item.name)}
-                    onLongPress={() => setMenu({ name: item.name, extraId: null })}
-                    marked={false}
-                    always={false}
-                    likely={isLikelyHave(haveByName, item.name)}
-                  />
-                ))}
+                .map((item) => {
+                  const ps = statusFor(item.name);
+                  return (
+                    <ShoppingRow
+                      key={item.name}
+                      name={item.name}
+                      qty={item.buy}
+                      math={item.math ?? null}
+                      sources={item.sources}
+                      expanded={expanded.has(item.name)}
+                      onTap={() => toggleExpand(item.name)}
+                      onToggleHave={() => {
+                        // Spec §5: 'out' suppresses the have toggle.
+                        if (ps === 'out') return;
+                        toggleHave(item.name);
+                      }}
+                      onDelete={() => dismissItem(item.name)}
+                      onLongPress={() => setMenu({ name: item.name, extraId: null })}
+                      marked={false}
+                      always={false}
+                      likely={isLikelyHave(haveByName, item.name)}
+                      pantryStatus={ps}
+                    />
+                  );
+                })}
             </View>
           ))
         )}
@@ -278,26 +347,33 @@ export default function ShoppingList() {
                     CATEGORY_ORDER.indexOf(categorizeIngredient(b.canonicalName)) ||
                   a.canonicalName.localeCompare(b.canonicalName),
               )
-              .map((ex) => (
-                <ShoppingRow
-                  key={ex.id}
-                  name={ex.canonicalName}
-                  qty={extraQty(ex)}
-                  math={null}
-                  origin={ex.originLabel}
-                  onTap={() => {
-                    /* extras are flat — nothing to expand */
-                  }}
-                  onToggleHave={() => toggleHave(ex.canonicalName)}
-                  onDelete={() => removeExtra(ex.id)}
-                  onLongPress={() =>
-                    setMenu({ name: ex.canonicalName, extraId: ex.id })
-                  }
-                  marked={false}
-                  always={false}
-                  likely={isLikelyHave(haveByName, ex.canonicalName)}
-                />
-              ))}
+              .map((ex) => {
+                const ps = statusFor(ex.canonicalName);
+                return (
+                  <ShoppingRow
+                    key={ex.id}
+                    name={ex.canonicalName}
+                    qty={extraQty(ex)}
+                    math={null}
+                    origin={ex.originLabel}
+                    onTap={() => {
+                      /* extras are flat — nothing to expand */
+                    }}
+                    onToggleHave={() => {
+                      if (ps === 'out') return;
+                      toggleHave(ex.canonicalName);
+                    }}
+                    onDelete={() => removeExtra(ex.id)}
+                    onLongPress={() =>
+                      setMenu({ name: ex.canonicalName, extraId: ex.id })
+                    }
+                    marked={false}
+                    always={false}
+                    likely={isLikelyHave(haveByName, ex.canonicalName)}
+                    pantryStatus={ps}
+                  />
+                );
+              })}
           </View>
         ) : null}
 
@@ -455,11 +531,11 @@ export default function ShoppingList() {
           }
         />
         <Button
-          label={copied ? 'Copied ✓' : 'Copy for Instacart'}
+          label={copied ? 'Copied — Instacart opening' : 'Copy → Instacart'}
           glyph="next"
           flex
           disabled={buyLines.length === 0}
-          onPress={copy}
+          onPress={copyAndOpen}
         />
       </BottomActionBar>
     </SafeAreaView>
@@ -480,6 +556,8 @@ type RowProps = {
    *  have bucket regardless of session state, and shows a small tag. */
   always: boolean;
   likely: boolean;
+  /** Spec §5 pantry-status: 'out' auto-promotes + locks the toggle, 'low' just renders a tag. */
+  pantryStatus?: PantryStatus;
   onTap: () => void;
   onToggleHave: () => void;
   onDelete: () => void;
@@ -496,22 +574,29 @@ function ShoppingRow({
   marked,
   always,
   likely,
+  pantryStatus,
   onTap,
   onToggleHave,
   onDelete,
   onLongPress,
 }: RowProps) {
-  // Swipe-to-commit: a sufficient swipe in either direction fires the action
-  // and snaps the row closed. The labels in the action panels are the
-  // affordance, not the trigger — no second tap required.
+  // Swipe semantics — asymmetric by direction (spec §5):
+  // - Swipe right → commits Have toggle on open (reversible binary toggle).
+  // - Swipe left → reveals a tappable Delete button; requires a second tap
+  //   to commit because delete is destructive (consolidated rows lose group
+  //   context, Extras rows go for good).
   const swipeRef = useRef<SwipeableMethods | null>(null);
   const handleOpen = (dir: 'left' | 'right') => {
-    // Close first so the row animates back; the action fires once the
-    // close has had a chance to start (avoids the panel "hanging" open
-    // when the parent re-renders after the state change).
+    if (dir === 'left') {
+      // Have toggle — commit-on-open, snap closed.
+      swipeRef.current?.close();
+      onToggleHave();
+    }
+    // dir === 'right' → leave the panel open; user must tap the Delete button.
+  };
+  const handleDeletePress = () => {
     swipeRef.current?.close();
-    if (dir === 'left') onToggleHave();
-    else onDelete();
+    onDelete();
   };
   return (
     <ReanimatedSwipeable
@@ -536,13 +621,15 @@ function ShoppingRow({
         </View>
       )}
       renderRightActions={() => (
-        <View
+        <GHPressable
+          onPress={handleDeletePress}
           style={styles.deleteAction}
-          accessibilityLabel={`Swipe to delete ${name} from this run`}>
+          accessibilityRole="button"
+          accessibilityLabel={`Confirm delete ${name} from this run`}>
           <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
             Delete
           </Text>
-        </View>
+        </GHPressable>
       )}>
       <View style={styles.rowSurface}>
         <GHPressable
@@ -571,6 +658,15 @@ function ShoppingRow({
               <Text color={marked ? 'textFaint' : 'text'}>
                 {name}
               </Text>
+              {pantryStatus === 'out' ? (
+                <Text color="accent" style={styles.outTag}>
+                  out
+                </Text>
+              ) : pantryStatus === 'low' ? (
+                <Text color="warn" style={styles.lowTag}>
+                  low
+                </Text>
+              ) : null}
               {always ? (
                 <Text color="ok" style={styles.alwaysTag}>
                   always
@@ -740,7 +836,11 @@ function SummaryRow({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  flex: { flex: 1 },
+  // minWidth: 0 lets the middle column actually shrink on narrow viewports —
+  // RN/web flex children default to min-content sizing, so without this a
+  // single long ingredient name pushes the qty off-screen and overlaps the
+  // check on the left. This fixes the mobile overlap (#10).
+  flex: { flex: 1, minWidth: 0 },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -781,7 +881,7 @@ const styles = StyleSheet.create({
   sources: { paddingTop: 6, gap: 3 },
   sourceLine: { fontSize: 12, lineHeight: 16 },
   recipeList: { fontSize: 12, paddingTop: 2, lineHeight: 16 },
-  qty: { fontSize: 14, fontWeight: '700', marginTop: 1 },
+  qty: { fontSize: 14, fontWeight: '700', marginTop: 1, flexShrink: 0, marginLeft: 8 },
   pantryCard: { gap: 6 },
   empty: { textAlign: 'center', paddingVertical: 40 },
   revealCard: { gap: 8 },
@@ -807,6 +907,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 4,
+  },
+  outTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    backgroundColor: colors.bg3,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    textTransform: 'uppercase',
+  },
+  lowTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    backgroundColor: colors.bg3,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    textTransform: 'uppercase',
   },
   deleteAction: {
     flexDirection: 'row',

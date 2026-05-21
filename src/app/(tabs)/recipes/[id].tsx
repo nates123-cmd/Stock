@@ -1,5 +1,14 @@
-import { useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Image,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { Overlay } from '@/components';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,7 +34,20 @@ export default function RecipeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const recipe = useRecipeStore((s) => s.recipes.find((r) => r.id === id));
+  const allRecipes = useRecipeStore((s) => s.recipes);
   const save = useRecipeStore((s) => s.save);
+  // Autocomplete source for the tag editor — every tag used anywhere in the
+  // library, deduped case-insensitively (spec §6 tag editor).
+  const allTagsAcrossLibrary = useMemo(() => {
+    const seen = new Map<string, string>(); // lower → original casing
+    for (const r of allRecipes) {
+      for (const t of r.tags) {
+        const k = t.toLowerCase().trim();
+        if (!seen.has(k)) seen.set(k, t);
+      }
+    }
+    return [...seen.values()].sort();
+  }, [allRecipes]);
   const [clean, setClean] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
@@ -60,6 +82,12 @@ export default function RecipeDetail() {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
   const steps = [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal);
+
+  // Wide-viewport two-column layout (spec §6). 768px breakpoint matches
+  // standard tablet/desktop split; the columns are width-independent so
+  // ingredient/step rows render the same in either orientation.
+  const { width: viewportWidth } = useWindowDimensions();
+  const wide = viewportWidth >= 768;
 
   const previewConvertToGrams = async () => {
     setConverting(true);
@@ -220,6 +248,14 @@ export default function RecipeDetail() {
 
         {recipe.nutrition ? <NutritionCard n={recipe.nutrition} /> : null}
 
+        {!clean ? (
+          <TagEditor
+            tags={recipe.tags}
+            allTags={allTagsAcrossLibrary}
+            onChange={(tags) => save({ ...recipe, tags, modifiedAt: new Date() })}
+          />
+        ) : null}
+
         <View style={styles.toolbar}>
           <Button
             label="Cook"
@@ -250,46 +286,52 @@ export default function RecipeDetail() {
           </Text>
         ) : null}
 
-        <SectionLabel style={styles.sectionLabel}>Ingredients</SectionLabel>
-        <View style={styles.ingredients}>
-          {recipe.ingredients.map((ing) => {
-            const annotation = clean ? null : ingredientAnnotation(ing);
-            return (
-              <View key={ing.id} style={styles.ingRow}>
-                <IngredientAmount
-                  ing={ing}
-                  style={[styles.amount, clean && styles.cleanAmount]}
-                />
-                <View style={styles.ingText}>
-                  <View style={styles.ingNameRow}>
-                    <IngredientName ing={ing} style={clean ? styles.cleanBody : undefined} />
-                    {ing.inlineNote ? (
-                      <Text color="textFaint">{`  · ${ing.inlineNote}`}</Text>
-                    ) : null}
+        <View style={wide ? styles.twoCol : undefined}>
+          <View style={wide ? styles.colLeft : undefined}>
+            <SectionLabel style={styles.sectionLabel}>Ingredients</SectionLabel>
+            <View style={styles.ingredients}>
+              {recipe.ingredients.map((ing) => {
+                const annotation = clean ? null : ingredientAnnotation(ing);
+                return (
+                  <View key={ing.id} style={styles.ingRow}>
+                    <IngredientAmount
+                      ing={ing}
+                      style={[styles.amount, clean && styles.cleanAmount]}
+                    />
+                    <View style={styles.ingText}>
+                      <View style={styles.ingNameRow}>
+                        <IngredientName ing={ing} style={clean ? styles.cleanBody : undefined} />
+                        {ing.inlineNote ? (
+                          <Text color="textFaint">{`  · ${ing.inlineNote}`}</Text>
+                        ) : null}
+                      </View>
+                      {annotation ? (
+                        <Text color="accent" style={styles.annotation}>
+                          {annotation}
+                        </Text>
+                      ) : null}
+                    </View>
                   </View>
-                  {annotation ? (
-                    <Text color="accent" style={styles.annotation}>
-                      {annotation}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-            );
-          })}
-        </View>
-
-        <SectionLabel style={styles.sectionLabel}>Method</SectionLabel>
-        <View style={styles.method}>
-          {steps.map((s) => (
-            <View key={s.id} style={styles.stepRow}>
-              <Text variant="recipeTitle" color="accent" style={styles.stepNum}>
-                {s.ordinal}
-              </Text>
-              <Text style={[styles.stepBody, clean && styles.cleanBody]}>
-                {s.body}
-              </Text>
+                );
+              })}
             </View>
-          ))}
+          </View>
+
+          <View style={wide ? styles.colRight : undefined}>
+            <SectionLabel style={styles.sectionLabel}>Method</SectionLabel>
+            <View style={styles.method}>
+              {steps.map((s) => (
+                <View key={s.id} style={styles.stepRow}>
+                  <Text variant="recipeTitle" color="accent" style={styles.stepNum}>
+                    {s.ordinal}
+                  </Text>
+                  <Text style={[styles.stepBody, clean && styles.cleanBody]}>
+                    {s.body}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
         </View>
 
         {!clean ? (
@@ -479,6 +521,159 @@ function NutritionCard({ n }: { n: Nutrition }) {
   );
 }
 
+/**
+ * Recipe tag editor (spec §6). Chip strip with × removal + inline add input
+ * with library-wide autocomplete. No explicit save — every mutation
+ * propagates via onChange (parent debounce-saves like other free text).
+ */
+function TagEditor({
+  tags,
+  allTags,
+  onChange,
+}: {
+  tags: string[];
+  allTags: string[];
+  onChange: (tags: string[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  const tagSet = new Set(tags.map((t) => t.toLowerCase()));
+  const suggestions = useMemo(() => {
+    const q = draft.trim().toLowerCase();
+    if (!q) return [] as string[];
+    return allTags
+      .filter((t) => t.toLowerCase().includes(q) && !tagSet.has(t.toLowerCase()))
+      .slice(0, 6);
+  }, [draft, allTags, tagSet]);
+
+  const commit = (raw: string) => {
+    const t = raw.trim();
+    if (!t) {
+      setAdding(false);
+      setDraft('');
+      return;
+    }
+    if (tagSet.has(t.toLowerCase())) {
+      setDraft('');
+      return;
+    }
+    onChange([...tags, t]);
+    setDraft('');
+  };
+
+  const remove = (t: string) => {
+    onChange(tags.filter((x) => x !== t));
+  };
+
+  return (
+    <View style={tagStyles.wrap}>
+      <SectionLabel color="textMuted" style={tagStyles.label}>
+        Tags
+      </SectionLabel>
+      <View style={tagStyles.row}>
+        {tags.map((t) => (
+          <View key={t} style={tagStyles.chip}>
+            <Text variant="bodyStrong" color="textMuted">
+              {t}
+            </Text>
+            <Pressable
+              onPress={() => remove(t)}
+              hitSlop={8}
+              accessibilityLabel={`Remove tag ${t}`}>
+              <Glyph name="close" size={11} color="textFaint" />
+            </Pressable>
+          </View>
+        ))}
+        {adding ? (
+          <View style={tagStyles.addBox}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              autoFocus
+              placeholder="tag"
+              placeholderTextColor={colors.textFaint}
+              onSubmitEditing={() => commit(draft)}
+              onBlur={() => {
+                commit(draft);
+                setAdding(false);
+              }}
+              style={tagStyles.input}
+            />
+          </View>
+        ) : (
+          <Pressable onPress={() => setAdding(true)} style={tagStyles.addChip}>
+            <Glyph name="add" size={12} color="textMuted" />
+            <Text variant="bodyStrong" color="textMuted">
+              tag
+            </Text>
+          </Pressable>
+        )}
+      </View>
+      {suggestions.length > 0 ? (
+        <View style={tagStyles.suggestRow}>
+          {suggestions.map((s) => (
+            <Pressable
+              key={s}
+              onPress={() => commit(s)}
+              style={tagStyles.suggestChip}
+              accessibilityLabel={`Add existing tag ${s}`}>
+              <Text variant="bodyStrong" color="textMuted">
+                {s}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const tagStyles = StyleSheet.create({
+  wrap: { gap: 6 },
+  label: { letterSpacing: 1.5 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.bg3,
+    paddingLeft: 10,
+    paddingRight: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  addChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.bg2,
+    borderWidth: 1,
+    borderColor: colors.lineSoft,
+    borderStyle: 'dashed',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  addBox: {
+    backgroundColor: colors.bg3,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    minWidth: 100,
+  },
+  input: { color: colors.text, fontSize: 13, padding: 0, margin: 0 },
+  suggestRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 4 },
+  suggestChip: {
+    backgroundColor: colors.bg2,
+    borderWidth: 1,
+    borderColor: colors.lineSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+});
+
 function NotesEditor({
   initial,
   onSave,
@@ -488,14 +683,45 @@ function NotesEditor({
 }) {
   const [text, setText] = useState(initial);
   const [saved, setSaved] = useState(false);
-  const dirty = text !== initial;
+  // The textRef keeps the latest value reachable from the unmount cleanup,
+  // since the setState closure in cleanup would otherwise see stale state.
+  const textRef = useRef(text);
+  textRef.current = text;
+  const lastSavedRef = useRef(initial);
+  const dirty = text !== lastSavedRef.current;
 
-  const commit = async () => {
-    if (!dirty) return;
-    await onSave(text);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
-  };
+  const commit = useCallback(
+    async (value?: string) => {
+      const next = value ?? textRef.current;
+      if (next === lastSavedRef.current) return;
+      lastSavedRef.current = next;
+      await onSave(next);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    },
+    [onSave],
+  );
+
+  // Debounce-save on every keystroke (500ms idle) — spec §6 says no
+  // free-text field should require an explicit Save tap. The blur path
+  // and the unmount cleanup remain as belt-and-suspenders.
+  useEffect(() => {
+    if (text === lastSavedRef.current) return;
+    const t = setTimeout(() => {
+      void commit(text);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [text, commit]);
+
+  // Force-save on unmount (route change while still dirty) so navigating
+  // away via the tab bar or browser back doesn't drop unsaved input.
+  useEffect(() => {
+    return () => {
+      if (textRef.current !== lastSavedRef.current) {
+        void onSave(textRef.current);
+      }
+    };
+  }, [onSave]);
 
   return (
     <Card style={styles.notes}>
@@ -506,17 +732,15 @@ function NotesEditor({
             Saved
           </Text>
         ) : dirty ? (
-          <Pressable onPress={commit} hitSlop={8}>
-            <Text variant="sectionLabel" color="accent">
-              Save
-            </Text>
-          </Pressable>
+          <Text variant="sectionLabel" color="textFaint">
+            Saving…
+          </Text>
         ) : null}
       </View>
       <TextInput
         value={text}
         onChangeText={setText}
-        onBlur={commit}
+        onBlur={() => void commit()}
         multiline
         placeholder="What worked, what to change next time…"
         placeholderTextColor={colors.textFaint}
@@ -597,6 +821,9 @@ const styles = StyleSheet.create({
   toolbar: { flexDirection: 'row', gap: 10 },
   hint: { paddingTop: 8, fontStyle: 'italic' },
   sectionLabel: { paddingTop: 24, paddingBottom: 12 },
+  twoCol: { flexDirection: 'row', gap: 36, alignItems: 'flex-start' },
+  colLeft: { flex: 4, minWidth: 0 },
+  colRight: { flex: 6, minWidth: 0 },
   ingredients: { gap: 10 },
   ingRow: { flexDirection: 'row', gap: 12 },
   ingNameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline' },

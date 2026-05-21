@@ -9,9 +9,11 @@ import {
   FilterChip,
   ChipRow,
   Fab,
+  Glyph,
 } from '@/components';
 import { colors, type ColorToken } from '@/design';
 import { usePipelineStore } from '@/store/pipeline';
+import { useExtrasStore } from '@/store/extras';
 import { relativeAge } from '@/lib/format';
 import type { PipelineIdea } from '@/types';
 
@@ -36,7 +38,48 @@ const STATUS_LABEL: Record<PipelineIdea['status'], string> = {
 export default function PipelineScreen() {
   const router = useRouter();
   const ideas = usePipelineStore((s) => s.ideas);
+  const addExtras = useExtrasStore((s) => s.add);
+  const removeExtrasByOrigin = useExtrasStore((s) => s.removeByOrigin);
+  const stagedOriginIds = useExtrasStore((s) => new Set(s.items.map((x) => x.originId)));
   const [tab, setTab] = useState<Tab>('Active');
+  const [pushed, setPushed] = useState<{ id: string; count: number } | null>(null);
+
+  // List-card "+ Cart" — spec §8. If the idea has best-guess ingredients
+  // already, push them straight to extras (same as detail-view action). If
+  // not, route to detail with a flag that opens the capture modal — keeps a
+  // single source of truth for the Claude-parse step.
+  const addToCart = (idea: PipelineIdea) => {
+    const ings = idea.bestGuessIngredients ?? [];
+    if (ings.length === 0) {
+      router.push({
+        pathname: '/idea/[id]',
+        params: { id: idea.id, openCart: '1' },
+      });
+      return;
+    }
+    removeExtrasByOrigin(idea.id);
+    addExtras(
+      ings.map((i) => ({
+        canonicalName: i.canonicalName,
+        amount: i.amount,
+        unit: i.unit,
+        originLabel: `from pipeline: '${idea.title}'`,
+        originId: idea.id,
+      })),
+    );
+    setPushed({ id: idea.id, count: ings.length });
+    setTimeout(() => setPushed(null), 4000);
+  };
+
+  const addToRecipe = (idea: PipelineIdea) =>
+    router.push({
+      pathname: '/capture',
+      params: {
+        ideaId: idea.id,
+        prefillTitle: idea.title,
+        refs: JSON.stringify(idea.references),
+      },
+    });
 
   const activeCount = ideas.filter((i) => i.status !== 'promoted').length;
 
@@ -83,39 +126,76 @@ export default function PipelineScreen() {
         </View>
 
         <View style={styles.list}>
-          {list.map((idea) => (
-            <Pressable
-              key={idea.id}
-              onPress={() =>
-                router.push({ pathname: '/idea/[id]', params: { id: idea.id } })
-              }>
+          {list.map((idea) => {
+            const promoted = idea.status === 'promoted';
+            const staged = stagedOriginIds.has(idea.id);
+            return (
               <View
+                key={idea.id}
                 style={[
                   styles.card,
                   { borderLeftColor: colors[STATUS_COLOR[idea.status]] },
                 ]}>
-                <Text variant="recipeTitle" numberOfLines={1}>
-                  {idea.title}
-                </Text>
-                {idea.note ? (
-                  <Text color="textMuted" numberOfLines={2} style={styles.note}>
-                    {idea.note}
+                <Pressable
+                  onPress={() =>
+                    router.push({ pathname: '/idea/[id]', params: { id: idea.id } })
+                  }>
+                  <Text variant="recipeTitle" numberOfLines={1}>
+                    {idea.title}
                   </Text>
+                  {idea.note ? (
+                    <Text color="textMuted" numberOfLines={2} style={styles.note}>
+                      {idea.note}
+                    </Text>
+                  ) : null}
+                  <View style={styles.metaRow}>
+                    <SectionLabel color={STATUS_COLOR[idea.status]}>
+                      {STATUS_LABEL[idea.status]}
+                    </SectionLabel>
+                    <Text color="textFaint" style={styles.meta}>
+                      {idea.references.length > 0
+                        ? `· ${idea.references.length} ref${idea.references.length === 1 ? '' : 's'} `
+                        : ''}
+                      · {relativeAge(idea.createdAt)}
+                    </Text>
+                  </View>
+                </Pressable>
+                {!promoted ? (
+                  <View style={styles.actionRow}>
+                    <Pressable
+                      onPress={() => addToRecipe(idea)}
+                      style={styles.actionPill}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Promote ${idea.title} to a recipe`}>
+                      <Glyph name="add" size={12} color="accent" />
+                      <Text variant="bodyStrong" color="accent">
+                        Recipe
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => addToCart(idea)}
+                      style={styles.actionPill}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Add ${idea.title} to your shopping list`}>
+                      <Glyph name="add" size={12} color="accent" />
+                      <Text variant="bodyStrong" color="accent">
+                        Cart
+                      </Text>
+                    </Pressable>
+                    {pushed?.id === idea.id ? (
+                      <Text color="ok" style={styles.pushedHint}>
+                        +{pushed.count} to list
+                      </Text>
+                    ) : staged ? (
+                      <Text color="textFaint" style={styles.pushedHint}>
+                        staged
+                      </Text>
+                    ) : null}
+                  </View>
                 ) : null}
-                <View style={styles.metaRow}>
-                  <SectionLabel color={STATUS_COLOR[idea.status]}>
-                    {STATUS_LABEL[idea.status]}
-                  </SectionLabel>
-                  <Text color="textFaint" style={styles.meta}>
-                    {idea.references.length > 0
-                      ? `· ${idea.references.length} ref${idea.references.length === 1 ? '' : 's'} `
-                      : ''}
-                    · {relativeAge(idea.createdAt)}
-                  </Text>
-                </View>
               </View>
-            </Pressable>
-          ))}
+            );
+          })}
 
           {list.length === 0 ? (
             <View style={styles.empty}>
@@ -157,4 +237,25 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 },
   meta: { fontSize: 12 },
   empty: { paddingTop: 60, alignItems: 'center', gap: 6 },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingTop: 10,
+    marginTop: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.lineSoft,
+  },
+  actionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg,
+  },
+  pushedHint: { fontSize: 12, fontStyle: 'italic', marginLeft: 'auto' },
 });

@@ -23,6 +23,7 @@ import { colors, layout, type ColorToken } from '@/design';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { useAuthStore } from '@/store/auth';
+import { useHaveStore } from '@/store/have';
 import type { Meal, PlanEntry, Recipe } from '@/types';
 import {
   addWeeks,
@@ -86,6 +87,19 @@ export default function PlanScreen() {
   const ingredientNames = new Set(
     plannedRecipes.flatMap((r) => r.ingredients.map((i) => i.canonicalName)),
   );
+
+  // Pantry coverage (spec §5): count of distinct planned canonicals already
+  // covered by the user's "always have" pins. Until the full Pantry pillar
+  // ships (§10) the always-have set is the proxy for in-stock inventory.
+  const alwaysHaveMap = useHaveStore((s) => s.alwaysHave);
+  const pantryCovers = useMemo(() => {
+    let n = 0;
+    for (const name of ingredientNames) {
+      if (alwaysHaveMap[name.toLowerCase().trim()]) n += 1;
+    }
+    return n;
+  }, [ingredientNames, alwaysHaveMap]);
+  const toShop = Math.max(0, ingredientNames.size - pantryCovers);
 
   const openPicker = (date: Date, meal: Meal) => {
     if (readOnly) return;
@@ -208,9 +222,10 @@ export default function PlanScreen() {
           <View>
             <Numeric color="textMuted">
               {plannedRecipes.length} recipes · {ingredientNames.size} ingredients
+              {pantryCovers > 0 ? ` · pantry covers ${pantryCovers}` : ''}
             </Numeric>
             <Text color="textFaint">
-              {ingredientNames.size} items to shop · pantry coverage with §10
+              {toShop} items to shop
             </Text>
           </View>
         }>
@@ -462,11 +477,23 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
   },
   weekmid: { alignItems: 'center', gap: 2 },
-  grid: { padding: layout.screenPadding, gap: 12 },
-  dayRow: { flexDirection: 'row', gap: 14 },
-  dayCol: { width: 40, alignItems: 'center', paddingTop: 8 },
-  dayNum: { fontSize: 17 },
-  cells: { flex: 1, gap: 8 },
+  // Day-row hierarchy (spec §5): grouping is visual, not structural — each
+  // day's rows share a card-like container with a left gutter pinning the
+  // day label so empty + breakfast / + lunch cells anchor to a date instead
+  // of floating as free text. (Pre-fix the day label sat in its own narrow
+  // column with no shared background, which read as flat list of strings.)
+  grid: { padding: layout.screenPadding, gap: 14 },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 14,
+    paddingTop: 6,
+    paddingBottom: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.lineSoft,
+  },
+  dayCol: { width: 44, alignItems: 'flex-start', paddingTop: 12, paddingLeft: 2 },
+  dayNum: { fontSize: 19 },
+  cells: { flex: 1, gap: 6 },
   cell: {
     flexDirection: 'row',
     alignItems: 'center',
