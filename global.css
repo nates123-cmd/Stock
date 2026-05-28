@@ -12,3 +12,19 @@ html,
 body {
   background-color: #F5EDDD;
 }
+
+/*
+ * Expo's web reset pins html/body/#root to `height: 100%`, which on iOS
+ * Safari + standalone PWAs resolves to the *layout* viewport (taller than the
+ * visible area while the address bar shows). That pushes the bottom tab nav
+ * and pinned action bars below the fold, where they can't be tapped
+ * (patch #0bd71852). Pin the app to the dynamic viewport height instead.
+ * !important guards against CSS injection-order differences between the dev
+ * server and the exported build.
+ */
+html,
+body,
+#root {
+  height: 100vh !important;
+  height: 100dvh !important;
+}
