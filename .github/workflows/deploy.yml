@@ -47,6 +47,9 @@ jobs:
         run: |
           # Jekyll would strip Expo's _expo/ directory without this.
           touch dist/.nojekyll
+          # Expo single-output HTML has no head hook — inject the iOS
+          # apple-touch-icon link so "Add to Home Screen" uses the pot icon.
+          node scripts/inject-pwa-head.mjs
           # web.output: "single" is a SPA — serve index.html for deep links.
           cp dist/index.html dist/404.html
 

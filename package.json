@@ -13,7 +13,7 @@
     "dev:web": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" expo start --web --port 8088",
     "dev:ios": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" expo start --ios",
     "typecheck": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" node node_modules/typescript/bin/tsc --noEmit",
-    "build:web": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" expo export --platform web",
+    "build:web": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" expo export --platform web && node scripts/inject-pwa-head.mjs",
     "serve:web": "npm run build:web && ln -sfn . dist/Stock && python3 -m http.server 8088 --bind 127.0.0.1 --directory dist"
   },
   "dependencies": {
