@@ -1,10 +1,9 @@
 /**
- * Magic-link sign-in. Signed in → cross-device sync turns on (Phase 2).
- * Signed out → app keeps working locally (existing IndexedDB path).
+ * Email one-time-code sign-in. Signed in → cross-device sync turns on
+ * (Phase 2). Signed out → app keeps working locally (existing IndexedDB path).
  *
- * The redirect URL is computed from window.location.origin so the same
- * build works on both localhost:8088/Stock/ and the deployed Pages site.
- * Both are allow-listed in the project's Auth → URL Configuration.
+ * Supabase emails an 8-digit code (no magic link / redirect); the user types
+ * it back in and we verify with supabase.auth.verifyOtp.
  */
 import { useState } from 'react';
 import {
@@ -30,13 +29,6 @@ import { colors, layout } from '@/design';
 import { useAuthStore } from '@/store/auth';
 import { SUPABASE_AVAILABLE } from '@/lib/supabase';
 
-function redirectUrl(): string {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return `${window.location.origin}/Stock/`;
-  }
-  return 'https://nates123-cmd.github.io/Stock/';
-}
-
 export default function SignIn() {
   const router = useRouter();
   const close = () => (router.canGoBack() ? router.back() : router.replace('/'));
@@ -46,11 +38,13 @@ export default function SignIn() {
   const busy = useAuthStore((s) => s.busy);
   const error = useAuthStore((s) => s.error);
   const pendingEmail = useAuthStore((s) => s.pendingEmail);
-  const signInWithEmail = useAuthStore((s) => s.signInWithEmail);
+  const sendCode = useAuthStore((s) => s.sendCode);
+  const verifyCode = useAuthStore((s) => s.verifyCode);
   const signOut = useAuthStore((s) => s.signOut);
   const reset = useAuthStore((s) => s.reset);
 
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
 
   if (!SUPABASE_AVAILABLE) {
     return (
@@ -81,14 +75,25 @@ export default function SignIn() {
           ) : user ? (
             <SignedIn email={user.email ?? '(no email on session)'} busy={busy} onSignOut={signOut} onDone={close} />
           ) : pendingEmail ? (
-            <CheckInbox email={pendingEmail} onUseAnother={reset} />
+            <EnterCode
+              email={pendingEmail}
+              code={code}
+              setCode={setCode}
+              error={error}
+              busy={busy}
+              onVerify={() => verifyCode(code)}
+              onUseAnother={() => {
+                setCode('');
+                reset();
+              }}
+            />
           ) : (
             <SignInForm
               email={email}
               setEmail={setEmail}
               error={error}
               busy={busy}
-              onSubmit={() => signInWithEmail(email, redirectUrl())}
+              onSubmit={() => sendCode(email)}
               onSkip={close}
             />
           )}
@@ -130,7 +135,7 @@ function SignInForm({
     <>
       <Text color="textMuted" style={styles.tip}>
         Sign in to sync your recipes, plans, and pantry across devices. We’ll
-        email you a one-click link — no password.
+        email you an 8-digit code — no password.
       </Text>
 
       <Card style={styles.formCard}>
@@ -161,7 +166,7 @@ function SignInForm({
       <BottomActionBar>
         <Button label="Skip" variant="secondary" flex onPress={onSkip} />
         <Button
-          label={busy ? 'Sending…' : 'Send magic link'}
+          label={busy ? 'Sending…' : 'Send code'}
           glyph="next"
           flex
           disabled={busy || !email.trim()}
@@ -172,23 +177,64 @@ function SignInForm({
   );
 }
 
-function CheckInbox({ email, onUseAnother }: { email: string; onUseAnother: () => void }) {
+function EnterCode({
+  email,
+  code,
+  setCode,
+  error,
+  busy,
+  onVerify,
+  onUseAnother,
+}: {
+  email: string;
+  code: string;
+  setCode: (s: string) => void;
+  error: string | null;
+  busy: boolean;
+  onVerify: () => void;
+  onUseAnother: () => void;
+}) {
   return (
-    <View style={styles.bodyCentered}>
-      <Heading variant="screenTitle">Check your inbox</Heading>
-      <Text color="textMuted" style={styles.tipCenter}>
-        We sent a sign-in link to{'\n'}
+    <>
+      <Text color="textMuted" style={styles.tip}>
+        We emailed an 8-digit code to{'\n'}
         <Text variant="bodyStrong">{email}</Text>
       </Text>
-      <Text color="textFaint" style={styles.tipCenter}>
-        Open the link in the same browser you’re reading this in. You can
-        close this tab — when you click the link it brings you back here
-        signed in.
-      </Text>
+
+      <Card style={styles.formCard}>
+        <SectionLabel color="textMuted">8-digit code</SectionLabel>
+        <TextInput
+          value={code}
+          onChangeText={(t) => setCode(t.replace(/\D/g, '').slice(0, 8))}
+          placeholder="••••••••"
+          placeholderTextColor={colors.textFaint}
+          keyboardType="number-pad"
+          textContentType="oneTimeCode"
+          autoComplete="one-time-code"
+          maxLength={8}
+          style={[styles.input, styles.codeInput]}
+        />
+        {error ? (
+          <Text color="warn" style={styles.errorText}>
+            {error}
+          </Text>
+        ) : null}
+      </Card>
+
       <Pressable onPress={onUseAnother} style={styles.linkRow}>
         <Text color="accent">Use a different email</Text>
       </Pressable>
-    </View>
+
+      <BottomActionBar>
+        <Button
+          label={busy ? 'Verifying…' : 'Verify'}
+          glyph="done"
+          flex
+          disabled={busy || code.trim().length < 6}
+          onPress={onVerify}
+        />
+      </BottomActionBar>
+    </>
   );
 }
 
@@ -261,6 +307,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 15,
     color: colors.text,
+  },
+  codeInput: {
+    textAlign: 'center',
+    fontSize: 24,
+    letterSpacing: 8,
+    fontVariant: ['tabular-nums'],
   },
   errorText: { fontStyle: 'italic', paddingTop: 4 },
   linkRow: { paddingTop: 18 },

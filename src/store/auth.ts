@@ -1,5 +1,5 @@
 /**
- * Auth store — magic-link sign-in via Supabase, source of truth for the
+ * Auth store — email one-time-code sign-in via Supabase, source of truth for the
  * sync layer (signed in = cloud-backed, signed out = local-only).
  *
  * Hydrate is called once in the root layout. It pulls the persisted session
@@ -18,12 +18,15 @@ type AuthState = {
   ready: boolean;
   busy: boolean;
   error: string | null;
-  /** email a magic link was just sent to (null until/after success) */
+  /** email a sign-in code was just sent to (null until/after success) */
   pendingEmail: string | null;
   hydrate: () => Promise<void>;
-  signInWithEmail: (email: string, redirectTo: string) => Promise<void>;
+  /** email an 8-digit one-time code to `email` */
+  sendCode: (email: string) => Promise<void>;
+  /** verify the code the user typed against the pending email */
+  verifyCode: (token: string) => Promise<void>;
   signOut: () => Promise<void>;
-  /** clear the "check your inbox" state to try a different email */
+  /** clear the "enter your code" state to try a different email */
   reset: () => void;
 };
 
@@ -47,7 +50,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  signInWithEmail: async (email, redirectTo) => {
+  sendCode: async (email) => {
     if (!supabase) {
       set({ error: 'Sync not configured for this build.' });
       return;
@@ -58,12 +61,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
     set({ busy: true, error: null });
-    const { error } = await supabase.auth.signInWithOtp({
-      email: trimmed,
-      options: { emailRedirectTo: redirectTo },
-    });
+    // No emailRedirectTo → Supabase emails the numeric token from the
+    // "Magic Link" template ({{ .Token }}) for code entry, not a click link.
+    const { error } = await supabase.auth.signInWithOtp({ email: trimmed });
     if (error) set({ busy: false, error: error.message });
     else set({ busy: false, pendingEmail: trimmed });
+  },
+
+  verifyCode: async (token) => {
+    const email = get().pendingEmail;
+    if (!supabase || !email) return;
+    const code = token.replace(/\D/g, '');
+    set({ busy: true, error: null });
+    const { error } = await supabase.auth.verifyOtp({ email, token: code, type: 'email' });
+    // Success: onAuthStateChange sets session/user; clear the pending email.
+    if (error) set({ busy: false, error: error.message });
+    else set({ busy: false, pendingEmail: null });
   },
 
   signOut: async () => {
