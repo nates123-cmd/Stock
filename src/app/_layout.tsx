@@ -103,6 +103,10 @@ export default function RootLayout() {
               options={{ headerShown: false, presentation: 'modal' }}
             />
             <Stack.Screen
+              name="shopping-confirm"
+              options={{ headerShown: false, presentation: 'modal' }}
+            />
+            <Stack.Screen
               name="pantry-paste"
               options={{ headerShown: false, presentation: 'modal' }}
             />

@@ -23,7 +23,7 @@ import { useRecipeStore } from '@/store/recipes';
 import { useAuthStore } from '@/store/auth';
 import { useHaveStore } from '@/store/have';
 import type { Meal, PlanEntry, Recipe } from '@/types';
-import { dateKey, dayLabel, isSameDay, startOfWeek } from '@/lib/week';
+import { dateKey, dayLabel, isSameDay } from '@/lib/week';
 
 export default function PlanScreen() {
   const router = useRouter();
@@ -206,8 +206,8 @@ export default function PlanScreen() {
           disabled={plannedRecipes.length === 0}
           onPress={() =>
             router.push({
-              pathname: '/shopping',
-              params: { weekStart: startOfWeek(new Date()).toISOString() },
+              pathname: '/shopping-confirm',
+              params: { days: String(daysAhead) },
             })
           }
         />

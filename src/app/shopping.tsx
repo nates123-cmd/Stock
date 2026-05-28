@@ -56,10 +56,17 @@ const srcQty = (s: ShoppingSource) =>
 
 export default function ShoppingList() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ weekStart: string }>();
+  const params = useLocalSearchParams<{ weekStart?: string; entryIds?: string }>();
   const weekStart = useMemo(
     () => (params.weekStart ? new Date(params.weekStart) : startOfWeek(new Date())),
     [params.weekStart],
+  );
+  // Launched from the confirm step: scope to the chosen plan entries instead
+  // of a calendar week.
+  const selectedEntryIds = useMemo(
+    () =>
+      params.entryIds ? new Set(params.entryIds.split(',').filter(Boolean)) : null,
+    [params.entryIds],
   );
   const entries = usePlanStore((s) => s.entries);
   const recipes = useRecipeStore((s) => s.recipes);
@@ -142,12 +149,15 @@ export default function ShoppingList() {
     const keys = new Set(weekDays(weekStart).map(dateKey));
     const byId = new Map<string, Recipe>(recipes.map((r) => [r.id, r]));
     return entries
-      .filter(
-        (e) => keys.has(dateKey(e.date)) && e.status === 'planned' && e.recipeId,
-      )
+      .filter((e) => {
+        const inScope = selectedEntryIds
+          ? selectedEntryIds.has(e.id)
+          : keys.has(dateKey(e.date));
+        return inScope && e.status === 'planned' && e.recipeId;
+      })
       .map((e) => byId.get(e.recipeId as string))
       .filter((r): r is Recipe => !!r);
-  }, [entries, recipes, weekStart]);
+  }, [entries, recipes, weekStart, selectedEntryIds]);
 
   // Render the local merge instantly, then upgrade with Claude's fuzzier
   // estimate when it resolves (graceful — consolidateSmart self-falls-back).
@@ -305,7 +315,8 @@ export default function ShoppingList() {
         <View style={styles.flex}>
           <Heading variant="screenTitle">Shopping list</Heading>
           <Text color="textMuted">
-            {weekRecipes.length} recipes · {weekRangeLabel(weekStart)}
+            {weekRecipes.length} recipes
+            {selectedEntryIds ? '' : ` · ${weekRangeLabel(weekStart)}`}
             {refining ? ' · estimating…' : ''}
           </Text>
         </View>
