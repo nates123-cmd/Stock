@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import ReanimatedSwipeable, {
@@ -110,6 +110,34 @@ export default function ShoppingList() {
     extraId: string | null;
   } | null>(null);
 
+  // First-run polarity hint (spec §5). Dismissed automatically the first time
+  // the user toggles any row — the action teaches itself once performed.
+  // localStorage-keyed so the dismissal survives reloads without needing the
+  // async IndexedDB store.
+  const ONBOARDING_KEY = 'stock:shopping-onboarding-seen';
+  const [showOnboard, setShowOnboard] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage?.getItem(ONBOARDING_KEY) !== '1';
+    } catch {
+      return false;
+    }
+  });
+  const dismissOnboard = () => {
+    setShowOnboard(false);
+    try {
+      window.localStorage?.setItem(ONBOARDING_KEY, '1');
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // Wide-viewport 2-col layout (spec §5 shopping list). ≥ 1024 px puts the
+  // buy list + extras on the left and the Already-have / pantry-stub on the
+  // right; below that, classic single-column stack.
+  const { width: viewportWidth } = useWindowDimensions();
+  const wide = viewportWidth >= 1024;
+
   const weekRecipes = useMemo(() => {
     const keys = new Set(weekDays(weekStart).map(dateKey));
     const byId = new Map<string, Recipe>(recipes.map((r) => [r.id, r]));
@@ -211,6 +239,9 @@ export default function ShoppingList() {
   const toggleHave = (name: string) => {
     if (isMarked(haveByName, name)) unmarkHave(name);
     else markHave(name);
+    // First toggle teaches the polarity — kill the onboarding banner the
+    // moment the user has performed the action it describes.
+    if (showOnboard) dismissOnboard();
   };
 
   /** Dismiss a consolidated row for this run (session-local). */
@@ -291,6 +322,21 @@ export default function ShoppingList() {
           <SummaryRow label="Already have" value={`${haveCount}`} tone="ok" />
         </Card>
 
+        {showOnboard && (visibleItems.length > 0 || extras.length > 0) ? (
+          <Pressable onPress={dismissOnboard} style={styles.onboard}>
+            <Text color="textMuted" style={styles.onboardText}>
+              <Text variant="bodyStrong" color="text">
+                Tap a row to drop it
+              </Text>{' '}
+              — “already have.” Swipe left to delete from this run, swipe right
+              to mark have.{' '}
+              <Text color="textFaint">(tap here to dismiss)</Text>
+            </Text>
+          </Pressable>
+        ) : null}
+
+        <View style={wide ? styles.twoCol : undefined}>
+          <View style={wide ? styles.colLeft : undefined}>
         {visibleItems.length === 0 && extras.length === 0 ? (
           <Text color="textMuted" style={styles.empty}>
             Nothing planned for this week yet. Pin recipes on the Plan tab.
@@ -376,6 +422,8 @@ export default function ShoppingList() {
               })}
           </View>
         ) : null}
+          </View>
+          <View style={wide ? styles.colRight : undefined}>
 
         {haveCount > 0 ? (
           <View style={styles.section}>
@@ -478,6 +526,8 @@ export default function ShoppingList() {
             “Already have” is its lightweight precursor.
           </Text>
         </Card>
+          </View>
+        </View>
 
         {revealText ? (
           <Card style={styles.revealCard}>
@@ -893,6 +943,18 @@ const styles = StyleSheet.create({
   },
   hint: { fontStyle: 'italic', textAlign: 'center' },
   extrasCaption: { fontSize: 11, fontStyle: 'italic', paddingBottom: 4 },
+  twoCol: { flexDirection: 'row', gap: 36, alignItems: 'flex-start' },
+  colLeft: { flex: 6, minWidth: 0, gap: 16 },
+  colRight: { flex: 4, minWidth: 0, gap: 16 },
+  onboard: {
+    backgroundColor: colors.bg2,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  onboardText: { lineHeight: 19 },
   haveHeader: {
     flexDirection: 'row',
     alignItems: 'center',

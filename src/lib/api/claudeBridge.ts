@@ -4,8 +4,10 @@
  * never enters the web bundle (Metro can't bundle it cleanly for web, and v1
  * web is preview-only — spec §12).
  */
-import { callClaude, callClaudePdf, MODELS } from './claude';
+import { callClaude, callClaudePdf, callClaudeImage, MODELS, type ImageMediaType } from './claude';
 import { makeAiCache } from './cache';
+
+export type { ImageMediaType };
 
 // Native talks to Anthropic directly via the SDK, which needs the client
 // key; availability tracks its presence (web's sibling tracks the proxy URL).
@@ -37,6 +39,26 @@ export async function claudePdf(
     task,
     system,
     pdfBase64,
+    prompt,
+    model: MODELS.reasoning,
+    maxTokens: 3000,
+    cache: makeAiCache(task),
+  });
+}
+
+/** Parse a photo/screenshot via Claude vision (spec §11.1). */
+export async function claudeImage(
+  task: string,
+  system: string,
+  imageBase64: string,
+  imageMediaType: ImageMediaType,
+  prompt: string,
+): Promise<string> {
+  return callClaudeImage({
+    task,
+    system,
+    imageBase64,
+    imageMediaType,
     prompt,
     model: MODELS.reasoning,
     maxTokens: 3000,

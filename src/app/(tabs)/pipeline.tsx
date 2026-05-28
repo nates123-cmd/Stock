@@ -10,10 +10,12 @@ import {
   ChipRow,
   Fab,
   Glyph,
+  Overlay,
 } from '@/components';
 import { colors, type ColorToken } from '@/design';
 import { usePipelineStore } from '@/store/pipeline';
 import { useExtrasStore } from '@/store/extras';
+import { usePlanStore } from '@/store/plan';
 import { relativeAge } from '@/lib/format';
 import type { PipelineIdea } from '@/types';
 
@@ -41,8 +43,12 @@ export default function PipelineScreen() {
   const addExtras = useExtrasStore((s) => s.add);
   const removeExtrasByOrigin = useExtrasStore((s) => s.removeByOrigin);
   const stagedOriginIds = useExtrasStore((s) => new Set(s.items.map((x) => x.originId)));
+  const setExperiment = usePlanStore((s) => s.setExperiment);
   const [tab, setTab] = useState<Tab>('Active');
   const [pushed, setPushed] = useState<{ id: string; count: number } | null>(null);
+  // Day-picker overlay state for the inline "+ Plan" action (spec §8).
+  const [planTarget, setPlanTarget] = useState<PipelineIdea | null>(null);
+  const [planned, setPlanned] = useState<{ id: string; label: string } | null>(null);
 
   // List-card "+ Cart" — spec §8. If the idea has best-guess ingredients
   // already, push them straight to extras (same as detail-view action). If
@@ -80,6 +86,19 @@ export default function PipelineScreen() {
         refs: JSON.stringify(idea.references),
       },
     });
+
+  // "+ Plan" — pin the idea to a target day's dinner slot as an experiment.
+  // Replaces whatever was there (setExperiment is destructive by design;
+  // user can undo via swipe-delete on the plan).
+  const planForDay = async (idea: PipelineIdea, offsetDays: number, label: string) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    d.setHours(0, 0, 0, 0);
+    await setExperiment(d, 'dinner', idea.id);
+    setPlanTarget(null);
+    setPlanned({ id: idea.id, label });
+    setTimeout(() => setPlanned(null), 4000);
+  };
 
   const activeCount = ideas.filter((i) => i.status !== 'promoted').length;
 
@@ -182,7 +201,21 @@ export default function PipelineScreen() {
                         Cart
                       </Text>
                     </Pressable>
-                    {pushed?.id === idea.id ? (
+                    <Pressable
+                      onPress={() => setPlanTarget(idea)}
+                      style={styles.actionPill}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Plan ${idea.title} as an experiment`}>
+                      <Glyph name="add" size={12} color="accent" />
+                      <Text variant="bodyStrong" color="accent">
+                        Plan
+                      </Text>
+                    </Pressable>
+                    {planned?.id === idea.id ? (
+                      <Text color="ok" style={styles.pushedHint}>
+                        planned {planned.label}
+                      </Text>
+                    ) : pushed?.id === idea.id ? (
                       <Text color="ok" style={styles.pushedHint}>
                         +{pushed.count} to list
                       </Text>
@@ -211,6 +244,47 @@ export default function PipelineScreen() {
       </Screen>
 
       <Fab onPress={() => router.push('/idea-capture')} />
+
+      <Overlay visible={planTarget != null} onClose={() => setPlanTarget(null)}>
+        {planTarget ? (
+          <View style={styles.planSheet}>
+            <Text variant="recipeTitle" numberOfLines={1}>
+              Plan {planTarget.title}
+            </Text>
+            <Text color="textFaint" style={styles.planHint}>
+              Pins the idea as an experiment on the chosen day's dinner — dashed
+              warn-tinted cell on the plan. Replaces anything already there.
+            </Text>
+            <View style={styles.planRow}>
+              <Pressable
+                onPress={() => planForDay(planTarget, 0, 'today')}
+                style={styles.planBtn}>
+                <Text variant="bodyStrong">Today</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => planForDay(planTarget, 1, 'tomorrow')}
+                style={styles.planBtn}>
+                <Text variant="bodyStrong">Tomorrow</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => planForDay(planTarget, 2, 'in 2 days')}
+                style={styles.planBtn}>
+                <Text variant="bodyStrong">In 2 days</Text>
+              </Pressable>
+            </View>
+            {(planTarget.bestGuessIngredients ?? []).length === 0 ? (
+              <Text color="textFaint" style={styles.planHint}>
+                This idea has no best-guess ingredients yet — the shopping list
+                won't reflect it until you tap{' '}
+                <Text variant="bodyStrong" color="textMuted">
+                  + Cart
+                </Text>{' '}
+                to capture them.
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+      </Overlay>
     </View>
   );
 }
@@ -232,6 +306,9 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     padding: 16,
     gap: 6,
+    // Same minWidth:0 defensive pattern — keeps long titles inside the
+    // card on narrow phones (#10).
+    minWidth: 0,
   },
   note: { lineHeight: 19 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 },
@@ -258,4 +335,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   pushedHint: { fontSize: 12, fontStyle: 'italic', marginLeft: 'auto' },
+  planSheet: { gap: 12 },
+  planHint: { fontStyle: 'italic', lineHeight: 18 },
+  planRow: { flexDirection: 'row', gap: 8, paddingTop: 4 },
+  planBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    alignItems: 'center',
+  },
 });

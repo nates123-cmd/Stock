@@ -46,7 +46,12 @@ export function Overlay({
         accessibilityLabel="Close overlay"
         accessibilityRole="button"
       />
-      <View style={[styles.panelWrap, anchor === 'center' && styles.center]}>
+      <View
+        style={[styles.panelWrap, anchor === 'center' && styles.center]}
+        // The wrapper's empty area (above the bottom-anchored panel) must
+        // pass touches through to the backdrop, or the dismiss tap is dead
+        // on web above the panel. Root cause of "can't exit the scaler".
+        pointerEvents="box-none">
         <View style={[styles.panel, anchor === 'center' && styles.panelCenter]}>
           <View style={styles.handle} />
           <Pressable

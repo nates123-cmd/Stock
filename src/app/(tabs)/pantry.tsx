@@ -15,6 +15,7 @@ import {
 } from '@/components';
 import { colors } from '@/design';
 import { usePantryStore } from '@/store/pantry';
+import { useExtrasStore } from '@/store/extras';
 import {
   cycleEstimateDays,
   formatCycle,
@@ -82,8 +83,11 @@ export default function PantryScreen() {
   const cycleStatus = usePantryStore((s) => s.cycleStatus);
   const setStatus = usePantryStore((s) => s.setStatus);
   const removeItem = usePantryStore((s) => s.remove);
+  const addExtras = useExtrasStore((s) => s.add);
+  const extras = useExtrasStore((s) => s.items);
   const [menu, setMenu] = useState<PantryItem | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
+  const [pushedToShop, setPushedToShop] = useState<number | null>(null);
   const openMenu = (it: PantryItem) => {
     setMenu(it);
     setNoteDraft(it.statusNote ?? '');
@@ -91,6 +95,46 @@ export default function PantryScreen() {
   const closeMenu = () => {
     setMenu(null);
     setNoteDraft('');
+  };
+
+  // Cross-section running-low view (spec §10). Shows everything `low` or
+  // `out` at the top of the pantry, sorted: out first, then low, alpha within.
+  const lowOrOut = useMemo(() => {
+    return items
+      .filter((i) => i.status === 'low' || i.status === 'out')
+      .sort((a, b) => {
+        const ra = a.status === 'out' ? 0 : 1;
+        const rb = b.status === 'out' ? 0 : 1;
+        if (ra !== rb) return ra - rb;
+        return a.canonicalName.localeCompare(b.canonicalName);
+      });
+  }, [items]);
+
+  const pushOutToShopping = () => {
+    const outs = items.filter((i) => i.status === 'out');
+    if (outs.length === 0) return;
+    // De-dupe against extras already pushed from this pantry origin to keep
+    // the shopping list quiet on repeat taps.
+    const existing = new Set(
+      extras.filter((e) => e.originId === 'pantry:running-low').map((e) => e.canonicalName.toLowerCase()),
+    );
+    const fresh = outs.filter((o) => !existing.has(o.canonicalName.toLowerCase()));
+    if (fresh.length === 0) {
+      setPushedToShop(0);
+      setTimeout(() => setPushedToShop(null), 3000);
+      return;
+    }
+    addExtras(
+      fresh.map((o) => ({
+        canonicalName: o.canonicalName,
+        amount: null,
+        unit: null,
+        originLabel: 'from pantry: running low',
+        originId: 'pantry:running-low',
+      })),
+    );
+    setPushedToShop(fresh.length);
+    setTimeout(() => setPushedToShop(null), 4000);
   };
 
   const last = useMemo(() => {
@@ -145,6 +189,40 @@ export default function PantryScreen() {
             onPress={() => router.push('/pantry-paste')}
           />
         </Card>
+
+        {lowOrOut.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.runningLowHead}>
+              <SectionLabel style={styles.sectionLabel} color="accent">
+                Running low · {lowOrOut.length}
+              </SectionLabel>
+              {lowOrOut.some((i) => i.status === 'out') ? (
+                <Pressable onPress={pushOutToShopping} hitSlop={6}>
+                  <Text variant="bodyStrong" color="accent">
+                    → Add out to shopping list
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {pushedToShop != null ? (
+              <Text color={pushedToShop > 0 ? 'ok' : 'textFaint'} style={styles.pushHint}>
+                {pushedToShop > 0
+                  ? `Added ${pushedToShop} item${pushedToShop === 1 ? '' : 's'} to this week's shopping list (Extras).`
+                  : 'Already staged on this run.'}
+              </Text>
+            ) : null}
+            <Card style={styles.runningLowCard}>
+              {lowOrOut.map((it) => (
+                <LooseRow
+                  key={`rl:${it.id}`}
+                  item={it}
+                  onCycle={() => cycleStatus(it.id)}
+                  onMenu={() => openMenu(it)}
+                />
+              ))}
+            </Card>
+          </View>
+        ) : null}
 
         {staples.length > 0 ? (
           <Section label="Always have">
@@ -440,7 +518,15 @@ function LooseRow({
               {' · '}
               {item.statusNote}
             </Text>
-          ) : null}
+          ) : (
+            // Discoverability for the long-press note affordance — without
+            // this, the only entry point was a hidden gesture (fix #5).
+            <Pressable onPress={onMenu} hitSlop={6}>
+              <Text color="textFaint" style={styles.addNoteHint}>
+                {'  · + note'}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </Pressable>
@@ -499,6 +585,15 @@ const styles = StyleSheet.create({
   empty: { paddingTop: 60, alignItems: 'center', gap: 6 },
   rightPill: { marginLeft: 'auto' },
   statusNote: { fontSize: 12, fontStyle: 'italic' },
+  addNoteHint: { fontSize: 12, fontStyle: 'italic' },
+  runningLowHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    paddingBottom: 4,
+  },
+  runningLowCard: { padding: 4, gap: 0, backgroundColor: colors.bg2 },
+  pushHint: { fontSize: 12, fontStyle: 'italic', paddingBottom: 6 },
   menu: { gap: 10, paddingTop: 4 },
   menuHint: { fontStyle: 'italic', lineHeight: 18, paddingBottom: 6 },
   menuStatusRow: { flexDirection: 'row', gap: 8 },

@@ -56,6 +56,10 @@ Deno.serve(async (req) => {
     maxTokens?: number;
     /** base64 application/pdf — when present, sent as a document block */
     pdfBase64?: string;
+    /** base64 image — when present, sent as a vision block */
+    imageBase64?: string;
+    /** mime type for imageBase64 (must be one of the Claude-supported types) */
+    imageMediaType?: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
     /** URL fetch branch — when present, do a server-side GET and return html */
     fetchUrl?: string;
   };
@@ -86,15 +90,41 @@ Deno.serve(async (req) => {
   if (pdf && pdf.length > 30 * 1024 * 1024) {
     return json({ error: 'pdf too large' }, 413);
   }
-  const content = pdf
-    ? [
-        {
-          type: 'document',
-          source: { type: 'base64', media_type: 'application/pdf', data: pdf },
-        },
-        { type: 'text', text: input },
-      ]
-    : input;
+  const img = typeof body.imageBase64 === 'string' ? body.imageBase64 : '';
+  // 8 MB base64 ≈ 6 MB binary — well under Claude's per-image 5MP / 20MB caps.
+  if (img && img.length > 8 * 1024 * 1024) {
+    return json({ error: 'image too large' }, 413);
+  }
+  const ALLOWED_IMAGE_TYPES = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+  ]);
+  const imgMedia =
+    img && ALLOWED_IMAGE_TYPES.has(body.imageMediaType ?? '')
+      ? (body.imageMediaType as string)
+      : 'image/jpeg';
+
+  let content: unknown = input;
+  if (pdf) {
+    content = [
+      {
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: pdf },
+      },
+      { type: 'text', text: input },
+    ];
+  } else if (img) {
+    // Image block before text — Anthropic best practice for vision tasks.
+    content = [
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: imgMedia, data: img },
+      },
+      { type: 'text', text: input },
+    ];
+  }
 
   let res: Response;
   try {
