@@ -65,7 +65,14 @@ export default function PipelineScreen() {
   const ideas = usePipelineStore((s) => s.ideas);
   const addExtras = useExtrasStore((s) => s.add);
   const removeExtrasByOrigin = useExtrasStore((s) => s.removeByOrigin);
-  const stagedOriginIds = useExtrasStore((s) => new Set(s.items.map((x) => x.originId)));
+  const extraItems = useExtrasStore((s) => s.items);
+  // Derive the Set in a memo. Returning `new Set(...)` straight from the
+  // zustand selector makes a new reference every render, which trips zustand's
+  // reference-equality check into an infinite update loop (React #185).
+  const stagedOriginIds = useMemo(
+    () => new Set(extraItems.map((x) => x.originId)),
+    [extraItems],
+  );
   const setExperiment = usePlanStore((s) => s.setExperiment);
   const [tab, setTab] = useState<Tab>('Active');
   const [pushed, setPushed] = useState<{ id: string; count: number } | null>(null);
