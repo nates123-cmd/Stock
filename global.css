@@ -28,3 +28,21 @@ body,
   height: 100vh !important;
   height: 100dvh !important;
 }
+
+/*
+ * Lock horizontal motion + pinch zoom at the document level (suite pattern,
+ * see tide/tick). touch-action: pan-y also disables pinch-zoom, which iOS
+ * Safari honors more reliably than the viewport's user-scalable=no. Inner
+ * swipe gestures (gesture-handler swipe-to-delete) declare their own
+ * touch-action, so they keep working.
+ */
+html,
+body,
+#root {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+html,
+body {
+  touch-action: pan-y;
+}
