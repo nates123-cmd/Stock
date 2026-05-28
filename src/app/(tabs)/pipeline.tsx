@@ -37,6 +37,29 @@ const STATUS_LABEL: Record<PipelineIdea['status'], string> = {
   promoted: 'promoted',
 };
 
+/**
+ * Expo Router route-level error boundary — renders instead of a blank screen
+ * if PipelineScreen throws, surfacing the error on-device with a retry.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        padding: 24,
+        gap: 12,
+        backgroundColor: colors.bg,
+        justifyContent: 'center',
+      }}>
+      <Heading variant="screenTitle">Pipeline hit an error</Heading>
+      <Text color="textMuted">{String(error?.message ?? error)}</Text>
+      <Pressable onPress={retry}>
+        <Text color="accent">Tap to retry</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 export default function PipelineScreen() {
   const router = useRouter();
   const ideas = usePipelineStore((s) => s.ideas);
@@ -112,7 +135,7 @@ export default function PipelineScreen() {
 
   const list = useMemo(() => {
     const byNew = (a: PipelineIdea, b: PipelineIdea) =>
-      b.createdAt.getTime() - a.createdAt.getTime();
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     let rs = ideas;
     if (tab === 'Active') rs = ideas.filter((i) => i.status !== 'promoted');
     else if (tab === 'Captured') rs = ideas.filter((i) => i.status === 'captured');
@@ -148,6 +171,7 @@ export default function PipelineScreen() {
           {list.map((idea) => {
             const promoted = idea.status === 'promoted';
             const staged = stagedOriginIds.has(idea.id);
+            const refCount = idea.references?.length ?? 0;
             return (
               <View
                 key={idea.id}
@@ -172,10 +196,10 @@ export default function PipelineScreen() {
                       {STATUS_LABEL[idea.status]}
                     </SectionLabel>
                     <Text color="textFaint" style={styles.meta}>
-                      {idea.references.length > 0
-                        ? `· ${idea.references.length} ref${idea.references.length === 1 ? '' : 's'} `
+                      {refCount > 0
+                        ? `· ${refCount} ref${refCount === 1 ? '' : 's'} `
                         : ''}
-                      · {relativeAge(idea.createdAt)}
+                      · {relativeAge(new Date(idea.createdAt))}
                     </Text>
                   </View>
                 </Pressable>
