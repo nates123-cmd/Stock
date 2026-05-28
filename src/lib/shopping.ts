@@ -192,6 +192,45 @@ export function consolidateLocalSmart(recipes: Recipe[]): ShoppingLine[] {
 }
 
 /**
+ * Reverse a fuzzy merge for the "keep separate" choice: rebuild one line per
+ * distinct source ingredient (same-text sources still sum together — that's a
+ * genuine quantity merge, not a cross-item one). Mirrors the local merge's
+ * quantity math so a split line reads like any other summed line.
+ */
+export function splitMerged(line: ShoppingLine): ShoppingLine[] {
+  const groups = new Map<string, ShoppingSource[]>();
+  for (const s of line.sources) {
+    const key = (s.text || '').toLowerCase().trim() || line.name;
+    (groups.get(key) ?? groups.set(key, []).get(key)!).push(s);
+  }
+  const out: ShoppingLine[] = [];
+  for (const ss of groups.values()) {
+    const name = (ss[0]?.text || line.name).trim();
+    let count = 0;
+    const units = new Map<string, number>();
+    for (const s of ss) {
+      if (s.amount == null) continue;
+      if (!s.unit || s.unit === 'pc') count += s.amount;
+      else units.set(s.unit, (units.get(s.unit) ?? 0) + s.amount);
+    }
+    const parts: string[] = [];
+    if (count > 0) parts.push(`${Math.ceil(count)} ${name}`);
+    for (const [u, a] of units) parts.push(`${+a.toFixed(2)} ${u}`);
+    out.push({
+      name,
+      category: categorizeIngredient(name),
+      buy: parts.join(' + ') || 'as needed',
+      math: ss
+        .map((s) => `${fmtQty(s.amount, s.unit)} ${s.text} (${s.recipe})`)
+        .join(' + '),
+      sources: ss,
+      confidence: 'summed',
+    });
+  }
+  return out;
+}
+
+/**
  * Consolidate a week's recipes into a fuzzy, estimated buy-list. Claude when
  * available, deterministic local merge otherwise.
  */

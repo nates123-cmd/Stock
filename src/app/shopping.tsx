@@ -32,6 +32,7 @@ import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
 import {
   consolidateSmart,
   consolidateLocalSmart,
+  splitMerged,
   instacartText,
   CATEGORY_ORDER,
   categorizeIngredient,
@@ -53,6 +54,26 @@ const CAT_LABEL: Record<ShoppingCategory, string> = {
 
 const srcQty = (s: ShoppingSource) =>
   s.amount == null ? 'some' : s.unit && s.unit !== 'pc' ? `${s.amount} ${s.unit}` : `×${s.amount}`;
+
+// Graceful fallback (Expo Router route boundary) instead of a blank screen.
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        padding: 24,
+        gap: 12,
+        backgroundColor: colors.bg,
+        justifyContent: 'center',
+      }}>
+      <Heading variant="screenTitle">Shopping list hit an error</Heading>
+      <Text color="textMuted">{String(error?.message ?? error)}</Text>
+      <Pressable onPress={retry}>
+        <Text color="accent">Tap to retry</Text>
+      </Pressable>
+    </View>
+  );
+}
 
 export default function ShoppingList() {
   const router = useRouter();
@@ -179,6 +200,44 @@ export default function ShoppingList() {
       cancelled = true;
     };
   }, [weekRecipes]);
+
+  // Smart-combine review (spec §8 follow-on): when the Claude pass fuzzily
+  // merges DIFFERENT-named ingredients into one buy line (cherry + grape
+  // tomatoes), surface them for one-tap approval. Kept-combined by default;
+  // "keep separate" splits a line back into its sources.
+  const mergeProposals = useMemo(
+    () =>
+      items.filter(
+        (i) =>
+          i.confidence === 'estimated' &&
+          new Set(i.sources.map((s) => (s.text || '').toLowerCase().trim())).size > 1,
+      ),
+    [items],
+  );
+  const [mergeReviewed, setMergeReviewed] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [keepSeparate, setKeepSeparate] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!refining && !mergeReviewed && mergeProposals.length > 0) setMergeOpen(true);
+  }, [refining, mergeReviewed, mergeProposals.length]);
+  const toggleKeepSeparate = (name: string) =>
+    setKeepSeparate((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  const applyMergeReview = () => {
+    if (keepSeparate.size > 0) {
+      setItems((prev) =>
+        prev.flatMap((line) =>
+          keepSeparate.has(line.name) ? splitMerged(line) : [line],
+        ),
+      );
+    }
+    setMergeReviewed(true);
+    setMergeOpen(false);
+  };
 
   const visibleItems = useMemo(
     () => items.filter((i) => !dismissed.has(`item:${i.name}`)),
@@ -580,6 +639,56 @@ export default function ShoppingList() {
             onClose={() => setMenu(null)}
           />
         ) : null}
+      </Overlay>
+
+      <Overlay visible={mergeOpen} onClose={applyMergeReview}>
+        <View style={{ gap: 12, maxHeight: 460 }}>
+          <Heading variant="recipeTitle">Combine these?</Heading>
+          <Text color="textMuted">
+            We merged a few similar items. Uncheck any you'd rather buy separately.
+          </Text>
+          <ScrollView style={{ maxHeight: 300 }}>
+            {mergeProposals.map((line) => {
+              const combined = !keepSeparate.has(line.name);
+              return (
+                <Pressable
+                  key={line.name}
+                  onPress={() => toggleKeepSeparate(line.name)}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    paddingVertical: 10,
+                  }}>
+                  <View
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 6,
+                      borderWidth: 1.5,
+                      borderColor: combined ? colors.accent : colors.textFaint,
+                      backgroundColor: combined ? colors.accent : 'transparent',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}>
+                    {combined ? (
+                      <Text style={{ color: colors.bg, fontWeight: '700', fontSize: 13 }}>
+                        ✓
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text numberOfLines={1}>{line.buy}</Text>
+                    <Text color="textMuted" variant="sectionLabel" numberOfLines={2}>
+                      {line.math}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Button label="Looks good" glyph="next" flex onPress={applyMergeReview} />
+        </View>
       </Overlay>
 
       <BottomActionBar>
