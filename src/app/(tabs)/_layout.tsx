@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { Glyph } from '@/components';
@@ -14,6 +15,11 @@ function TabGlyph({ name, focused }: { name: GlyphName; focused: boolean }) {
 }
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  // Lift the bar off the bottom edge / iOS home indicator. On this web export
+  // env(safe-area-inset-*) is 0 (no viewport-fit=cover), so floor the clearance
+  // so the labels clear the home indicator instead of sitting under it.
+  const bottomInset = Math.max(insets.bottom, 22);
   return (
     <Tabs
       screenOptions={{
@@ -24,6 +30,9 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: colors.bg2,
           borderTopColor: colors.line,
+          height: 56 + bottomInset,
+          paddingTop: 6,
+          paddingBottom: bottomInset,
         },
         tabBarLabelStyle: {
           fontFamily: fonts.sans,
