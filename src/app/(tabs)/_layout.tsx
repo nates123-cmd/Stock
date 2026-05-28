@@ -19,7 +19,7 @@ export default function TabLayout() {
   // Lift the bar off the bottom edge / iOS home indicator. On this web export
   // env(safe-area-inset-*) is 0 (no viewport-fit=cover), so floor the clearance
   // so the labels clear the home indicator instead of sitting under it.
-  const bottomInset = Math.max(insets.bottom, 22);
+  const bottomInset = Math.max(insets.bottom, 40);
   return (
     <Tabs
       screenOptions={{
