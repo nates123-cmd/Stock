@@ -11,10 +11,8 @@ import ReanimatedSwipeable, {
 import { Pressable as GHPressable } from 'react-native-gesture-handler';
 import {
   Text,
-  Heading,
   Numeric,
   SectionLabel,
-  Glyph,
   Button,
   Overlay,
   BottomActionBar,
@@ -25,17 +23,7 @@ import { useRecipeStore } from '@/store/recipes';
 import { useAuthStore } from '@/store/auth';
 import { useHaveStore } from '@/store/have';
 import type { Meal, PlanEntry, Recipe } from '@/types';
-import {
-  addWeeks,
-  dateKey,
-  dayLabel,
-  isPastWeek,
-  isSameDay,
-  startOfWeek,
-  weekDays,
-  weekOffsetLabel,
-  weekRangeLabel,
-} from '@/lib/week';
+import { dateKey, dayLabel, isSameDay, startOfWeek } from '@/lib/week';
 
 export default function PlanScreen() {
   const router = useRouter();
@@ -44,21 +32,22 @@ export default function PlanScreen() {
   const removeEntry = usePlanStore((s) => s.remove);
   const recipes = useRecipeStore((s) => s.recipes);
 
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [daysAhead, setDaysAhead] = useState(6); // today + next 5
   const [manage, setManage] = useState<PlanEntry | null>(null);
 
-  const readOnly = isPastWeek(weekStart);
-  // For the current week, hide already-past days — today should always be
-  // the first row. Other weeks (past read-only, future planning) show all
-  // 7 days so the grid is still a complete week-at-a-glance.
+  // Rolling view — always starts today, so it's always editable (no past weeks).
+  const readOnly = false;
+  // Today + the next (daysAhead - 1) days. setDate handles month/DST rollovers;
+  // "+ show more days" extends the window a week at a time.
   const days = useMemo(() => {
-    const all = weekDays(weekStart);
-    const isCurrentWeek =
-      startOfWeek(new Date()).getTime() === weekStart.getTime();
-    if (!isCurrentWeek) return all;
-    const todayKey = dateKey(new Date());
-    return all.filter((d) => dateKey(d) >= todayKey);
-  }, [weekStart]);
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return Array.from({ length: daysAhead }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      return d;
+    });
+  }, [daysAhead]);
   const recipeById = useMemo(() => {
     const m = new Map<string, Recipe>();
     recipes.forEach((r) => m.set(r.id, r));
@@ -112,23 +101,6 @@ export default function PlanScreen() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <AccountBar />
-      {/* Week nav */}
-      <View style={styles.weeknav}>
-        <Pressable onPress={() => setWeekStart((w) => addWeeks(w, -1))} hitSlop={10}>
-          <Glyph name="pageLeft" size={22} color="textMuted" />
-        </Pressable>
-        <View style={styles.weekmid}>
-          <Heading variant="recipeTitle">{weekRangeLabel(weekStart)}</Heading>
-          <Text color={readOnly ? 'textFaint' : 'textMuted'}>
-            {weekOffsetLabel(weekStart)}
-            {readOnly ? ' · read-only' : ''}
-          </Text>
-        </View>
-        <Pressable onPress={() => setWeekStart((w) => addWeeks(w, 1))} hitSlop={10}>
-          <Glyph name="pageRight" size={22} color="textMuted" />
-        </Pressable>
-      </View>
-
       <ScrollView contentContainerStyle={styles.grid}>
         {days.map((day) => {
           const today = isSameDay(day, new Date());
@@ -210,11 +182,9 @@ export default function PlanScreen() {
             </View>
           );
         })}
-        {days.length === 0 ? (
-          <Text color="textMuted" style={styles.emptyWeek}>
-            Nothing left in this week. Tap → for next week.
-          </Text>
-        ) : null}
+        <Pressable style={styles.moreDays} onPress={() => setDaysAhead((n) => n + 7)}>
+          <Text color="textFaint">+ Show more days</Text>
+        </Pressable>
       </ScrollView>
 
       <BottomActionBar
@@ -237,7 +207,7 @@ export default function PlanScreen() {
           onPress={() =>
             router.push({
               pathname: '/shopping',
-              params: { weekStart: weekStart.toISOString() },
+              params: { weekStart: startOfWeek(new Date()).toISOString() },
             })
           }
         />
@@ -467,16 +437,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPadding,
     paddingTop: 10,
   },
-  weeknav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: layout.screenPadding,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
-  },
-  weekmid: { alignItems: 'center', gap: 2 },
+  moreDays: { alignItems: 'center', paddingVertical: 16 },
   // Day-row hierarchy (spec §5): grouping is visual, not structural — each
   // day's rows share a card-like container with a left gutter pinning the
   // day label so empty + breakfast / + lunch cells anchor to a date instead
