@@ -8,7 +8,14 @@
  */
 import type { Ingredient, Nutrition, Recipe, RecipeSource, Step } from '@/types';
 import { uid } from '@/lib/id';
-import { CLAUDE_AVAILABLE, claudeText, claudePdf, proxyFetch } from '@/lib/api/claudeBridge';
+import {
+  CLAUDE_AVAILABLE,
+  claudeText,
+  claudePdf,
+  claudeImage,
+  proxyFetch,
+  type ImageMediaType,
+} from '@/lib/api/claudeBridge';
 import { localParseRecipe } from './localRecipe';
 import { extractRecipeJsonLd } from './jsonld';
 
@@ -260,6 +267,53 @@ export async function parseRecipeFromPdf(
       ingredients: 'extracted',
       steps: 'extracted',
       yield: 'extracted',
+    },
+  };
+}
+
+const IMAGE_PROMPT =
+  'Read the recipe in this image (photo of a printed page, screenshot, or ' +
+  'handwriting) and extract it into the JSON schema. If the image is not a ' +
+  'recipe, still return the JSON but leave ingredients/steps empty. ' +
+  'Output ONLY the JSON object.';
+
+/**
+ * §11.1 — parse a photo or screenshot of a recipe. Claude vision OCRs and
+ * structures in one shot. No local fallback — there's no on-device OCR.
+ * Fields are marked `parsed` (not `extracted`) because OCR/handwriting
+ * ambiguity is real; the review screen will let the user fix anything wrong.
+ */
+export async function parseRecipeFromImage(
+  imageBase64: string,
+  imageMediaType: ImageMediaType,
+  source: RecipeSource = { type: 'mine' },
+): Promise<ParsedRecipeDraft> {
+  if (!CLAUDE_AVAILABLE) {
+    throw new Error(
+      'Photo import needs Claude — add EXPO_PUBLIC_ANTHROPIC_API_KEY (native) ' +
+        'or configure the Claude proxy (web).',
+    );
+  }
+  const out = await claudeImage(
+    'recipe-image',
+    SYSTEM,
+    imageBase64,
+    imageMediaType,
+    IMAGE_PROMPT,
+  );
+  const mapped = mapRaw(extractJson(out));
+  if ((mapped.ingredients?.length ?? 0) === 0 && (mapped.steps?.length ?? 0) === 0) {
+    throw new Error("I couldn't find a recipe in that image. Try a clearer shot.");
+  }
+  return {
+    ...mapped,
+    source,
+    status: 'draft',
+    fieldConfidence: {
+      title: 'parsed',
+      ingredients: 'parsed',
+      steps: 'parsed',
+      yield: 'parsed',
     },
   };
 }

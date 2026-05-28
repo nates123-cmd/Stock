@@ -26,6 +26,7 @@ import { tokenizeStep } from '@/lib/cookText';
 import { formatMinutes } from '@/lib/format';
 import { uid } from '@/lib/id';
 import { makeMod } from '@/lib/recipe';
+import { pushCookToTide } from '@/lib/tide';
 import type { Cook, Ingredient, Modification, Recipe, Step } from '@/types';
 
 type Mode = 'focused' | 'glance' | 'notes';
@@ -73,6 +74,9 @@ export default function CookScreen() {
   const [pendingMods, setPendingMods] = useState<Modification[]>([]);
   const [editingIng, setEditingIng] = useState<Ingredient | null>(null);
   const [addingIng, setAddingIng] = useState(false);
+  // Servings cooked (spec §7). Defaults to recipe.yield.serves; the stepper
+  // in PostCook lets the user override before the Tide push is computed.
+  const [servings, setServings] = useState<number>(0);
 
   if (!recipe) {
     return (
@@ -88,7 +92,11 @@ export default function CookScreen() {
   const markDone = (ordinal: number) =>
     setDoneSteps((prev) => new Set(prev).add(ordinal));
 
-  const finishCook = () => setPhase('post');
+  const finishCook = () => {
+    // Seed servings from the recipe; the stepper in PostCook can override.
+    setServings(recipe.yield.serves);
+    setPhase('post');
+  };
 
   const saveCook = async () => {
     const finishedAt = new Date();
@@ -96,6 +104,7 @@ export default function CookScreen() {
       1,
       Math.round((finishedAt.getTime() - startedAt.current.getTime()) / 60000),
     );
+    const effectiveServings = servings > 0 ? servings : recipe.yield.serves;
     const cook: Cook = {
       id: cookId,
       recipeId: recipe.id,
@@ -108,9 +117,13 @@ export default function CookScreen() {
       // Cook.mode is the cooking style — if they happened to finish from the
       // Notes view, fall back to Glance (the default).
       mode: mode === 'notes' ? 'glance' : mode,
+      servingsCooked: effectiveServings,
     };
     await recordCook(cook);
     await saveRecipe({ ...recipe, cookCount: recipe.cookCount + 1, modifiedAt: finishedAt });
+    // Tide calorie push — fire-and-forget so a failed network call never
+    // blocks the save. Has its own no-op paths for no-nutrition / signed-out.
+    void pushCookToTide(cook, recipe, effectiveServings);
     router.back();
   };
 
@@ -243,6 +256,8 @@ export default function CookScreen() {
         cookNumber={cookNumber}
         note={note}
         setNote={setNote}
+        servings={servings || recipe.yield.serves}
+        setServings={setServings}
         onSkip={() => router.back()}
         onSave={saveCook}
       />
@@ -642,6 +657,8 @@ function PostCook({
   cookNumber,
   note,
   setNote,
+  servings,
+  setServings,
   onSkip,
   onSave,
 }: {
@@ -651,9 +668,12 @@ function PostCook({
   cookNumber: number;
   note: string;
   setNote: (s: string) => void;
+  servings: number;
+  setServings: (n: number) => void;
   onSkip: () => void;
   onSave: () => void;
 }) {
+  const hasNutrition = !!recipe.nutrition?.calories;
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.postContent}>
@@ -680,6 +700,40 @@ function PostCook({
             multiline
             style={styles.noteInput}
           />
+        </View>
+
+        {/* Servings cooked (spec §7) — drives the Tide calorie push. */}
+        <View style={styles.servingsRow}>
+          <SectionLabel color="textMuted">Cooked for</SectionLabel>
+          <View style={styles.servingsStepper}>
+            <Pressable
+              onPress={() => setServings(Math.max(1, servings - 1))}
+              style={styles.servingsBtn}
+              hitSlop={8}>
+              <Text variant="recipeTitle">−</Text>
+            </Pressable>
+            <View style={styles.servingsNum}>
+              <Numeric color="text">{servings}</Numeric>
+              <Text color="textMuted"> servings</Text>
+            </View>
+            <Pressable
+              onPress={() => setServings(Math.min(99, servings + 1))}
+              style={styles.servingsBtn}
+              hitSlop={8}>
+              <Text variant="recipeTitle">+</Text>
+            </Pressable>
+          </View>
+          {hasNutrition ? (
+            <Text color="textFaint" style={styles.tidePushHint}>
+              {Math.round((recipe.nutrition?.calories ?? 0) * servings)} kcal will sync to Tide
+              {recipe.nutrition?.source === 'estimated' ? ' (estimated)' : ''}.
+            </Text>
+          ) : (
+            <Text color="textFaint" style={styles.tidePushHint}>
+              No calorie data on this recipe — nothing will sync to Tide. Add nutrition
+              from the recipe to enable.
+            </Text>
+          )}
         </View>
       </ScrollView>
 
@@ -1022,4 +1076,22 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
+  servingsRow: { width: '100%', gap: 8, paddingTop: 14 },
+  servingsStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingVertical: 4,
+  },
+  servingsBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  servingsNum: { flexDirection: 'row', alignItems: 'baseline', flex: 1 },
+  tidePushHint: { fontStyle: 'italic', lineHeight: 18, paddingTop: 2 },
 });

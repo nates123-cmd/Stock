@@ -131,6 +131,10 @@ export type Cook = {
   /** if user scaled */
   scaleFactor?: number;
   mode: 'focused' | 'glance';
+  /** cook-time override of recipe.yield.serves; drives the Tide calorie push (spec §7) */
+  servingsCooked?: number;
+  /** when meal_log push succeeded; used for idempotent re-saves */
+  tidePushedAt?: Date;
 };
 
 export type PipelineIdea = {

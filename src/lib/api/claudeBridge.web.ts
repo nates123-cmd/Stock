@@ -12,6 +12,8 @@
 const PROXY_URL = process.env.EXPO_PUBLIC_CLAUDE_PROXY_URL;
 const PROXY_SECRET = process.env.EXPO_PUBLIC_CLAUDE_PROXY_SECRET;
 
+export type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
 // Match MODELS.fast / .reasoning in ./claude (kept literal so the SDK module
 // — and its deps — stay out of the web bundle).
 const FAST_MODEL = 'claude-haiku-4-5';
@@ -60,6 +62,24 @@ export async function claudePdf(
     system,
     input: prompt,
     pdfBase64,
+    model: REASON_MODEL,
+    maxTokens: 3000,
+  });
+}
+
+export async function claudeImage(
+  task: string,
+  system: string,
+  imageBase64: string,
+  imageMediaType: ImageMediaType,
+  prompt: string,
+): Promise<string> {
+  return postProxy({
+    task,
+    system,
+    input: prompt,
+    imageBase64,
+    imageMediaType,
     model: REASON_MODEL,
     maxTokens: 3000,
   });

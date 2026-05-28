@@ -32,10 +32,11 @@ import {
   parseRecipeFromText,
   parseRecipeFromUrl,
   parseRecipeFromPdf,
+  parseRecipeFromImage,
   detectSource,
   type ParsedRecipeDraft,
 } from '@/lib/parsing';
-import { CLAUDE_AVAILABLE } from '@/lib/api/claudeBridge';
+import { CLAUDE_AVAILABLE, type ImageMediaType } from '@/lib/api/claudeBridge';
 import { formatAmount } from '@/lib/format';
 import { uid } from '@/lib/id';
 import type { Recipe, RecipeSource } from '@/types';
@@ -45,12 +46,36 @@ type Step = 'capture' | 'parsing' | 'review' | 'saved';
 const isUrl = (s: string) => /^https?:\/\//i.test(s.trim());
 
 const MAX_PDF_BYTES = 12 * 1024 * 1024; // recipes are tiny; Anthropic cap is 32MB
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // ~6 MB binary; comfortably under proxy 8MB-base64 cap
+
+const ALLOWED_IMAGE_TYPES: ReadonlySet<ImageMediaType> = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
+
+function inferImageType(mime: string | undefined, uri: string): ImageMediaType {
+  const fromMime = (mime ?? '').toLowerCase();
+  if (ALLOWED_IMAGE_TYPES.has(fromMime as ImageMediaType)) return fromMime as ImageMediaType;
+  // Some pickers don't surface a mime — fall back to extension. iOS HEIC
+  // photos get converted to JPEG by the picker, so we don't handle them here.
+  const ext = (uri.toLowerCase().split('?')[0] ?? '').split('.').pop();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  return 'image/jpeg';
+}
 
 /** Read a picked file (native file:// or web blob:) into base64, no prefix. */
-async function fileToBase64(uri: string): Promise<string> {
+async function fileToBase64(uri: string, maxBytes: number, kind: 'PDF' | 'image'): Promise<string> {
   const blob = await (await fetch(uri)).blob();
-  if (blob.size > MAX_PDF_BYTES) {
-    throw new Error('That PDF is large — try a single-recipe print/export.');
+  if (blob.size > maxBytes) {
+    throw new Error(
+      kind === 'PDF'
+        ? 'That PDF is large — try a single-recipe print/export.'
+        : 'That image is too large — try a smaller screenshot or photo.',
+    );
   }
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -165,7 +190,7 @@ export default function CaptureFlow() {
     const tick = (i: number, state: ProgressStep['state']) =>
       setProgress((p) => p.map((s, idx) => (idx === i ? { ...s, state } : s)));
     try {
-      const b64 = await fileToBase64(asset.uri);
+      const b64 = await fileToBase64(asset.uri, MAX_PDF_BYTES, 'PDF');
       tick(0, 'done');
       tick(1, 'doing');
       const d = await parseRecipeFromPdf(b64);
@@ -178,6 +203,53 @@ export default function CaptureFlow() {
       setStep('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read that PDF.');
+    }
+  }, []);
+
+  const runPhotoImport = useCallback(async () => {
+    // DocumentPicker with image/* cross-platform: on iOS Safari the file
+    // input shows "Take Photo / Photo Library / Choose Files" — that's the
+    // camera path for the PWA. On native it shows Files; users with photo-
+    // roll access install expo-image-picker as a v1.1 upgrade.
+    let picked: DocumentPicker.DocumentPickerResult;
+    try {
+      picked = await DocumentPicker.getDocumentAsync({
+        type: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+    } catch {
+      return;
+    }
+    if (picked.canceled || !picked.assets?.[0]) return;
+    const asset = picked.assets[0];
+
+    setStep('parsing');
+    setError(null);
+    const seq: ProgressStep[] = [
+      { label: 'Read the photo', state: 'doing' },
+      { label: 'Reading the recipe (OCR)', state: 'todo' },
+      { label: 'Checking against your pantry', state: 'todo' },
+      { label: 'Suggesting tags', state: 'todo' },
+    ];
+    setProgress(seq);
+    const tick = (i: number, state: ProgressStep['state']) =>
+      setProgress((p) => p.map((s, idx) => (idx === i ? { ...s, state } : s)));
+    try {
+      const b64 = await fileToBase64(asset.uri, MAX_IMAGE_BYTES, 'image');
+      const mediaType = inferImageType(asset.mimeType, asset.uri);
+      tick(0, 'done');
+      tick(1, 'doing');
+      const d = await parseRecipeFromImage(b64, mediaType);
+      tick(1, 'done');
+      tick(2, 'done');
+      tick(3, 'done');
+      setDraft(d);
+      setTitle(d.title ?? '');
+      setServes(String(d.yield?.serves ?? 4));
+      setStep('review');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not read that image.');
     }
   }, []);
 
@@ -230,6 +302,7 @@ export default function CaptureFlow() {
             onCancel={close}
             onNext={runParse}
             onPickPdf={runPdfImport}
+            onPickPhoto={runPhotoImport}
           />
         )}
         {step === 'parsing' && (
@@ -287,6 +360,7 @@ function CaptureStep({
   onCancel,
   onNext,
   onPickPdf,
+  onPickPhoto,
 }: {
   raw: string;
   setRaw: (s: string) => void;
@@ -296,6 +370,7 @@ function CaptureStep({
   onCancel: () => void;
   onNext: () => void;
   onPickPdf: () => void;
+  onPickPhoto: () => void;
 }) {
   const recipes = useRecipeStore((s) => s.recipes);
   const [tip, setTip] = useState<string | null>(null);
@@ -336,12 +411,7 @@ function CaptureStep({
         <View style={styles.modeRow}>
           <Button label="Type" variant="secondary" flex onPress={() => inputRef.current?.focus()} />
           <Button label="PDF" variant="secondary" flex onPress={onPickPdf} />
-          <Button
-            label="Voice"
-            variant="secondary"
-            flex
-            onPress={() => setTip('Voice capture is deferred to v1.1 (spec §12).')}
-          />
+          <Button label="Photo" variant="secondary" flex onPress={onPickPhoto} />
         </View>
         {tip ? (
           <Text color="textMuted" style={styles.tip}>

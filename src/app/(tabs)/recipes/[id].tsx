@@ -697,7 +697,10 @@ function NotesEditor({
       lastSavedRef.current = next;
       await onSave(next);
       setSaved(true);
-      setTimeout(() => setSaved(false), 1800);
+      // 4s linger so the badge is actually noticed mid-type. Originally
+      // 1.8s, which was below "did that just blink?" perceptual threshold
+      // for users who type-then-look — fix #4.
+      setTimeout(() => setSaved(false), 4000);
     },
     [onSave],
   );
@@ -728,11 +731,14 @@ function NotesEditor({
       <View style={styles.notesHead}>
         <SectionLabel color="textMuted">My notes</SectionLabel>
         {saved ? (
-          <Text variant="sectionLabel" color="ok">
-            Saved
-          </Text>
+          <View style={styles.savedBadge}>
+            <Glyph name="done" size={11} color="bg" />
+            <Text variant="sectionLabel" color="bg" style={styles.savedBadgeText}>
+              Saved
+            </Text>
+          </View>
         ) : dirty ? (
-          <Text variant="sectionLabel" color="textFaint">
+          <Text variant="sectionLabel" color="warn">
             Saving…
           </Text>
         ) : null}
@@ -937,4 +943,14 @@ const styles = StyleSheet.create({
   nutriCell: { alignItems: 'center', flex: 1, gap: 2 },
   nutriVal: { fontSize: 18 },
   nutriLabel: { fontSize: 11 },
+  savedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.ok,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+  },
+  savedBadgeText: { letterSpacing: 0.4 },
 });

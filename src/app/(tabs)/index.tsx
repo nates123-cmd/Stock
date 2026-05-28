@@ -530,7 +530,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   emptyText: { fontStyle: 'italic' },
-  cellTitle: { flex: 1 },
+  // minWidth: 0 lets the title shrink on narrow phones — RN/web flex
+  // children default to min-content sizing, so without this a long recipe
+  // title shoves the `exp` tag off the row. Same defensive pattern used in
+  // shopping.tsx (#10 overlapping text on mobile).
+  cellTitle: { flex: 1, minWidth: 0 },
   strike: { textDecorationLine: 'line-through' },
   addSide: {
     minHeight: 32,
