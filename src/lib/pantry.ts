@@ -121,6 +121,19 @@ export function matchKey(canonicalName: string): string {
   return canonicalName.split(',')[0]!.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+/**
+ * Base ingredient for "always have" matching: the head noun (last word) of the
+ * match key. English ingredient names put the modifier first, so the head noun
+ * is the staple — "fine sea salt", "kosher salt" and "salt, to taste" all
+ * reduce to "salt". This lets one always-have pin suppress every variant of a
+ * staple, instead of matching the exact qualified name only.
+ */
+export function baseIngredient(canonicalName: string): string {
+  const mk = matchKey(canonicalName);
+  const words = mk.split(' ');
+  return words[words.length - 1] || mk;
+}
+
 export function coverageSet(items: PantryItem[]): Set<string> {
   return new Set(items.map((i) => matchKey(i.canonicalName)));
 }

@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -27,7 +27,16 @@ import { formatMinutes } from '@/lib/format';
 import { uid } from '@/lib/id';
 import { makeMod } from '@/lib/recipe';
 import { pushCookToTide } from '@/lib/tide';
+import { webPersist } from '@/lib/db/webStore';
 import type { Cook, Ingredient, Modification, Recipe, Step } from '@/types';
+
+const NATIVE = Platform.OS !== 'web';
+// In-cook note draft (web). The note only lands on the Cook record when the
+// cook is marked done; until then it lived in memory with no persistence and
+// no save feedback. Persist a per-recipe draft as the user types so it
+// survives leaving/reloading mid-cook, and surface a Saved badge like the
+// recipe notes editor. Cleared once the note is committed to the Cook.
+const noteDraftKey = (recipeId: string) => `cook-note-draft:${recipeId}`;
 
 type Mode = 'focused' | 'glance' | 'notes';
 type Phase = 'cooking' | 'post';
@@ -78,6 +87,56 @@ export default function CookScreen() {
   // in PostCook lets the user override before the Tide push is computed.
   const [servings, setServings] = useState<number>(0);
 
+  // — In-cook note: autosave a per-recipe draft + show a Saved badge —
+  const [noteSaved, setNoteSaved] = useState(false);
+  const lastSavedNote = useRef('');
+  const noteHydrated = useRef(false);
+  const noteRef = useRef(note);
+  noteRef.current = note;
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noteDirty = noteHydrated.current && note !== lastSavedNote.current;
+
+  const persistNote = useCallback(
+    async (value: string) => {
+      if (NATIVE || !id || value === lastSavedNote.current) return;
+      lastSavedNote.current = value;
+      await webPersist.save(noteDraftKey(id), value);
+      setNoteSaved(true);
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setNoteSaved(false), 4000);
+    },
+    [id],
+  );
+
+  // Restore any draft left from an unfinished cook of this recipe.
+  useEffect(() => {
+    if (NATIVE || !id) { noteHydrated.current = true; return; }
+    let alive = true;
+    void (async () => {
+      const saved = await webPersist.load<string>(noteDraftKey(id));
+      if (alive && saved) {
+        lastSavedNote.current = saved;
+        setNote(saved);
+      }
+      noteHydrated.current = true;
+    })();
+    return () => { alive = false; };
+  }, [id]);
+
+  // Debounce-save on every keystroke (500ms idle); force-save on unmount.
+  useEffect(() => {
+    if (!noteHydrated.current || NATIVE || note === lastSavedNote.current) return;
+    const t = setTimeout(() => void persistNote(note), 500);
+    return () => clearTimeout(t);
+  }, [note, persistNote]);
+  useEffect(() => {
+    return () => {
+      if (!NATIVE && id && noteRef.current !== lastSavedNote.current) {
+        void webPersist.save(noteDraftKey(id), noteRef.current);
+      }
+    };
+  }, [id]);
+
   if (!recipe) {
     return (
       <SafeAreaView style={styles.root}>
@@ -124,6 +183,11 @@ export default function CookScreen() {
     // Tide calorie push — fire-and-forget so a failed network call never
     // blocks the save. Has its own no-op paths for no-nutrition / signed-out.
     void pushCookToTide(cook, recipe, effectiveServings);
+    // Note now lives on the Cook record — drop the in-progress draft.
+    if (!NATIVE && id) {
+      lastSavedNote.current = note.trim();
+      void webPersist.save(noteDraftKey(id), '');
+    }
     router.back();
   };
 
@@ -345,7 +409,7 @@ export default function CookScreen() {
           onAddIngredient={() => setAddingIng(true)}
         />
       ) : (
-        <NotesBody recipe={recipe} note={note} setNote={setNote} />
+        <NotesBody recipe={recipe} note={note} setNote={setNote} saved={noteSaved} dirty={noteDirty} />
       )}
 
       {/* Scrub overlay */}
@@ -619,10 +683,14 @@ function NotesBody({
   recipe,
   note,
   setNote,
+  saved,
+  dirty,
 }: {
   recipe: Recipe;
   note: string;
   setNote: (s: string) => void;
+  saved: boolean;
+  dirty: boolean;
 }) {
   return (
     <ScrollView contentContainerStyle={styles.notesBody} keyboardShouldPersistTaps="handled">
@@ -634,9 +702,23 @@ function NotesBody({
           </Text>
         </Card>
       ) : null}
-      <SectionLabel color="textMuted">This cook</SectionLabel>
+      <View style={styles.notesHead}>
+        <SectionLabel color="textMuted">This cook</SectionLabel>
+        {saved ? (
+          <View style={styles.savedBadge}>
+            <Glyph name="done" size={11} color="bg" />
+            <Text variant="sectionLabel" color="bg" style={styles.savedBadgeText}>
+              Saved
+            </Text>
+          </View>
+        ) : dirty ? (
+          <Text variant="sectionLabel" color="warn">
+            Saving…
+          </Text>
+        ) : null}
+      </View>
       <Text color="textFaint" style={styles.notesHint}>
-        Jot down what's working or what to change next time — saved with this cook when you mark it done.
+        Autosaves as you type, and is filed with this cook when you mark it done.
       </Text>
       <TextInput
         value={note}
@@ -915,6 +997,17 @@ const styles = StyleSheet.create({
   },
   notesRecipeCard: { gap: 8 },
   notesRecipeText: { lineHeight: 20 },
+  notesHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  savedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.ok,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+  },
+  savedBadgeText: { letterSpacing: 0.4 },
   notesHint: { fontStyle: 'italic', lineHeight: 18 },
   notesInput: {
     borderWidth: 1,

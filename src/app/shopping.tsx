@@ -27,7 +27,7 @@ import { useHaveStore } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
 import { usePantryStore } from '@/store/pantry';
 import type { PantryStatus } from '@/types';
-import { matchKey } from '@/lib/pantry';
+import { matchKey, baseIngredient } from '@/lib/pantry';
 import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
 import {
   consolidateSmart,
@@ -244,13 +244,26 @@ export default function ShoppingList() {
     [items, dismissed],
   );
 
+  /** Base ingredients the user has pinned as "always have" (head-noun of each
+   *  pinned name), so one "salt" pin covers every salt variant. */
+  const alwaysHaveBases = useMemo(
+    () => new Set(Object.keys(alwaysHaveMap).map(baseIngredient)),
+    [alwaysHaveMap],
+  );
+
   /** Should this canonical name appear in the Already-have bucket? True if
-   *  the user marked it this run OR they've pinned it as "always have".
-   *  Pantry-status 'out' overrides everything else — out items are auto-
-   *  promoted to the buy list and the have toggle is suppressed (spec §5). */
+   *  the user marked it this run OR they've pinned it (or its base staple) as
+   *  "always have". Pantry-status 'out' overrides everything else — out items
+   *  are auto-promoted to the buy list and the have toggle is suppressed
+   *  (spec §5). Always-routed items still render in the visible Already-have
+   *  bucket, so a base-match on a needed variant is recoverable, not hidden. */
   const inHave = (name: string) => {
     if (statusFor(name) === 'out') return false;
-    return isMarked(haveByName, name) || alwaysHaveMap[name.toLowerCase().trim()] === true;
+    return (
+      isMarked(haveByName, name) ||
+      alwaysHaveMap[name.toLowerCase().trim()] === true ||
+      alwaysHaveBases.has(baseIngredient(name))
+    );
   };
 
   /** Lines actually destined for the cart — everything visible (consolidated
