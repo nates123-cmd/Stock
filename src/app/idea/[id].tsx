@@ -217,7 +217,7 @@ export default function IdeaDetail() {
             ) : null}
           </View>
 
-          <Button label="Cooked it → Recipe" glyph="done" onPress={cookedIt} />
+          <Button label="Cooked it → Recipe" glyph="done" style={styles.cookedBtn} onPress={cookedIt} />
 
           <View style={styles.shopRow}>
             <Button
@@ -367,6 +367,7 @@ const styles = StyleSheet.create({
   note: { lineHeight: 21, paddingVertical: 10 },
   promotedCard: { gap: 10, marginTop: 12 },
   statusRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  cookedBtn: { marginTop: 10 },
   tip: { fontStyle: 'italic', lineHeight: 19, paddingTop: 10 },
   section: { paddingTop: 22, gap: 8 },
   refCard: { gap: 10 },

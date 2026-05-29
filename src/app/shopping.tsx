@@ -756,13 +756,15 @@ function ShoppingRow({
   //   to commit because delete is destructive (consolidated rows lose group
   //   context, Extras rows go for good).
   const swipeRef = useRef<SwipeableMethods | null>(null);
+  // onSwipeableOpen reports the drag direction: a rightward drag reveals the
+  // left actions (Have), a leftward drag reveals the right actions (Delete).
   const handleOpen = (dir: 'left' | 'right') => {
-    if (dir === 'left') {
-      // Have toggle — commit-on-open, snap closed.
+    if (dir === 'right') {
+      // Swipe right → Have toggle — commit-on-open, snap closed.
       swipeRef.current?.close();
       onToggleHave();
     }
-    // dir === 'right' → leave the panel open; user must tap the Delete button.
+    // dir === 'left' → Delete panel revealed; user must tap the Delete button.
   };
   const handleDeletePress = () => {
     swipeRef.current?.close();
