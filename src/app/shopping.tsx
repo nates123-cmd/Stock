@@ -332,14 +332,21 @@ export default function ShoppingList() {
 
   // Shortcut Instacart path (spec §11 cross-app integrations — Developer
   // Platform path replaced with a copy-and-open until the API actually
-  // accepts a key): copy the consolidated buy list to the clipboard and
-  // open Instacart in a new tab / the native app. The user pastes the
-  // list into Instacart's Shopping List (which accepts a bulk paste).
-  // Must be /store/your-lists — that's the real authed Your-Lists route
-  // (redirects to login when signed out, and is a universal link into the
-  // iOS app's Shopping List). The old /lists just bounced to the marketing
-  // homepage, which was the wrong page.
-  const INSTACART_URL = 'https://www.instacart.com/store/your-lists';
+  // accepts a key): copy the consolidated buy list to the clipboard, then
+  // open Instacart so the user pastes the list into its Shopping List.
+  //
+  // Instacart's Shopping List (the bulk-paste surface) is iOS-app only —
+  // there is NO web URL for it, so any https link either 404s or shows
+  // Instacart's "something went wrong" page. So on iOS we deep-link into the
+  // installed app via its custom scheme (lands on the app home; the user
+  // taps Shopping List and pastes). On desktop web there's no app, so we
+  // open the storefront — which at least never errors. The only way to skip
+  // the manual paste entirely is the IDP "create shopping list page" API,
+  // which needs a key we don't have yet.
+  const INSTACART_APP = 'instacart://';
+  const INSTACART_WEB = 'https://www.instacart.com';
+  const isIOSWeb =
+    typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent);
   const copyAndOpen = async () => {
     const clip =
       typeof navigator !== 'undefined'
@@ -364,16 +371,28 @@ export default function ShoppingList() {
     // Open Instacart even if the copy failed — the user can paste from
     // the revealed text or re-tap once they grant clipboard access.
     if (Platform.OS === 'web') {
-      try {
-        window.open(INSTACART_URL, '_blank', 'noopener');
-      } catch {
-        // popup-blocked — surface a hint, the user can tap the link.
-        setHint(`Couldn't open Instacart automatically — go to ${INSTACART_URL}.`);
+      if (isIOSWeb) {
+        // Custom scheme launches the installed app. Navigating the PWA to it
+        // backgrounds Stock and foregrounds Instacart; if the app isn't
+        // installed iOS no-ops, so leave a hint either way.
+        setHint('Opening Instacart — go to Shopping List and paste your list.');
+        try {
+          window.location.href = INSTACART_APP;
+        } catch {
+          setHint('Open the Instacart app, go to Shopping List, and paste.');
+        }
+      } else {
+        try {
+          window.open(INSTACART_WEB, '_blank', 'noopener');
+        } catch {
+          setHint(`Couldn't open Instacart — go to ${INSTACART_WEB}.`);
+        }
       }
     } else {
-      await Linking.openURL(INSTACART_URL).catch(() => {
-        setHint(`Couldn't open Instacart — go to ${INSTACART_URL}.`);
-      });
+      await Linking.openURL(INSTACART_APP).catch(() =>
+        Linking.openURL(INSTACART_WEB).catch(() =>
+          setHint('Open the Instacart app, go to Shopping List, and paste.')),
+      );
     }
     if (didCopy) {
       setCopied(true);
