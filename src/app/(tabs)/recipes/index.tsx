@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   Screen,
@@ -125,13 +125,14 @@ export default function RecipesLibrary() {
         {recentlyCooked.length > 0 ? (
           <Section label="Recently cooked">
             {recentlyCooked.map((r) => (
-              <RecipeCard
-                key={r.id}
-                recipe={r}
-                onPress={() =>
-                  router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
-                }
-              />
+              <View key={r.id} style={styles.cardCell}>
+                <RecipeCard
+                  recipe={r}
+                  onPress={() =>
+                    router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
+                  }
+                />
+              </View>
             ))}
           </Section>
         ) : null}
@@ -139,13 +140,14 @@ export default function RecipesLibrary() {
         {library.length > 0 ? (
           <Section label="Library">
             {library.map((r) => (
-              <RecipeCard
-                key={r.id}
-                recipe={r}
-                onPress={() =>
-                  router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
-                }
-              />
+              <View key={r.id} style={styles.cardCell}>
+                <RecipeCard
+                  recipe={r}
+                  onPress={() =>
+                    router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
+                  }
+                />
+              </View>
             ))}
           </Section>
         ) : null}
@@ -186,6 +188,17 @@ const styles = StyleSheet.create({
   notice: { paddingVertical: 10 },
   section: { paddingTop: 14 },
   sectionLabel: { paddingBottom: 10 },
-  sectionBody: { gap: 12 },
+  // On web the library has the full browser width, so lay cards out as a
+  // responsive grid (multiple columns side by side). Native stays single
+  // column. cardCell carries the per-card sizing so RecipeCard itself stays
+  // width-independent.
+  sectionBody: {
+    gap: 12,
+    ...Platform.select({ web: { flexDirection: 'row', flexWrap: 'wrap' }, default: {} }),
+  },
+  cardCell: Platform.select({
+    web: { flexGrow: 1, flexBasis: 320, minWidth: 280 },
+    default: {},
+  }),
   empty: { paddingTop: 60, alignItems: 'center', gap: 6 },
 });
