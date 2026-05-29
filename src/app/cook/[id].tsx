@@ -48,6 +48,11 @@ export default function CookScreen() {
   const recipe = useRecipeStore((s) => s.recipes.find((r) => r.id === id));
   const saveRecipe = useRecipeStore((s) => s.save);
   const recordCook = useCookStore((s) => s.record);
+  // Most recent prior cook note for this recipe — surfaced in Glance so you
+  // see "what I learned last time" before cooking again. cooks are newest-first.
+  const lastNote = useCookStore(
+    (s) => s.cooks.find((c) => c.recipeId === id && c.note)?.note,
+  );
   const { timers, startTimer, clearTimer } = useCookTimers();
 
   const steps = useMemo(
@@ -333,6 +338,7 @@ export default function CookScreen() {
       ) : mode === 'glance' ? (
         <GlanceBody
           recipe={recipe}
+          lastNote={lastNote}
           steps={steps}
           doneSteps={doneSteps}
           expanded={expanded}
@@ -495,6 +501,7 @@ function FocusedBody({
 /* ---------- Glance ---------- */
 function GlanceBody({
   recipe,
+  lastNote,
   steps,
   doneSteps,
   expanded,
@@ -507,6 +514,7 @@ function GlanceBody({
   onAddIngredient,
 }: {
   recipe: Recipe;
+  lastNote?: string;
   steps: Step[];
   doneSteps: Set<number>;
   expanded: number | null;
@@ -529,6 +537,15 @@ function GlanceBody({
           serves {recipe.yield.serves}
           {time ? ` · ~${time}` : ''} · cooked {recipe.cookCount}×
         </SectionLabel>
+
+        {lastNote ? (
+          <Card style={styles.lastNoteCard}>
+            <SectionLabel color="textMuted">Note from last time</SectionLabel>
+            <Text color="text" style={styles.lastNoteText}>
+              “{lastNote}”
+            </Text>
+          </Card>
+        ) : null}
 
         <Card style={styles.ingCard}>
           {recipe.ingredients.map((ing) => (
@@ -967,6 +984,8 @@ const styles = StyleSheet.create({
   dim: { opacity: 0.35 },
   glanceContent: { padding: layout.screenPadding, gap: 14, paddingBottom: 30 },
   glanceTitle: { fontSize: 22 },
+  lastNoteCard: { gap: 6 },
+  lastNoteText: { lineHeight: 20, fontStyle: 'italic' },
   ingCard: { gap: 8 },
   ingGrid: { flexDirection: 'row', gap: 12, paddingVertical: 2 },
   ingGridAmt: { minWidth: 58 },
