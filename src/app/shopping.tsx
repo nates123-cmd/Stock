@@ -333,13 +333,13 @@ export default function ShoppingList() {
   // Shortcut Instacart path (spec §11 cross-app integrations — Developer
   // Platform path replaced with a copy-and-open until the API actually
   // accepts a key): copy the consolidated buy list to the clipboard and
-  // open Instacart in a new tab / the native app. The user pastes
-  // item-by-item into Instacart's search.
-  // Instacart's Lists surface is where the user actually inputs ingredients
-  // one-by-one (storefront opens you onto a retailer search, which is the
-  // wrong starting point). Falls back to the storefront if the deep link
-  // ever 404s.
-  const INSTACART_URL = 'https://www.instacart.com/lists';
+  // open Instacart in a new tab / the native app. The user pastes the
+  // list into Instacart's Shopping List (which accepts a bulk paste).
+  // Must be /store/your-lists — that's the real authed Your-Lists route
+  // (redirects to login when signed out, and is a universal link into the
+  // iOS app's Shopping List). The old /lists just bounced to the marketing
+  // homepage, which was the wrong page.
+  const INSTACART_URL = 'https://www.instacart.com/store/your-lists';
   const copyAndOpen = async () => {
     const clip =
       typeof navigator !== 'undefined'
