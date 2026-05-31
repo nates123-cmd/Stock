@@ -46,3 +46,30 @@ html,
 body {
   touch-action: pan-y;
 }
+
+/*
+ * Suppress the blue text-selection highlight that drags across the UI when you
+ * tap/long-press chrome on web (suite sweep). react-native-web's <Text>
+ * defaults to user-select:text unless selectable={false} is passed, so without
+ * a document-level reset, tapping buttons/labels/rows drags a selection across
+ * everything. Stock is tap-driven, so chrome selection is never intentional.
+ * -webkit-tap-highlight-color kills the grey tap flash on mobile Safari/Chrome.
+ *
+ * Re-enabled below for real form fields. Recipe/user content that should stay
+ * copyable (ingredients, steps, notes) opts back in per-<Text> via RN Web's
+ * `selectable` prop, which emits inline user-select:text and overrides this.
+ */
+html,
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+input,
+textarea,
+select,
+[contenteditable],
+[contenteditable] * {
+  -webkit-user-select: text;
+  user-select: text;
+}
