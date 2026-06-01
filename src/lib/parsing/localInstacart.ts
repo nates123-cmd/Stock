@@ -26,9 +26,13 @@ const PRICE_RE = /\$\s*\d+(?:\.\d{1,2})?/g;
 const LEAD_QTY_RE = /^\s*\(?(\d+(?:\.\d+)?)\)?\s*(?:[×x]|ct\b|count\b)?\s+/i;
 
 /** Multi-pack: "6 oz × 2", "2 × 6 oz", "2-pack 6 oz" → total amount + unit. */
-const PACK_A = /(\d+(?:\.\d+)?)\s*(oz|g|kg|lb|ml|l)\b[\s.]*[×x]\s*(\d+)/i;
-const PACK_B = /(\d+)\s*[×x]\s*(\d+(?:\.\d+)?)\s*(oz|g|kg|lb|ml|l)\b/i;
-const SINGLE_SIZE = /(\d+(?:\.\d+)?)\s*(oz|g|kg|lb|ml|l|gal)\b/i;
+// Unit alternations list the plural forms FIRST so the regex engine prefers
+// the longer match ("lbs" before "lb"); otherwise "lb" matches and the
+// trailing "s" breaks the \b boundary, dropping the size. normalizeUnit()
+// collapses the plural back to canonical.
+const PACK_A = /(\d+(?:\.\d+)?)\s*(oz|g|kg|lbs|lb|ml|l)\b[\s.]*[×x]\s*(\d+)/i;
+const PACK_B = /(\d+)\s*[×x]\s*(\d+(?:\.\d+)?)\s*(oz|g|kg|lbs|lb|ml|l)\b/i;
+const SINGLE_SIZE = /(\d+(?:\.\d+)?)\s*(oz|g|kg|lbs|lb|ml|l|gal)\b/i;
 
 function normalizeUnit(u: string): string {
   const x = u.toLowerCase();
@@ -67,12 +71,22 @@ function canonicalize(raw: string): string {
     .trim();
 
   // Drop a leading Capitalized brand run if a lowercase food word follows
-  // ("Driscoll's Raspberries" → "Raspberries", "King Arthur Bread Flour" kept
+  // ("Trader Joes mango salsa" → "mango salsa", "King Arthur Bread Flour" kept
   // when all-caps-ish because the noun is also capitalized).
-  const tokens = s.split(' ');
+  let tokens = s.split(' ');
   if (tokens.length > 2) {
     const firstLower = tokens.findIndex((t) => /^[a-z]/.test(t));
     if (firstLower > 0 && firstLower < tokens.length) s = tokens.slice(firstLower).join(' ');
+  }
+
+  // A leading possessive token is almost always the brand, even when the food
+  // noun that follows is also Capitalized ("Driscoll's Raspberries" →
+  // "Raspberries"). Strip it as long as at least one token remains. This is a
+  // strong brand signal, so it fires for the common 2-token case the
+  // Capitalized-run rule above (which needs a lowercase follower) misses.
+  tokens = s.split(' ');
+  if (tokens.length >= 2 && /['’]s$/i.test(tokens[0]!)) {
+    s = tokens.slice(1).join(' ');
   }
 
   s = s.toLowerCase().replace(/['’]s\b/g, '').replace(/\s{2,}/g, ' ').trim();

@@ -143,12 +143,24 @@ export function localParseRecipe(text: string, fallbackTitle = 'Untitled recipe'
       continue;
     }
 
+    // A numbered/ordinal line ("1. Preheat oven to 350", "2) Stir") is an
+    // instruction step, not a quantity-led ingredient. Genuine ingredient
+    // quantities are followed by a unit/food token with a space ("2 cups
+    // flour"), never by "." or ")", so this never steals a real ingredient.
+    // Must run BEFORE toIngredient(), whose INGREDIENT_RE would otherwise eat
+    // the ordinal "1." as a quantity and file the whole sentence as an
+    // ingredient (yielding zero steps).
+    if (/^\s*\d+[.)]\s+/.test(line)) {
+      stepLines.push(line);
+      continue;
+    }
+
     const ing = toIngredient(line);
     if (ing) {
       ingredients.push(ing);
       continue;
     }
-    if (/^\s*\d+[.)]\s+/.test(line) || line.length > 60) {
+    if (line.length > 60) {
       stepLines.push(line);
       continue;
     }

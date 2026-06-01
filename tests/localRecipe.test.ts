@@ -71,23 +71,30 @@ describe('localParseRecipe (keyless fallback)', () => {
     expect(r.steps.length).toBeGreaterThanOrEqual(1);
   });
 
-  // *** REAL APP BUG (documented, not patched — src is read-only here) ***
-  // A numbered step line like "1. Preheat the oven..." is misclassified as an
-  // INGREDIENT in the keyless fallback parser. toIngredient() runs before the
-  // numbered-step branch, and INGREDIENT_RE treats the leading ordinal "1." as
-  // a quantity (\d+[\d./]* eats "1."), so the whole sentence becomes an
-  // ingredient (amount:1, name:"preheat the oven...") and the step list is
-  // empty. See src/lib/parsing/localRecipe.ts (INGREDIENT_RE + the
-  // toIngredient-before-step ordering in localParseRecipe).
-  // This test pins the CURRENT behavior so a future fix is noticed.
-  it('BUG: numbered step lines are swallowed as ingredients (keyless parser)', () => {
+  // REGRESSION (bug fix): a numbered step line like "1. Preheat oven to 350"
+  // must route to steps, not be swallowed as an ingredient. The leading
+  // ordinal "1." used to be eaten by INGREDIENT_RE as a quantity. The fix runs
+  // the numbered-step branch BEFORE toIngredient() in localParseRecipe.
+  it('routes a numbered step line into steps, not ingredients', () => {
+    const r = localParseRecipe('1. Preheat oven to 350');
+    expect(r.steps).toHaveLength(1);
+    expect(r.ingredients).toHaveLength(0);
+    expect(r.steps[0]!.body).toBe('Preheat oven to 350');
+  });
+
+  it('routes several numbered steps in order and keeps quantity ingredients', () => {
     const r = localParseRecipe(
-      '1. Preheat the oven to a reasonable temperature and wait patiently for it',
+      '2 cups flour\n1. Preheat oven to 350\n2) Mix the dry ingredients',
     );
-    expect(r.steps).toHaveLength(0);
-    expect(r.ingredients).toHaveLength(1);
-    expect(r.ingredients[0]!.canonicalName).toContain('preheat the oven');
-    expect(r.ingredients[0]!.amount).toBe(1);
+    // the genuine quantity-led ingredient still parses as an ingredient
+    expect(r.ingredients.map((i) => i.canonicalName)).toEqual(['flour']);
+    const flour = r.ingredients[0]!;
+    expect(flour.amount).toBe(2);
+    expect(flour.unit).toBe('cup');
+    // both numbered lines became steps, in order
+    expect(r.steps.map((s) => s.ordinal)).toEqual([1, 2]);
+    expect(r.steps[0]!.body).toBe('Preheat oven to 350');
+    expect(r.steps[1]!.body).toBe('Mix the dry ingredients');
   });
 
   it('keeps an unknown unit word as part of the name', () => {

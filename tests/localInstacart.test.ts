@@ -43,15 +43,13 @@ describe('localParseInstacart (keyless fallback)', () => {
     expect(out[0]!.value.unit).toBe('lb');
   });
 
-  // NOTE (real limitation, not a test bug): the plural "lbs" is NOT recognized
-  // as a size because SINGLE_SIZE matches `lb\b`, and "lbs" has no word
-  // boundary after "lb". normalizeUnit() handles "lbs"→"lb" but is never
-  // reached for this token, so "Ground Beef 2 lbs" yields no amount/unit.
-  // Documented, not patched (app source is read-only here).
-  it('does NOT parse the plural "lbs" as a size (known gap)', () => {
+  // REGRESSION (bug fix): the plural "lbs" must be recognized as a size. The
+  // size regexes now list "lbs" before "lb" so the longer plural wins, and
+  // normalizeUnit() collapses it to "lb".
+  it('normalizes the plural "lbs" size to lb', () => {
     const out = localParseInstacart('Ground Beef 2 lbs');
-    expect(out[0]!.value.amount).toBeUndefined();
-    expect(out[0]!.value.unit).toBeUndefined();
+    expect(out[0]!.value.amount).toBe(2);
+    expect(out[0]!.value.unit).toBe('lb');
   });
 
   it('detects substitution and keeps the arrived item', () => {
@@ -71,13 +69,12 @@ describe('localParseInstacart (keyless fallback)', () => {
     expect(out[0]!.value.canonicalName).toBe('mango salsa');
   });
 
-  // NOTE (real limitation, not a test bug): with exactly 2 tokens the brand
-  // run is NOT stripped (the strip guard is `tokens.length > 2`), so
-  // "Driscoll's Raspberries" canonicalizes to "driscoll raspberries", not
-  // "raspberries". Documented, not patched.
-  it('does NOT strip the brand for a 2-token name (known gap)', () => {
+  // REGRESSION (bug fix): a leading 2-token possessive brand is now stripped.
+  // "Driscoll's Raspberries" → "raspberries" (the possessive token is a strong
+  // brand signal, fired even though the food noun is also Capitalized).
+  it('strips a leading possessive brand for a 2-token name', () => {
     const out = localParseInstacart("Driscoll's Raspberries");
-    expect(out[0]!.value.canonicalName).toBe('driscoll raspberries');
+    expect(out[0]!.value.canonicalName).toBe('raspberries');
   });
 
   it('strips price and parentheticals', () => {
