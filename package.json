@@ -9,6 +9,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "test": "vitest run",
     "_comment": "Node 26 (system default) breaks Expo/Metro: expo start hangs, expo export crashes (rnGetPolyfills). ALL scripts here force keg-only node@22. Run these in a real terminal (TTY) or a clean session. If export hangs/cache-errors, add: -- --clear",
     "dev:web": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" expo start --web --port 8088",
     "dev:ios": "PATH=\"/opt/homebrew/opt/node@22/bin:$PATH\" expo start --ios",
@@ -57,7 +58,8 @@
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "tailwindcss": "^3.4.19",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^2.1.9"
   },
   "private": true
 }
