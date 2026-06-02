@@ -36,7 +36,11 @@ export type PasteInput = {
   canonicalName: string;
   amount?: number;
   unit?: string;
-  originalInstacartText: string;
+  /** Source text for an Instacart paste. Optional for manual single-item adds. */
+  originalInstacartText?: string;
+  /** Manual-add overrides, honored only when the item is brand new (not a restock). */
+  location?: PantryLocation;
+  isStaple?: boolean;
 };
 
 export type PasteResult = {
@@ -130,7 +134,7 @@ export const usePantryStore = create<PantryState>((set, get) => ({
           expiresAt: computeExpiry(at, prev.defaultFreshnessDays),
           purchaseHistory,
           cycleEstimateDays: after,
-          originalInstacartText: row.originalInstacartText,
+          originalInstacartText: row.originalInstacartText ?? prev.originalInstacartText,
           // Restocking clears 'out' / 'low' — the user just bought more.
           // Preserve the note (it's about the item, not the state).
           status: 'fine',
@@ -150,13 +154,13 @@ export const usePantryStore = create<PantryState>((set, get) => ({
           canonicalName: row.canonicalName,
           amount: row.amount,
           unit: row.unit,
-          location: defaultLocation(cat),
-          isStaple: false,
+          location: row.location ?? defaultLocation(cat),
+          isStaple: row.isStaple ?? false,
           acquiredAt: at,
           defaultFreshnessDays: freshness,
           expiresAt: computeExpiry(at, freshness),
           purchaseHistory: [at],
-          originalInstacartText: row.originalInstacartText,
+          originalInstacartText: row.originalInstacartText ?? row.canonicalName,
           status: 'fine',
           statusUpdatedAt: at,
         };

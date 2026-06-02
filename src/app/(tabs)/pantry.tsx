@@ -24,7 +24,7 @@ import {
   isRecentlyAdded,
   shortDate,
 } from '@/lib/pantry';
-import type { PantryItem, PantryStatus } from '@/types';
+import type { PantryItem, PantryLocation, PantryStatus } from '@/types';
 
 /**
  * Pantry status pill (spec §10). The right-side affordance: 'fine' renders
@@ -83,11 +83,38 @@ export default function PantryScreen() {
   const cycleStatus = usePantryStore((s) => s.cycleStatus);
   const setStatus = usePantryStore((s) => s.setStatus);
   const removeItem = usePantryStore((s) => s.remove);
+  const applyPaste = usePantryStore((s) => s.applyPaste);
   const addExtras = useExtrasStore((s) => s.add);
   const extras = useExtrasStore((s) => s.items);
   const [menu, setMenu] = useState<PantryItem | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [pushedToShop, setPushedToShop] = useState<number | null>(null);
+
+  // Manual single-item add (spec §10 — was paste-only; this is the in-tab path).
+  const [adding, setAdding] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [addLocation, setAddLocation] = useState<PantryLocation>('pantry');
+  const [addStaple, setAddStaple] = useState(false);
+  const [addToast, setAddToast] = useState<string | null>(null);
+  const openAdd = () => {
+    setAddName('');
+    setAddLocation('pantry');
+    setAddStaple(false);
+    setAdding(true);
+  };
+  const submitAdd = async () => {
+    const name = addName.trim();
+    if (!name) return;
+    const res = await applyPaste([
+      { canonicalName: name, location: addLocation, isStaple: addStaple },
+    ]);
+    setAdding(false);
+    setAddToast(
+      res.restocks > 0 ? `Restocked ${name}.` : `Added ${name} to the pantry.`,
+    );
+    setTimeout(() => setAddToast(null), 3500);
+  };
+
   const openMenu = (it: PantryItem) => {
     setMenu(it);
     setNoteDraft(it.statusNote ?? '');
@@ -163,8 +190,17 @@ export default function PantryScreen() {
       <Screen>
         <View style={styles.header}>
           <Heading variant="screenTitle">Pantry</Heading>
-          <Text color="textMuted">{items.length} tracked</Text>
+          <View style={styles.headerRight}>
+            <Text color="textMuted">{items.length} tracked</Text>
+            <Button label="Add" glyph="add" onPress={openAdd} />
+          </View>
         </View>
+
+        {addToast ? (
+          <Text color="ok" style={styles.addToast}>
+            {addToast}
+          </Text>
+        ) : null}
 
         <Card style={styles.lastCard}>
           <View style={styles.flex}>
@@ -292,7 +328,10 @@ export default function PantryScreen() {
         {items.length === 0 ? (
           <View style={styles.empty}>
             <Text color="textMuted">Nothing tracked yet.</Text>
-            <Text color="textFaint">Paste an order to fill the pantry.</Text>
+            <Text color="textFaint">Paste an order or add an item to fill the pantry.</Text>
+            <View style={styles.emptyActions}>
+              <Button label="Add item" glyph="add" onPress={openAdd} />
+            </View>
           </View>
         ) : null}
       </Screen>
@@ -384,6 +423,75 @@ export default function PantryScreen() {
             </Pressable>
           </View>
         ) : null}
+      </Overlay>
+
+      <Overlay visible={adding} onClose={() => setAdding(false)}>
+        <View style={styles.menu}>
+          <Text variant="recipeTitle">Add to pantry</Text>
+          <Text color="textFaint" style={styles.menuHint}>
+            One item. If it matches something you already track, it merges in as a
+            restock and refreshes the cycle estimate.
+          </Text>
+
+          <View style={styles.noteWrap}>
+            <SectionLabel color="textMuted">Item</SectionLabel>
+            <TextInput
+              value={addName}
+              onChangeText={setAddName}
+              placeholder="e.g. olive oil"
+              placeholderTextColor={colors.textFaint}
+              style={styles.noteInput}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={submitAdd}
+            />
+          </View>
+
+          <View style={styles.noteWrap}>
+            <SectionLabel color="textMuted">Where</SectionLabel>
+            <View style={styles.menuStatusRow}>
+              {(['pantry', 'fridge', 'freezer'] as PantryLocation[]).map((loc) => {
+                const active = addLocation === loc;
+                return (
+                  <Pressable
+                    key={loc}
+                    onPress={() => setAddLocation(loc)}
+                    style={[
+                      styles.menuStatusBtn,
+                      active && styles.menuStatusBtnActive,
+                    ]}>
+                    <Text variant="bodyStrong" color={active ? 'bg' : 'text'}>
+                      {loc === 'pantry' ? 'Shelf' : loc === 'fridge' ? 'Fridge' : 'Freezer'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => setAddStaple((v) => !v)}>
+            <Text variant="bodyStrong">
+              {addStaple ? '✓ Always-have' : 'Mark as always-have'}
+            </Text>
+            <Text color="textFaint" style={styles.menuItemHint}>
+              Pins it to the Always-have section and tracks a restock cycle.
+            </Text>
+          </Pressable>
+
+          <View style={styles.addActions}>
+            <Pressable style={styles.menuCancel} onPress={() => setAdding(false)}>
+              <Text color="textMuted">Cancel</Text>
+            </Pressable>
+            <Button
+              label="Add"
+              glyph="done"
+              disabled={addName.trim().length === 0}
+              onPress={submitAdd}
+            />
+          </View>
+        </View>
       </Overlay>
     </View>
   );
@@ -552,6 +660,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: 8,
     paddingBottom: 14,
+  },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  addToast: { fontStyle: 'italic', paddingBottom: 8 },
+  emptyActions: { paddingTop: 12 },
+  addActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 16,
+    paddingTop: 6,
   },
   lastCard: {
     flexDirection: 'row',
