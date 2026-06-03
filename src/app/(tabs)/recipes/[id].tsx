@@ -12,13 +12,14 @@ import {
 import { Overlay } from '@/components';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, IngredientAmount, IngredientName } from '@/components';
+import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName } from '@/components';
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { convertToGrams } from '@/lib/parsing';
-import type { Ingredient } from '@/types';
+import { uid } from '@/lib/id';
+import type { Ingredient, Recipe, Step, Unit } from '@/types';
 import { formatMinutes, formatAmount } from '@/lib/format';
 import type { Nutrition, RecipeSource } from '@/types';
 
@@ -62,6 +63,7 @@ export default function RecipeDetail() {
   const [editingSource, setEditingSource] = useState(false);
   const [sourceNameInput, setSourceNameInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
+  const [editing, setEditing] = useState(false);
 
   // Always land on the Recipes library — the back button is literally
   // labeled "Recipes", and following history dropped users back into Plan
@@ -75,6 +77,14 @@ export default function RecipeDetail() {
         <View style={styles.missing}>
           <Text color="textMuted">Recipe not found.</Text>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (editing) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <EditRecipe recipe={recipe} onClose={() => setEditing(false)} />
       </SafeAreaView>
     );
   }
@@ -166,7 +176,12 @@ export default function RecipeDetail() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <TopBar onBack={goBack} clean={clean} onToggleClean={() => setClean((c) => !c)} />
+      <TopBar
+        onBack={goBack}
+        clean={clean}
+        onToggleClean={() => setClean((c) => !c)}
+        onEdit={() => setEditing(true)}
+      />
 
       <ScrollView contentContainerStyle={styles.content}>
         {recipe.imageUrl ? (
@@ -760,10 +775,12 @@ function TopBar({
   onBack,
   clean,
   onToggleClean,
+  onEdit,
 }: {
   onBack: () => void;
   clean: boolean;
   onToggleClean: () => void;
+  onEdit?: () => void;
 }) {
   return (
     <View style={styles.topbar}>
@@ -771,11 +788,20 @@ function TopBar({
         <Glyph name="back" size={18} color="text" />
         <Text variant="bodyStrong">Recipes</Text>
       </Pressable>
-      <Pressable onPress={onToggleClean} hitSlop={8}>
-        <Text variant="bodyStrong" color={clean ? 'accent' : 'textMuted'}>
-          {clean ? 'Annotated view' : 'Clean view'}
-        </Text>
-      </Pressable>
+      <View style={styles.topbarRight}>
+        <Pressable onPress={onToggleClean} hitSlop={8}>
+          <Text variant="bodyStrong" color={clean ? 'accent' : 'textMuted'}>
+            {clean ? 'Annotated view' : 'Clean view'}
+          </Text>
+        </Pressable>
+        {onEdit ? (
+          <Pressable onPress={onEdit} hitSlop={8}>
+            <Text variant="bodyStrong" color="accent">
+              Edit
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -812,6 +838,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
+  topbarRight: { flexDirection: 'row', alignItems: 'center', gap: 18 },
   back: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   content: { padding: layout.screenPadding, paddingBottom: 48, gap: 4 },
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -953,4 +980,286 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   savedBadgeText: { letterSpacing: 0.4 },
+});
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Edit mode — full recipe edit (overwrite, no modification history; the mod
+ * system stays reserved for cook-time tweaks). Covers title, serves, time,
+ * every ingredient (amount/unit/name + add/remove) and every step (body +
+ * add/remove). Draft state is local; nothing persists until Save. Fields the
+ * form doesn't surface (originalText, parsed timers/amounts, mod history) are
+ * preserved by keying each row back to its original ingredient/step.
+ * ──────────────────────────────────────────────────────────────────────── */
+type IngDraft = { id: string; amount: string; unit: string; canonicalName: string };
+type StepDraft = { id: string; body: string };
+
+function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }) {
+  const save = useRecipeStore((s) => s.save);
+  const [title, setTitle] = useState(recipe.title);
+  const [serves, setServes] = useState(String(recipe.yield.serves));
+  const [minutes, setMinutes] = useState(
+    recipe.yield.totalMinutes != null ? String(recipe.yield.totalMinutes) : '',
+  );
+  const [ings, setIngs] = useState<IngDraft[]>(() =>
+    recipe.ingredients.map((i) => ({
+      id: i.id,
+      amount: i.amount != null ? String(i.amount) : '',
+      unit: i.unit ?? '',
+      canonicalName: i.canonicalName,
+    })),
+  );
+  const [steps, setSteps] = useState<StepDraft[]>(() =>
+    [...recipe.steps]
+      .sort((a, b) => a.ordinal - b.ordinal)
+      .map((s) => ({ id: s.id, body: s.body })),
+  );
+  const [saving, setSaving] = useState(false);
+
+  const setIng = (id: string, patch: Partial<IngDraft>) =>
+    setIngs((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const addIng = () =>
+    setIngs((rows) => [...rows, { id: uid('ing'), amount: '', unit: '', canonicalName: '' }]);
+  const removeIng = (id: string) =>
+    setIngs((rows) => rows.filter((r) => r.id !== id));
+
+  const setStep = (id: string, body: string) =>
+    setSteps((rows) => rows.map((r) => (r.id === id ? { ...r, body } : r)));
+  const addStep = () => setSteps((rows) => [...rows, { id: uid('step'), body: '' }]);
+  const removeStep = (id: string) =>
+    setSteps((rows) => rows.filter((r) => r.id !== id));
+
+  const parseAmount = (s: string): number | null => {
+    const t = s.trim();
+    if (t === '') return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const onSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    const origIng = new Map(recipe.ingredients.map((i) => [i.id, i]));
+    const origStep = new Map(recipe.steps.map((s) => [s.id, s]));
+    const ingredients: Ingredient[] = ings
+      .filter((d) => d.canonicalName.trim() !== '')
+      .map((d) => {
+        const o = origIng.get(d.id);
+        const name = d.canonicalName.trim();
+        const unit = d.unit.trim();
+        return {
+          id: d.id,
+          amount: parseAmount(d.amount),
+          unit: unit === '' ? null : (unit as Unit),
+          canonicalName: name,
+          originalText: o?.originalText ?? name,
+          modificationHistory: o?.modificationHistory ?? [],
+          inlineNote: o?.inlineNote,
+        };
+      });
+    const nextSteps: Step[] = steps
+      .filter((d) => d.body.trim() !== '')
+      .map((d, idx) => {
+        const o = origStep.get(d.id);
+        return {
+          id: d.id,
+          ordinal: idx + 1,
+          title: o?.title ?? '',
+          body: d.body.trim(),
+          parsedTimers: o?.parsedTimers ?? [],
+          parsedAmounts: o?.parsedAmounts ?? [],
+          parsedTemperature: o?.parsedTemperature,
+          modificationHistory: o?.modificationHistory ?? [],
+        };
+      });
+    const servesNum = Math.max(1, Math.round(Number(serves)) || recipe.yield.serves);
+    const minNum =
+      minutes.trim() === '' ? undefined : Math.max(0, Math.round(Number(minutes)) || 0);
+    await save({
+      ...recipe,
+      title: title.trim() || recipe.title,
+      yield: { serves: servesNum, totalMinutes: minNum },
+      ingredients,
+      steps: nextSteps,
+      modifiedAt: new Date(),
+    });
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <>
+      <View style={styles.topbar}>
+        <Pressable onPress={onClose} hitSlop={8}>
+          <Text variant="bodyStrong" color="textMuted">
+            Cancel
+          </Text>
+        </Pressable>
+        <Text variant="bodyStrong">Edit recipe</Text>
+        <Pressable onPress={onSave} hitSlop={8} disabled={saving}>
+          <Text variant="bodyStrong" color="accent">
+            {saving ? 'Saving…' : 'Save'}
+          </Text>
+        </Pressable>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={editStyles.body}
+        keyboardShouldPersistTaps="handled">
+        <View style={editStyles.field}>
+          <SectionLabel color="textMuted">Title</SectionLabel>
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            style={editStyles.input}
+            placeholder="Recipe title"
+            placeholderTextColor={colors.textFaint}
+          />
+        </View>
+
+        <View style={editStyles.row2}>
+          <View style={editStyles.flex}>
+            <SectionLabel color="textMuted">Serves</SectionLabel>
+            <TextInput
+              value={serves}
+              onChangeText={setServes}
+              keyboardType="number-pad"
+              style={editStyles.input}
+              placeholder="2"
+              placeholderTextColor={colors.textFaint}
+            />
+          </View>
+          <View style={editStyles.flex}>
+            <SectionLabel color="textMuted">Total minutes</SectionLabel>
+            <TextInput
+              value={minutes}
+              onChangeText={setMinutes}
+              keyboardType="number-pad"
+              style={editStyles.input}
+              placeholder="—"
+              placeholderTextColor={colors.textFaint}
+            />
+          </View>
+        </View>
+
+        <SectionLabel style={editStyles.heading}>Ingredients</SectionLabel>
+        <View style={editStyles.list}>
+          {ings.map((d) => (
+            <View key={d.id} style={editStyles.ingRow}>
+              <TextInput
+                value={d.amount}
+                onChangeText={(t) => setIng(d.id, { amount: t })}
+                keyboardType="numbers-and-punctuation"
+                style={[editStyles.input, editStyles.amt]}
+                placeholder="qty"
+                placeholderTextColor={colors.textFaint}
+              />
+              <TextInput
+                value={d.unit}
+                onChangeText={(t) => setIng(d.id, { unit: t })}
+                autoCapitalize="none"
+                style={[editStyles.input, editStyles.unit]}
+                placeholder="unit"
+                placeholderTextColor={colors.textFaint}
+              />
+              <TextInput
+                value={d.canonicalName}
+                onChangeText={(t) => setIng(d.id, { canonicalName: t })}
+                style={[editStyles.input, editStyles.flex]}
+                placeholder="ingredient"
+                placeholderTextColor={colors.textFaint}
+              />
+              <Pressable
+                onPress={() => removeIng(d.id)}
+                hitSlop={8}
+                style={editStyles.del}
+                accessibilityLabel="Remove ingredient">
+                <Glyph name="close" size={13} color="textFaint" />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+        <Pressable onPress={addIng} style={editStyles.addRow}>
+          <Glyph name="add" size={13} color="accent" />
+          <Text variant="bodyStrong" color="accent">
+            Add ingredient
+          </Text>
+        </Pressable>
+
+        <SectionLabel style={editStyles.heading}>Method</SectionLabel>
+        <View style={editStyles.list}>
+          {steps.map((d, idx) => (
+            <View key={d.id} style={editStyles.stepRow}>
+              <Text variant="recipeTitle" color="accent" style={editStyles.stepNum}>
+                {idx + 1}
+              </Text>
+              <TextInput
+                value={d.body}
+                onChangeText={(t) => setStep(d.id, t)}
+                multiline
+                style={[editStyles.input, editStyles.stepInput]}
+                placeholder="Step…"
+                placeholderTextColor={colors.textFaint}
+              />
+              <Pressable
+                onPress={() => removeStep(d.id)}
+                hitSlop={8}
+                style={editStyles.del}
+                accessibilityLabel="Remove step">
+                <Glyph name="close" size={13} color="textFaint" />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+        <Pressable onPress={addStep} style={editStyles.addRow}>
+          <Glyph name="add" size={13} color="accent" />
+          <Text variant="bodyStrong" color="accent">
+            Add step
+          </Text>
+        </Pressable>
+      </ScrollView>
+
+      <BottomActionBar>
+        <Button label="Cancel" variant="secondary" flex onPress={onClose} />
+        <Button
+          label={saving ? 'Saving…' : 'Save recipe'}
+          glyph="done"
+          flex
+          disabled={saving}
+          onPress={onSave}
+        />
+      </BottomActionBar>
+    </>
+  );
+}
+
+const editStyles = StyleSheet.create({
+  body: { padding: layout.screenPadding, paddingBottom: 40, gap: 14 },
+  field: { gap: 6 },
+  flex: { flex: 1 },
+  row2: { flexDirection: 'row', gap: 12 },
+  heading: { paddingTop: 10 },
+  list: { gap: 8 },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.bg2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.text,
+  },
+  ingRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  amt: { width: 60, textAlign: 'center', paddingHorizontal: 6 },
+  unit: { width: 64, paddingHorizontal: 8 },
+  del: { paddingHorizontal: 4, paddingVertical: 6 },
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  stepNum: { minWidth: 18, textAlign: 'center', paddingTop: 8 },
+  stepInput: { flex: 1, minHeight: 60, textAlignVertical: 'top' },
 });

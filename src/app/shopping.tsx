@@ -253,12 +253,14 @@ export default function ShoppingList() {
 
   /** Should this canonical name appear in the Already-have bucket? True if
    *  the user marked it this run OR they've pinned it (or its base staple) as
-   *  "always have". Pantry-status 'out' overrides everything else — out items
-   *  are auto-promoted to the buy list and the have toggle is suppressed
-   *  (spec §5). Always-routed items still render in the visible Already-have
-   *  bucket, so a base-match on a needed variant is recoverable, not hidden. */
+   *  "always have". Pantry-status 'low'/'out' overrides everything else — a
+   *  staple you flagged running-low or out is auto-promoted to the buy list
+   *  even if it's an always-have, because "always have" stops being true the
+   *  moment you flag it (spec §5 × §10). 'out' also locks the have toggle;
+   *  'low' stays togglable so you can drop it if you've got enough. */
   const inHave = (name: string) => {
-    if (statusFor(name) === 'out') return false;
+    const ps = statusFor(name);
+    if (ps === 'out' || ps === 'low') return false;
     return (
       isMarked(haveByName, name) ||
       alwaysHaveMap[name.toLowerCase().trim()] === true ||
@@ -266,9 +268,49 @@ export default function ShoppingList() {
     );
   };
 
+  /** Pantry restock rows: items you've flagged low/out in the pantry that no
+   *  planned-recipe row or extra already covers. Surfaced as their own buy
+   *  lines so flagging a staple low/out always lands it on the shopping list,
+   *  recipe or not — the user's "I'm running low on salt → put it on my list"
+   *  (spec §10). Recipe-listed staples are promoted in-place via inHave above,
+   *  so they're filtered out here to avoid a duplicate row. */
+  const pantryRestockLines = useMemo<ShoppingLine[]>(() => {
+    const flagged = pantryItems.filter(
+      (p) => p.status === 'low' || p.status === 'out',
+    );
+    if (flagged.length === 0) return [];
+    const covered = new Set<string>();
+    for (const i of visibleItems) covered.add(matchKey(i.name));
+    for (const e of extras) covered.add(matchKey(e.canonicalName));
+    const isCovered = (k: string) => {
+      if (covered.has(k)) return true;
+      for (const c of covered) if (c.startsWith(k) || k.startsWith(c)) return true;
+      return false;
+    };
+    const seen = new Set<string>();
+    const out: ShoppingLine[] = [];
+    for (const p of flagged) {
+      const k = matchKey(p.canonicalName);
+      if (seen.has(k) || isCovered(k)) continue;
+      seen.add(k);
+      out.push({
+        name: p.canonicalName,
+        category: categorizeIngredient(p.canonicalName),
+        // 'as needed' renders cleanly on the row and is omitted from the
+        // Instacart copy text (no quantity known for a restock).
+        buy: 'as needed',
+        math: '',
+        sources: [],
+        confidence: 'summed' as const,
+      });
+    }
+    return out;
+  }, [pantryItems, visibleItems, extras]);
+
   /** Lines actually destined for the cart — everything visible (consolidated
-   *  + extras) minus what's routed to Already-have. Both the Copy-for-Instacart
-   *  text and the "To buy" counter read from this list, so they always agree. */
+   *  + extras + pantry restocks) minus what's routed to Already-have. Both the
+   *  Copy-for-Instacart text and the "To buy" counter read from this list, so
+   *  they always agree. */
   const buyLines = useMemo<ShoppingLine[]>(() => {
     const fromItems = visibleItems.filter((i) => !inHave(i.name));
     const fromExtras: ShoppingLine[] = extras
@@ -281,9 +323,12 @@ export default function ShoppingList() {
         sources: [],
         confidence: 'summed' as const,
       }));
-    return [...fromItems, ...fromExtras];
+    const fromPantry = pantryRestockLines.filter(
+      (p) => !dismissed.has(`item:${p.name}`),
+    );
+    return [...fromItems, ...fromExtras, ...fromPantry];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, haveByName, alwaysHaveMap]);
+  }, [visibleItems, extras, haveByName, alwaysHaveMap, pantryRestockLines, dismissed]);
 
   const text = useMemo(() => instacartText(buyLines), [buyLines]);
 
@@ -296,9 +341,10 @@ export default function ShoppingList() {
     for (const i of visibleItems) seen.add(i.name.toLowerCase().trim());
     for (const e of extras) seen.add(e.canonicalName.toLowerCase().trim());
     return Object.keys(alwaysHaveMap)
-      .filter((k) => !seen.has(k))
+      .filter((k) => !seen.has(k) && statusFor(k) === undefined)
       .sort();
-  }, [visibleItems, extras, alwaysHaveMap]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems, extras, alwaysHaveMap, statusByKey]);
 
   const haveCount = useMemo(() => {
     let n = ghostAlways.length;
@@ -518,6 +564,43 @@ export default function ShoppingList() {
                     marked={false}
                     always={false}
                     likely={isLikelyHave(haveByName, ex.canonicalName)}
+                    pantryStatus={ps}
+                  />
+                );
+              })}
+          </View>
+        ) : null}
+
+        {pantryRestockLines.some((p) => !dismissed.has(`item:${p.name}`)) ? (
+          <View style={styles.section}>
+            <SectionLabel color="accent">Running low · restock</SectionLabel>
+            <Text color="textFaint" style={styles.extrasCaption}>
+              Staples you flagged low or out in the pantry. Tap a row to drop it
+              if you’ve got enough.
+            </Text>
+            {pantryRestockLines
+              .filter((p) => !dismissed.has(`item:${p.name}`))
+              .map((p) => {
+                const ps = statusFor(p.name);
+                return (
+                  <ShoppingRow
+                    key={`pantry:${p.name}`}
+                    name={p.name}
+                    qty={p.buy}
+                    math={null}
+                    onTap={() => {
+                      // 'out' is locked on; 'low' drops for this run on tap.
+                      if (ps !== 'out') dismissItem(p.name);
+                    }}
+                    onToggleHave={() => {
+                      if (ps === 'out') return;
+                      dismissItem(p.name);
+                    }}
+                    onDelete={() => dismissItem(p.name)}
+                    onLongPress={() => setMenu({ name: p.name, extraId: null })}
+                    marked={false}
+                    always={false}
+                    likely={false}
                     pantryStatus={ps}
                   />
                 );
