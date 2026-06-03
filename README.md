@@ -71,9 +71,16 @@ assets/
 | Scaffold / design system / nav | ✅ | tsc + web bundle (clean) |
 | Recipes §6 (library, detail, capture flow, parser) | ✅ | tsc clean |
 | Cook §7 (Focused, Glance, timers, scrub, post-cook) | ✅ | tsc clean |
-| Plan §5 (week grid, picker, shopping list) | ✅ | **tsc not yet run** — verify first |
-| Pantry §10 | ⬜ next | — |
-| Pipeline §8 · Bench §9 · Mod history | ⬜ | — |
+| Plan §5 (week grid, picker, shopping list) | ✅ | tsc clean |
+| Pantry §10 (list, status cycle, Instacart paste, cycles) | ✅ | built |
+| Pipeline §8 (ideas → recipe) | ✅ | built |
+| Bench §9 (Convert grams + baker's %, Sub) | ✅ | tsc clean + web export |
+| Mod history | ✅ | in recipe/cook diffs |
+
+All five pillars are now built (Bench was the last `PillarPlaceholder`).
+Remaining Claude tasks still stubbed in `lib/parsing/recipe.ts` (throw "not
+implemented"): §11.3 YouTube-transcript inference, §11.8 timer/temp detection,
+§11.9 step-title generation, §11.10 recipe→pipeline keyword matching.
 
 **First thing in a new session:** `npm run typecheck` (Plan §5 was written but
 its typecheck couldn't run last session — fix anything it flags), then
