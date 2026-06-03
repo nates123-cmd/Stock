@@ -65,6 +65,15 @@ export default function RecipeDetail() {
   const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [editing, setEditing] = useState(false);
 
+  // Wide-viewport two-column layout (spec §6). 768px breakpoint matches
+  // standard tablet/desktop split; the columns are width-independent so
+  // ingredient/step rows render the same in either orientation.
+  // MUST stay above the early returns below (`!recipe`, `editing`): a hook
+  // after a conditional return changes the hook count between renders when
+  // `editing` toggles, which crashes the screen to a blank page.
+  const { width: viewportWidth } = useWindowDimensions();
+  const wide = viewportWidth >= 768;
+
   // Always land on the Recipes library — the back button is literally
   // labeled "Recipes", and following history dropped users back into Plan
   // when they tapped a meal cell to open a recipe.
@@ -92,12 +101,6 @@ export default function RecipeDetail() {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
   const steps = [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal);
-
-  // Wide-viewport two-column layout (spec §6). 768px breakpoint matches
-  // standard tablet/desktop split; the columns are width-independent so
-  // ingredient/step rows render the same in either orientation.
-  const { width: viewportWidth } = useWindowDimensions();
-  const wide = viewportWidth >= 768;
 
   const previewConvertToGrams = async () => {
     setConverting(true);
