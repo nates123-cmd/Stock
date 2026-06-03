@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -53,6 +53,15 @@ export default function BenchScreen() {
 
   const [tab, setTab] = useState<BenchTab>(params.tab === 'sub' ? 'sub' : 'convert');
 
+  // The Bench tab stays mounted, so a fresh long-press from a recipe (or any
+  // new deep-link params) must re-drive the tab choice. Depend on the payload
+  // params too, so re-launching with a *different* ingredient still switches
+  // to Sub even when params.tab is unchanged.
+  useEffect(() => {
+    if (params.tab === 'sub' || params.sub) setTab('sub');
+    else if (params.tab === 'convert' || params.text) setTab('convert');
+  }, [params.tab, params.sub, params.text]);
+
   return (
     <Screen>
       <View style={styles.header}>
@@ -66,9 +75,14 @@ export default function BenchScreen() {
       </View>
 
       {tab === 'convert' ? (
-        <ConvertTool initialText={params.text ?? ''} />
+        // key re-seeds the paste box from new params (state init runs once).
+        <ConvertTool key={`convert:${params.text ?? ''}`} initialText={params.text ?? ''} />
       ) : (
+        // key re-seeds the inputs each time a recipe long-press hands off new
+        // ingredient params — without it the once-only useState keeps the old
+        // (empty) values and the row never fills.
         <SubTool
+          key={`sub:${params.sub ?? ''}:${params.amount ?? ''}:${params.unit ?? ''}`}
           initialName={params.sub ?? ''}
           initialAmount={params.amount ?? ''}
           initialUnit={params.unit ?? 'cup'}
