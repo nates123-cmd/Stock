@@ -22,6 +22,7 @@ import {
   SourceBadge,
   BottomActionBar,
   ProgressStepList,
+  FilterChip,
   type ProgressStep,
 } from '@/components';
 import { colors, layout } from '@/design';
@@ -34,13 +35,14 @@ import {
   parseRecipeFromPdf,
   parseRecipeFromImage,
   inferRecipeFromTranscript,
+  matchPipelineKeywords,
   detectSource,
   type ParsedRecipeDraft,
 } from '@/lib/parsing';
 import { CLAUDE_AVAILABLE, type ImageMediaType } from '@/lib/api/claudeBridge';
 import { formatAmount } from '@/lib/format';
 import { uid } from '@/lib/id';
-import type { Recipe, RecipeSource } from '@/types';
+import type { PipelineIdea, Recipe, RecipeSource } from '@/types';
 
 type Step = 'capture' | 'parsing' | 'review' | 'saved';
 
@@ -112,6 +114,8 @@ export default function CaptureFlow() {
   const router = useRouter();
   const save = useRecipeStore((s) => s.save);
   const promote = usePipelineStore((s) => s.promote);
+  const ideas = usePipelineStore((s) => s.ideas);
+  const hydratePipeline = usePipelineStore((s) => s.hydrate);
 
   // Promotion context (spec §8 "Idea → Recipe"): title pre-filled, idea
   // references carried over, idea archived once the recipe is saved.
@@ -142,6 +146,46 @@ export default function CaptureFlow() {
   const [intention, setIntention] = useState('');
   const [savedId, setSavedId] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
+
+  // §11.10 — Pipeline ideas this capture might be fulfilling. `linkedIdeaId`
+  // is the one the user chose to link (promoted on save). Skipped when the
+  // capture was itself launched FROM an idea (params.ideaId already links it).
+  const [relatedIdeaIds, setRelatedIdeaIds] = useState<string[]>([]);
+  const [linkedIdeaId, setLinkedIdeaId] = useState<string | null>(null);
+  const matchedForDraft = useRef<ParsedRecipeDraft | null>(null);
+
+  useEffect(() => {
+    void hydratePipeline();
+  }, [hydratePipeline]);
+
+  // When a draft lands in review, ask Claude which open ideas it matches.
+  useEffect(() => {
+    if (step !== 'review' || !draft || params.ideaId) return;
+    if (matchedForDraft.current === draft) return; // once per draft
+    matchedForDraft.current = draft;
+    const open = ideas.filter((i) => i.status !== 'promoted');
+    if (open.length === 0) return;
+    const recipeText = [
+      draft.title ?? '',
+      ...(draft.ingredients ?? []).map((i) => i.canonicalName),
+      ...(draft.steps ?? []).map((s) => s.title),
+    ].join('\n');
+    let cancelled = false;
+    void matchPipelineKeywords(
+      recipeText,
+      open.map((i) => ({ id: i.id, title: i.title })),
+    ).then((ids) => {
+      if (!cancelled) setRelatedIdeaIds(ids);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, draft, ideas, params.ideaId]);
+
+  const relatedIdeas = useMemo(
+    () => ideas.filter((i) => relatedIdeaIds.includes(i.id)),
+    [ideas, relatedIdeaIds],
+  );
 
   const src: RecipeSource = isUrl(raw)
     ? detectSource(raw.trim())
@@ -307,13 +351,16 @@ export default function CaptureFlow() {
       nutrition: draft.nutrition,
       myNotes: refsNote,
       firstCookIntention: intention.trim() || undefined,
-      linkedPipelineId: params.ideaId || undefined,
+      linkedPipelineId: params.ideaId || linkedIdeaId || undefined,
       createdAt: now,
       modifiedAt: now,
       cookCount: 0,
     };
     await save(recipe);
-    if (params.ideaId) await promote(params.ideaId, recipe.id);
+    // Promote whichever idea this fulfills: the one we were launched from, or
+    // the one the user linked from the §11.10 related-ideas suggestions.
+    const fulfilled = params.ideaId || linkedIdeaId;
+    if (fulfilled) await promote(fulfilled, recipe.id);
     setSavedId(recipe.id);
     setStep('saved');
   };
@@ -353,6 +400,9 @@ export default function CaptureFlow() {
             setServes={setServes}
             intention={intention}
             setIntention={setIntention}
+            relatedIdeas={relatedIdeas}
+            linkedIdeaId={linkedIdeaId}
+            onToggleLink={(id) => setLinkedIdeaId((cur) => (cur === id ? null : id))}
             onSaveDraft={() => persist('draft')}
             onSave={() => persist('active')}
           />
@@ -534,6 +584,9 @@ function ReviewStep({
   setServes,
   intention,
   setIntention,
+  relatedIdeas,
+  linkedIdeaId,
+  onToggleLink,
   onSaveDraft,
   onSave,
 }: {
@@ -544,6 +597,9 @@ function ReviewStep({
   setServes: (s: string) => void;
   intention: string;
   setIntention: (s: string) => void;
+  relatedIdeas: PipelineIdea[];
+  linkedIdeaId: string | null;
+  onToggleLink: (id: string) => void;
   onSaveDraft: () => void;
   onSave: () => void;
 }) {
@@ -586,6 +642,25 @@ function ReviewStep({
             </View>
           </View>
         </View>
+
+        {relatedIdeas.length > 0 ? (
+          <View style={styles.reviewSection}>
+            <SectionLabel color="textMuted">From your pipeline</SectionLabel>
+            <Text color="textFaint" style={styles.tip}>
+              This looks like one of your ideas. Link it to mark the idea cooked.
+            </Text>
+            <View style={styles.tagRow}>
+              {relatedIdeas.map((idea) => (
+                <FilterChip
+                  key={idea.id}
+                  label={idea.title}
+                  active={linkedIdeaId === idea.id}
+                  onPress={() => onToggleLink(idea.id)}
+                />
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.reviewSection}>
           <View style={styles.labelRow}>

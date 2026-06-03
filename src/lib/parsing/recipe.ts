@@ -383,11 +383,41 @@ export async function generateStepTitle(_stepBody: string): Promise<string> {
   throw new Error('not implemented — spec §11.9');
 }
 
-/** §11.10 — on capture, find Pipeline ideas matching the recipe. */
+const MATCH_SYSTEM = `You match a freshly captured recipe against a list of the
+user's saved "to-try" cooking ideas. Return ONLY ideas that are clearly about
+the same dish or a close variant — same core ingredient, technique, or cuisine.
+Be strict: returning nothing is better than a loose match.
+
+Input JSON: {"recipe":string,"ideas":[{"id":string,"title":string}]}
+Output STRICT JSON, no prose, no markdown: {"matchIds":string[]} — ids drawn
+from the input list, empty array if none match. Output ONLY the JSON object.`;
+
+/** §11.10 — on capture, find Pipeline ideas matching the recipe. Returns the
+ *  matching idea ids. Passive surfacing: returns [] (never throws) when Claude
+ *  is unavailable or nothing matches, so it can't break the capture flow. */
 export async function matchPipelineKeywords(
-  _recipeText: string,
-  _ideaTitles: { id: string; title: string }[],
+  recipeText: string,
+  ideaTitles: { id: string; title: string }[],
 ): Promise<string[]> {
-  // TODO: callClaude(MODELS.fast) — returns matching idea ids.
-  throw new Error('not implemented — spec §11.10');
+  if (!CLAUDE_AVAILABLE || ideaTitles.length === 0) return [];
+  const input = JSON.stringify({
+    recipe: recipeText.slice(0, 2000),
+    ideas: ideaTitles,
+  });
+  try {
+    const out = await claudeText('recipe-pipeline-match', MATCH_SYSTEM, input);
+    const cleaned = out.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    const s = cleaned.indexOf('{');
+    const e = cleaned.lastIndexOf('}');
+    if (s < 0 || e < 0) return [];
+    const parsed = JSON.parse(cleaned.slice(s, e + 1)) as { matchIds?: unknown };
+    if (!Array.isArray(parsed.matchIds)) return [];
+    const valid = new Set(ideaTitles.map((i) => i.id));
+    return parsed.matchIds.filter(
+      (x): x is string => typeof x === 'string' && valid.has(x),
+    );
+  } catch (err) {
+    console.warn('[stock] pipeline match failed', err);
+    return [];
+  }
 }
