@@ -33,7 +33,12 @@ export default function RecipesLibrary() {
   const pantry = usePantryStore((s) => s.items);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('All');
-  const [activeTag, setActiveTag] = useState<string | null>(null);
+  // Multiple user-tags can be active at once; a recipe must carry ALL of them
+  // (AND), matching how the tag filter already ANDs with the canned filter
+  // (patch #f5f6d434).
+  const [activeTags, setActiveTags] = useState<string[]>([]);
+  const toggleTag = (t: string) =>
+    setActiveTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
 
   // User-tag chips, generated from the library. Ordered by frequency desc
   // (spec §6). Excludes the canned filter tags so the two strips don't
@@ -61,11 +66,13 @@ export default function RecipesLibrary() {
         return false;
       const cannedTag = TAG_FILTER[filter];
       if (cannedTag && !r.tags.includes(cannedTag)) return false;
-      // User-tag filter ANDs with the canned filter (spec §6).
-      if (activeTag && !r.tags.includes(activeTag)) return false;
+      // User-tag filter ANDs with the canned filter (spec §6) and across every
+      // selected tag — recipe must carry all active tags.
+      if (activeTags.length && !activeTags.every((t) => r.tags.includes(t)))
+        return false;
       return true;
     });
-  }, [recipes, query, filter, activeTag, pantry]);
+  }, [recipes, query, filter, activeTags, pantry]);
 
   const byRecent = (a: Recipe, b: Recipe) =>
     b.modifiedAt.getTime() - a.modifiedAt.getTime();
@@ -105,8 +112,8 @@ export default function RecipesLibrary() {
                   key={t}
                   label={t}
                   variant="tag"
-                  active={activeTag === t}
-                  onPress={() => setActiveTag(activeTag === t ? null : t)}
+                  active={activeTags.includes(t)}
+                  onPress={() => toggleTag(t)}
                 />
               ))}
             </ChipRow>
