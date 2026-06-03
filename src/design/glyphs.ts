@@ -8,7 +8,9 @@
 export const glyph = {
   recipes: '▤', // Recipes / library / list
   pipeline: '◔', // Pipeline / partial-circle = incomplete
-  bench: '⚖', // Bench / workbench / measurement
+  bench: '▦', // Bench / workbench (crosshatch worktop). NOT ⚖ — U+2696 has
+  //               emoji presentation, rendered colorful next to the other
+  //               monochrome geometric glyphs. ▦ stays text-style + on-family.
   pantry: '▣', // Pantry / inventory
   plan: '◷', // Plan / week / time
   next: '→', // Next action, navigation
