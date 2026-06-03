@@ -42,12 +42,15 @@ export default function TabLayout() {
           letterSpacing: 0.5,
         },
       }}>
-      {/* Order is fixed by spec §3 — Plan first, default-selected. */}
+      {/* Pipeline and Plan swapped positions per request (patch #97acc710):
+          Pipeline now sits in the leftmost slot, Plan takes Pipeline's old
+          3rd slot. `index` is still the Plan route so it remains the default
+          landing screen — only the bar position changed. */}
       <Tabs.Screen
-        name="index"
+        name="pipeline"
         options={{
-          title: 'Plan',
-          tabBarIcon: ({ focused }) => <TabGlyph name="plan" focused={focused} />,
+          title: 'Pipeline',
+          tabBarIcon: ({ focused }) => <TabGlyph name="pipeline" focused={focused} />,
         }}
       />
       <Tabs.Screen
@@ -58,10 +61,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="pipeline"
+        name="index"
         options={{
-          title: 'Pipeline',
-          tabBarIcon: ({ focused }) => <TabGlyph name="pipeline" focused={focused} />,
+          title: 'Plan',
+          tabBarIcon: ({ focused }) => <TabGlyph name="plan" focused={focused} />,
         }}
       />
       <Tabs.Screen
