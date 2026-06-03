@@ -318,12 +318,55 @@ export async function parseRecipeFromImage(
   };
 }
 
-/** §11.3 — infer recipe structure from a YouTube transcript (low confidence). */
+const TRANSCRIPT_SYSTEM = `You are reading the auto-generated transcript of a
+cooking video. It is messy: spoken filler, timestamps, no exact measurements,
+ingredients mentioned only in passing. Infer the recipe as best you can.
+
+Output STRICT JSON, no prose, no markdown, using this schema:
+{"title":string,"serves":number,"totalMinutes":number|null,"tags":string[],
+"ingredients":[{"amount":number|null,"unit":string|null,"canonicalName":string,"originalText":string}],
+"steps":[{"title":string,"body":string}],
+"nutrition":{"calories":number|null,"protein":number|null,"carbs":number|null,"fat":number|null}}
+
+Transcript rules:
+- Amounts are often vague or unstated — use null amount/unit rather than
+  inventing precise numbers. Only fill an amount the speaker actually says.
+- Collapse rambling into clear imperative steps; each step.title is a 3-6 word
+  summary.
+- Ignore intros, sponsor reads, "like and subscribe", and timestamp markers.
+- canonicalName is normalized & lowercase. nutrition is a best per-serving
+  estimate (kcal; grams) or null if you genuinely cannot estimate.
+Output ONLY the JSON object.`;
+
+/** §11.3 — infer recipe structure from a YouTube transcript (low confidence).
+ *  Cheap: one fast-model call on pasted transcript text (no auto-fetch — the
+ *  caller pastes the transcript). All fields flagged `guessed` so the §6
+ *  review screen styles them low-confidence. */
 export async function inferRecipeFromTranscript(
-  _transcript: string,
+  transcript: string,
+  source: RecipeSource = { type: 'yt', name: 'YouTube' },
 ): Promise<ParsedRecipeDraft> {
-  // TODO: callClaude(MODELS.reasoning) — flag inferred fields as "guessed".
-  throw new Error('not implemented — spec §11.3');
+  if (!CLAUDE_AVAILABLE) {
+    throw new Error(
+      'Transcript import needs Claude — configure the proxy (web) or key (native).',
+    );
+  }
+  const out = await claudeText('recipe-transcript', TRANSCRIPT_SYSTEM, transcript);
+  const mapped = mapRaw(extractJson(out));
+  if ((mapped.ingredients.length ?? 0) === 0 && (mapped.steps.length ?? 0) === 0) {
+    throw new Error("I couldn't find a recipe in that transcript.");
+  }
+  return {
+    ...mapped,
+    source,
+    status: 'draft',
+    fieldConfidence: {
+      title: 'guessed',
+      ingredients: 'guessed',
+      steps: 'guessed',
+      yield: 'guessed',
+    },
+  };
 }
 
 /** §11.8 — detect timers/temperature with positions in a step body. */

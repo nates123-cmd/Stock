@@ -33,6 +33,7 @@ import {
   parseRecipeFromUrl,
   parseRecipeFromPdf,
   parseRecipeFromImage,
+  inferRecipeFromTranscript,
   detectSource,
   type ParsedRecipeDraft,
 } from '@/lib/parsing';
@@ -44,6 +45,17 @@ import type { Recipe, RecipeSource } from '@/types';
 type Step = 'capture' | 'parsing' | 'review' | 'saved';
 
 const isUrl = (s: string) => /^https?:\/\//i.test(s.trim());
+
+/** Pasted YouTube "Show transcript" text — many lines that are a bare
+ *  timestamp or start with one (e.g. "0:42" / "12:05 add the butter"). Routes
+ *  to the transcript-tuned inference instead of the literal text parser. */
+const looksLikeTranscript = (s: string): boolean => {
+  const lines = s.split(/\r?\n/);
+  const stamped = lines.filter((l) =>
+    /^\s*\d{1,2}:\d{2}(?::\d{2})?(\s|$)/.test(l),
+  ).length;
+  return stamped >= 5;
+};
 
 const MAX_PDF_BYTES = 12 * 1024 * 1024; // recipes are tiny; Anthropic cap is 32MB
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // ~6 MB binary; comfortably under proxy 8MB-base64 cap
@@ -131,7 +143,11 @@ export default function CaptureFlow() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
 
-  const src: RecipeSource = isUrl(raw) ? detectSource(raw.trim()) : { type: 'mine' };
+  const src: RecipeSource = isUrl(raw)
+    ? detectSource(raw.trim())
+    : looksLikeTranscript(raw)
+      ? { type: 'yt', name: 'YouTube' }
+      : { type: 'mine' };
   const hasContent = raw.trim().length > 0;
 
   const close = () => (router.canGoBack() ? router.back() : router.replace('/recipes'));
@@ -139,9 +155,20 @@ export default function CaptureFlow() {
   const runParse = useCallback(async () => {
     setStep('parsing');
     setError(null);
+    const transcript = !isUrl(raw) && looksLikeTranscript(raw);
     const seq: ProgressStep[] = [
-      { label: isUrl(raw) ? 'Fetched the page' : 'Read the text', state: 'doing' },
-      { label: 'Structuring ingredients & method', state: 'todo' },
+      {
+        label: isUrl(raw)
+          ? 'Fetched the page'
+          : transcript
+            ? 'Read the transcript'
+            : 'Read the text',
+        state: 'doing',
+      },
+      {
+        label: transcript ? 'Inferring the recipe (best-guess)' : 'Structuring ingredients & method',
+        state: 'todo',
+      },
       { label: 'Checking against your pantry', state: 'todo' },
       { label: 'Suggesting tags', state: 'todo' },
     ];
@@ -153,7 +180,9 @@ export default function CaptureFlow() {
       tick(1, 'doing');
       const d = isUrl(raw)
         ? await parseRecipeFromUrl(raw.trim())
-        : await parseRecipeFromText(raw, { type: 'mine' });
+        : transcript
+          ? await inferRecipeFromTranscript(raw)
+          : await parseRecipeFromText(raw, { type: 'mine' });
       tick(1, 'done');
       tick(2, 'done'); // pantry pillar not built yet (spec §10) — no-op pass
       tick(3, 'done');
@@ -403,7 +432,7 @@ function CaptureStep({
               value={raw}
               onChangeText={setRaw}
               multiline
-              placeholder="Paste a URL, drop in recipe text, or just start typing"
+              placeholder="Paste a URL, recipe text, or a video transcript — or just start typing"
               placeholderTextColor={colors.textFaint}
               style={styles.pasteInput}
             />
