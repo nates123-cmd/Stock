@@ -89,11 +89,64 @@ export type Substitute = {
   note: string;
 };
 
+const SUB_SYSTEM = `You are a cooking-substitution expert. Given an ingredient
+and the amount a recipe calls for, return the 3 best one-for-one substitutes,
+ranked (1 = closest result). For each: the substitute's name, the concrete
+amount to use IN PLACE of the original (scaled to the requested amount — e.g.
+1 cup buttermilk → 1 cup milk + 1 tbsp lemon juice, so lead with the milk),
+and a short note on what changes (flavor, texture, rise, browning).
+
+Pick substitutes a home cook is likely to have. Keep notes under 15 words.
+
+STRICT JSON, no prose, no markdown.
+Schema: {"subs":[{"rank":1|2|3,"name":string,"amount":{"value":number,"unit":string},"note":string}]}
+Output ONLY the JSON object, exactly 3 items ranked 1..3.`;
+
 /** §11.5 — 3 ranked substitutes with amounts and notes. */
 export async function findSubstitutes(
-  _ingredient: string,
-  _amount: { value: number; unit: Unit },
+  ingredient: string,
+  amount: { value: number; unit: Unit },
 ): Promise<Substitute[]> {
-  // TODO: callClaude(MODELS.fast), cache on ingredient+amount.
-  throw new Error('not implemented — spec §11.5');
+  if (!CLAUDE_AVAILABLE) {
+    throw new Error(
+      'Substitutions need Claude — configure your key or the proxy (sign-in not required).',
+    );
+  }
+  const input = JSON.stringify({
+    ingredient: ingredient.trim(),
+    amount: amount.value,
+    unit: amount.unit,
+  });
+  const out = await claudeText('bench-substitutes', SUB_SYSTEM, input);
+
+  const cleaned = out.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  const s = cleaned.indexOf('{');
+  const e = cleaned.lastIndexOf('}');
+  if (s < 0 || e < 0) throw new Error('Bench parse: no JSON in response');
+  const parsed = JSON.parse(cleaned.slice(s, e + 1)) as {
+    subs?: {
+      rank?: unknown;
+      name?: unknown;
+      amount?: { value?: unknown; unit?: unknown };
+      note?: unknown;
+    }[];
+  };
+  if (!Array.isArray(parsed.subs)) throw new Error('Bench parse: no subs array');
+
+  return parsed.subs
+    .filter(
+      (x): x is { rank: number; name: string; amount: { value: number; unit: string }; note: string } =>
+        typeof x.name === 'string' &&
+        x.name.trim().length > 0 &&
+        typeof x.note === 'string' &&
+        typeof x.amount?.value === 'number' &&
+        typeof x.amount?.unit === 'string',
+    )
+    .slice(0, 3)
+    .map((x, i) => ({
+      rank: (i + 1) as 1 | 2 | 3,
+      name: x.name.trim(),
+      amount: { value: x.amount.value, unit: x.amount.unit },
+      note: x.note.trim(),
+    }));
 }

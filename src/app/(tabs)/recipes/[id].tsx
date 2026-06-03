@@ -308,7 +308,21 @@ export default function RecipeDetail() {
               {recipe.ingredients.map((ing) => {
                 const annotation = clean ? null : ingredientAnnotation(ing);
                 return (
-                  <View key={ing.id} style={styles.ingRow}>
+                  <Pressable
+                    key={ing.id}
+                    style={styles.ingRow}
+                    // Long-press → Bench Sub, amount pre-loaded (spec §9).
+                    onLongPress={() =>
+                      router.push({
+                        pathname: '/(tabs)/bench',
+                        params: {
+                          tab: 'sub',
+                          sub: ing.canonicalName,
+                          amount: ing.amount != null ? String(ing.amount) : '',
+                          unit: ing.unit ?? '',
+                        },
+                      })
+                    }>
                     <IngredientAmount
                       ing={ing}
                       style={[styles.amount, clean && styles.cleanAmount]}
@@ -326,7 +340,7 @@ export default function RecipeDetail() {
                         </Text>
                       ) : null}
                     </View>
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>

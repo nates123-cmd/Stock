@@ -107,6 +107,8 @@ export default function CaptureFlow() {
     ideaId?: string;
     prefillTitle?: string;
     refs?: string;
+    /** Bench Convert "Save as recipe" seeds the paste area (spec §9). */
+    prefillText?: string;
   }>();
   const ideaRefs = useMemo<{ url: string; label: string }[]>(() => {
     try {
@@ -117,7 +119,7 @@ export default function CaptureFlow() {
   }, [params.refs]);
 
   const [step, setStep] = useState<Step>('capture');
-  const [raw, setRaw] = useState('');
+  const [raw, setRaw] = useState(params.prefillText ?? '');
   const [draft, setDraft] = useState<ParsedRecipeDraft | null>(null);
   const [progress, setProgress] = useState<ProgressStep[]>([]);
   const [error, setError] = useState<string | null>(null);
