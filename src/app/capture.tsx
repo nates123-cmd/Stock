@@ -110,6 +110,16 @@ function sourceLabel(src: RecipeSource): string {
   return 'Pasted text';
 }
 
+/** Source/origin options offered in the review step so the captured source can
+ *  be corrected before saving (patch #77641107). */
+const SOURCE_TYPES: { key: RecipeSource['type']; label: string }[] = [
+  { key: 'mine', label: 'Mine' },
+  { key: 'nyt', label: 'NYT' },
+  { key: 'yt', label: 'YouTube' },
+  { key: 'book', label: 'Book' },
+  { key: 'web', label: 'Web' },
+];
+
 export default function CaptureFlow() {
   const router = useRouter();
   const save = useRecipeStore((s) => s.save);
@@ -144,6 +154,9 @@ export default function CaptureFlow() {
   const [title, setTitle] = useState(params.prefillTitle ?? '');
   const [serves, setServes] = useState('4');
   const [intention, setIntention] = useState('');
+  // Editable source/origin — seeded from the parsed/detected source when a
+  // draft lands in review, then user-correctable (patch #77641107).
+  const [source, setSource] = useState<RecipeSource | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
 
@@ -193,6 +206,13 @@ export default function CaptureFlow() {
       ? { type: 'yt', name: 'YouTube' }
       : { type: 'mine' };
   const hasContent = raw.trim().length > 0;
+
+  // Seed the editable source each time a fresh draft arrives (new parse).
+  // Same draft identity → no re-seed, so user edits survive re-renders.
+  useEffect(() => {
+    if (draft) setSource(draft.source ?? src);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
 
   const close = () => (router.canGoBack() ? router.back() : router.replace('/recipes'));
 
@@ -339,7 +359,7 @@ export default function CaptureFlow() {
     const recipe: Recipe = {
       id: uid('rec'),
       title: title.trim() || 'Untitled recipe',
-      source: draft.source ?? src,
+      source: source ?? draft.source ?? src,
       status,
       yield: { serves: Math.max(1, parseInt(serves, 10) || 4), totalMinutes: draft.yield?.totalMinutes },
       ingredients: draft.ingredients ?? [],
@@ -400,6 +420,8 @@ export default function CaptureFlow() {
             setServes={setServes}
             intention={intention}
             setIntention={setIntention}
+            source={source ?? draft.source ?? src}
+            setSource={setSource}
             relatedIdeas={relatedIdeas}
             linkedIdeaId={linkedIdeaId}
             onToggleLink={(id) => setLinkedIdeaId((cur) => (cur === id ? null : id))}
@@ -410,7 +432,7 @@ export default function CaptureFlow() {
         {step === 'saved' && draft && (
           <SavedStep
             title={title}
-            source={draft.source ?? src}
+            source={source ?? draft.source ?? src}
             count={draft.ingredients?.length ?? 0}
             onView={() => {
               close();
@@ -420,6 +442,7 @@ export default function CaptureFlow() {
             onAnother={() => {
               setRaw('');
               setDraft(null);
+              setSource(null);
               setSavedId(null);
               setStep('capture');
             }}
@@ -584,6 +607,8 @@ function ReviewStep({
   setServes,
   intention,
   setIntention,
+  source,
+  setSource,
   relatedIdeas,
   linkedIdeaId,
   onToggleLink,
@@ -597,6 +622,8 @@ function ReviewStep({
   setServes: (s: string) => void;
   intention: string;
   setIntention: (s: string) => void;
+  source: RecipeSource;
+  setSource: (s: RecipeSource) => void;
   relatedIdeas: PipelineIdea[];
   linkedIdeaId: string | null;
   onToggleLink: (id: string) => void;
@@ -626,21 +653,47 @@ function ReviewStep({
           <TextInput value={title} onChangeText={setTitle} style={styles.field} />
         </Field>
 
-        <View style={styles.row2}>
-          <Field label="Serves" confidence={guessed('yield')}>
-            <TextInput
-              value={serves}
-              onChangeText={setServes}
-              keyboardType="number-pad"
-              style={styles.field}
-            />
-          </Field>
-          <View style={styles.flex}>
+        <Field label="Serves" confidence={guessed('yield')}>
+          <TextInput
+            value={serves}
+            onChangeText={setServes}
+            keyboardType="number-pad"
+            style={styles.field}
+          />
+        </Field>
+
+        <View style={styles.reviewSection}>
+          <View style={styles.labelRow}>
             <SectionLabel color="textMuted">Source</SectionLabel>
-            <View style={styles.sourceInline}>
-              <SourceBadge source={draft.source ?? { type: 'mine' }} />
-            </View>
+            <SourceBadge source={source} />
           </View>
+          <View style={styles.tagRow}>
+            {SOURCE_TYPES.map((st) => (
+              <FilterChip
+                key={st.key}
+                label={st.label}
+                active={source.type === st.key}
+                onPress={() => setSource({ ...source, type: st.key })}
+              />
+            ))}
+          </View>
+          <TextInput
+            value={source.name ?? ''}
+            onChangeText={(t) => setSource({ ...source, name: t.length ? t : undefined })}
+            placeholder="Name — e.g. NYT Cooking, Bon Appétit, Grandma"
+            placeholderTextColor={colors.textFaint}
+            style={styles.field}
+          />
+          <TextInput
+            value={source.url ?? ''}
+            onChangeText={(t) => setSource({ ...source, url: t.length ? t : undefined })}
+            placeholder="https://… (optional)"
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            style={styles.field}
+          />
         </View>
 
         {relatedIdeas.length > 0 ? (
