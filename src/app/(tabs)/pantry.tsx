@@ -33,10 +33,15 @@ import type { PantryItem, PantryLocation, PantryStatus } from '@/types';
  */
 function StatusPill({ status, since }: { status: PantryStatus; since?: Date }) {
   if (!status || status === 'fine') return null;
+  // `since` can arrive as an ISO string, not a Date, if it ever slips past the
+  // sync revivers or sits in an already-persisted store — calling .getTime() on
+  // a string blanked the whole Pantry screen (patch #1ef184bd). Coerce here so a
+  // bad value degrades to "no stale hint" instead of crashing the render.
+  const sinceMs = since ? new Date(since).getTime() : NaN;
   const isStale =
     status === 'out' &&
-    since &&
-    Date.now() - since.getTime() > 30 * 86_400_000;
+    !Number.isNaN(sinceMs) &&
+    Date.now() - sinceMs > 30 * 86_400_000;
   return (
     <View style={[statusStyles.pill, status === 'out' ? statusStyles.out : statusStyles.low]}>
       <Text

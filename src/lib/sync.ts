@@ -54,6 +54,10 @@ function revivePlanEntry(p: PlanEntry): PlanEntry {
 function revivePantryItem(p: PantryItem): PantryItem {
   p.acquiredAt = new Date(p.acquiredAt as unknown as string);
   if (p.expiresAt) p.expiresAt = new Date(p.expiresAt as unknown as string);
+  // statusUpdatedAt is a Date too — missing it left cloud-synced 'out'/'low'
+  // items with a string here, and StatusPill's since.getTime() then crashed
+  // the whole Pantry screen to blank (patch #1ef184bd, round 2).
+  if (p.statusUpdatedAt) p.statusUpdatedAt = new Date(p.statusUpdatedAt as unknown as string);
   p.purchaseHistory = (p.purchaseHistory ?? []).map(
     (d) => new Date(d as unknown as string),
   );
