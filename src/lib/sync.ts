@@ -373,9 +373,14 @@ async function start(userId: string): Promise<void> {
           console.warn('[stock/sync] migration upload failed', c.table, upErr.message);
         }
         // Local already matches cloud now.
-      } else {
-        c.replace([]);
       }
+      // else: cloud and local are both empty *right now* — but local may
+      // simply not have finished its async hydrate yet (this pull races the
+      // store hydrate in _layout). Do NOT replace with `[]`: that clobbers a
+      // store that's about to populate, and the autosave subscription would
+      // then persist the empty array, sticking the pantry blank forever.
+      // Leaving local untouched lets hydrate fill it, after which the store
+      // subscriber migrates it up to the cloud.
     } else {
       c.replace(cloudItems);
     }

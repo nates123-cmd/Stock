@@ -99,9 +99,16 @@ export const usePantryStore = create<PantryState>((set, get) => ({
       }
     }
     const saved = await webPersist.load<PantryItem[]>('pantry');
+    // Re-seed when there's nothing persisted. An *empty* array counts as
+    // nothing: a transient empty store (e.g. the sync layer racing ahead of
+    // this async hydrate, see lib/sync.ts) used to get autosaved as `[]`,
+    // and `saved ?? seed` treated that `[]` as real data — so the pantry
+    // stuck blank forever. Length-check, not nullish-check, so an empty
+    // persisted pantry recovers to the seed instead of staying empty.
+    const base = saved && saved.length > 0 ? saved : seedPantry();
     // Backfill `status` on older persisted rows that pre-date the field
     // (spec §10 open question #10). Leaves modern rows alone.
-    const items = (saved ?? seedPantry()).map((p) =>
+    const items = base.map((p) =>
       p.status ? p : { ...p, status: 'fine' as PantryStatus, statusUpdatedAt: p.acquiredAt },
     );
     set({ items, hydrated: true });
