@@ -12,14 +12,16 @@ import {
 import { Overlay } from '@/components';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName } from '@/components';
+import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow } from '@/components';
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
+import { usePlanStore } from '@/store/plan';
+import { dayTag, isSameDay } from '@/lib/week';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { convertToGrams } from '@/lib/parsing';
 import { uid } from '@/lib/id';
-import type { Ingredient, Recipe, Step, Unit } from '@/types';
+import type { Ingredient, Meal, Recipe, Step, Unit } from '@/types';
 import { formatMinutes, formatAmount } from '@/lib/format';
 import type { Nutrition, RecipeSource } from '@/types';
 
@@ -64,6 +66,22 @@ export default function RecipeDetail() {
   const [sourceNameInput, setSourceNameInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [editing, setEditing] = useState(false);
+  // "Add to plan" sheet (spec §5/§6 cross-link): pick a day + meal to pin this
+  // recipe straight from the recipe tab, without going through the Plan grid.
+  const setPlanRecipe = usePlanStore((s) => s.setRecipe);
+  const [planning, setPlanning] = useState(false);
+  const [planMeal, setPlanMeal] = useState<Meal>('dinner');
+  // Today + next 13 days — same rolling, always-editable window as the Plan
+  // grid. Anchored at mount; the recipe screen is opened fresh each time.
+  const planDays = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return Array.from({ length: 14 }, (_, i) => {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      return d;
+    });
+  }, []);
 
   // Wide-viewport two-column layout (spec §6). 768px breakpoint matches
   // standard tablet/desktop split; the columns are width-independent so
@@ -101,6 +119,17 @@ export default function RecipeDetail() {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
   const steps = [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal);
+
+  const MEAL_LABELS: Record<Meal, string> = {
+    breakfast: 'Breakfast',
+    lunch: 'Lunch',
+    dinner: 'Dinner',
+  };
+  const addToPlan = async (day: Date) => {
+    await setPlanRecipe(day, planMeal, recipe.id);
+    setPlanning(false);
+    setHint(`Added to ${dayTag(day)} · ${MEAL_LABELS[planMeal]}`);
+  };
 
   const previewConvertToGrams = async () => {
     setConverting(true);
@@ -273,6 +302,13 @@ export default function RecipeDetail() {
             onChange={(tags) => save({ ...recipe, tags, modifiedAt: new Date() })}
           />
         ) : null}
+
+        <Button
+          label="Add to plan"
+          glyph="plan"
+          flex
+          onPress={() => setPlanning(true)}
+        />
 
         <View style={styles.toolbar}>
           <Button
@@ -465,6 +501,41 @@ export default function RecipeDetail() {
             </View>
           </View>
         ) : null}
+      </Overlay>
+
+      <Overlay visible={planning} onClose={() => setPlanning(false)}>
+        <View style={styles.planSheet}>
+          <Text variant="recipeTitle">Add to plan</Text>
+          <Text color="textFaint" style={styles.planHint}>
+            Pick a meal, then a day. Pins “{recipe.title}” to your week.
+          </Text>
+          <ChipRow>
+            {(['breakfast', 'lunch', 'dinner'] as Meal[]).map((m) => (
+              <FilterChip
+                key={m}
+                label={MEAL_LABELS[m]}
+                active={planMeal === m}
+                onPress={() => setPlanMeal(m)}
+              />
+            ))}
+          </ChipRow>
+          <ScrollView style={styles.planList}>
+            {planDays.map((day) => {
+              const today = isSameDay(day, new Date());
+              return (
+                <Pressable
+                  key={day.toISOString()}
+                  style={styles.planRow}
+                  onPress={() => addToPlan(day)}>
+                  <Text variant="bodyStrong" color={today ? 'accent' : 'text'}>
+                    {today ? 'Today' : dayTag(day)}
+                  </Text>
+                  <Glyph name="next" size={16} color="textMuted" />
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
       </Overlay>
 
       <Overlay
@@ -925,6 +996,17 @@ const styles = StyleSheet.create({
   convertName: { flex: 1 },
   scaleSheet: { gap: 14 },
   scaleHint: { fontStyle: 'italic', lineHeight: 18 },
+  planSheet: { gap: 14 },
+  planHint: { fontStyle: 'italic', lineHeight: 18 },
+  planList: { maxHeight: 320 },
+  planRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.lineSoft,
+  },
   scaleControl: {
     flexDirection: 'row',
     alignItems: 'center',
