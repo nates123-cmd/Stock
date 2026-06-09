@@ -1,7 +1,7 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AppState, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -35,19 +35,41 @@ export default function PlanScreen() {
   const [daysAhead, setDaysAhead] = useState(6); // today + next 5
   const [manage, setManage] = useState<PlanEntry | null>(null);
 
+  // "Today" anchor (midnight ms). The rolling window is memoized off this, so
+  // a session left open past midnight — or a PWA restored from bfcache without
+  // a remount — would otherwise keep rendering yesterday's date until a hard
+  // refresh. Re-anchor whenever the screen regains focus or the app returns to
+  // the foreground (RN-web maps AppState 'active' to document visibility).
+  const [todayMs, setTodayMs] = useState(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  });
+  const refreshToday = useCallback(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    setTodayMs((prev) => (prev === d.getTime() ? prev : d.getTime()));
+  }, []);
+  useFocusEffect(refreshToday);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') refreshToday();
+    });
+    return () => sub.remove();
+  }, [refreshToday]);
+
   // Rolling view — always starts today, so it's always editable (no past weeks).
   const readOnly = false;
   // Today + the next (daysAhead - 1) days. setDate handles month/DST rollovers;
   // "+ show more days" extends the window a week at a time.
   const days = useMemo(() => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    const start = new Date(todayMs);
     return Array.from({ length: daysAhead }, (_, i) => {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
       return d;
     });
-  }, [daysAhead]);
+  }, [daysAhead, todayMs]);
   const recipeById = useMemo(() => {
     const m = new Map<string, Recipe>();
     recipes.forEach((r) => m.set(r.id, r));
@@ -103,7 +125,7 @@ export default function PlanScreen() {
       <AccountBar />
       <ScrollView contentContainerStyle={styles.grid}>
         {days.map((day) => {
-          const today = isSameDay(day, new Date());
+          const today = isSameDay(day, new Date(todayMs));
           const key = dateKey(day);
           const breakfast = entryFor(key, 'breakfast');
           const lunch = entryFor(key, 'lunch');
