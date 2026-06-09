@@ -937,21 +937,30 @@ export default function ShoppingList() {
       </Overlay>
 
       <BottomActionBar>
-        <Button
-          label={editing ? 'Done editing' : 'Edit list'}
-          variant="secondary"
-          flex
-          onPress={() => setEditing((v) => !v)}
-        />
-        {!editing ? (
+        {editing ? (
           <Button
-            label={copied ? 'Copied — Instacart opening' : 'Copy → Instacart'}
-            glyph="next"
+            label="Confirm"
+            glyph="done"
             flex
-            disabled={buyLines.length === 0}
-            onPress={copyAndOpen}
+            onPress={() => setEditing(false)}
           />
-        ) : null}
+        ) : (
+          <>
+            <Button
+              label="Edit list"
+              variant="secondary"
+              flex
+              onPress={() => setEditing(true)}
+            />
+            <Button
+              label={copied ? 'Copied — Instacart opening' : 'Copy → Instacart'}
+              glyph="next"
+              flex
+              disabled={buyLines.length === 0}
+              onPress={copyAndOpen}
+            />
+          </>
+        )}
       </BottomActionBar>
     </SafeAreaView>
   );
