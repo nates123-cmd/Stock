@@ -31,6 +31,11 @@ type ExtrasState = {
   hydrated: boolean;
   hydrate: () => Promise<void>;
   add: (items: Omit<ExtraItem, 'id' | 'addedAt'>[]) => void;
+  /** Inline-edit an existing extra (name / amount / unit). */
+  update: (
+    id: string,
+    patch: Partial<Pick<ExtraItem, 'canonicalName' | 'amount' | 'unit'>>,
+  ) => void;
   remove: (id: string) => void;
   removeByOrigin: (originId: string) => void;
 };
@@ -60,6 +65,11 @@ export const useExtrasStore = create<ExtrasState>((set, get) => ({
     }));
     set((s) => ({ items: [...s.items, ...built] }));
   },
+
+  update: (id, patch) =>
+    set((s) => ({
+      items: s.items.map((i) => (i.id === id ? { ...i, ...patch } : i)),
+    })),
 
   remove: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
 

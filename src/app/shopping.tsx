@@ -93,6 +93,8 @@ export default function ShoppingList() {
   const recipes = useRecipeStore((s) => s.recipes);
   const extras = useExtrasStore((s) => s.items);
   const removeExtra = useExtrasStore((s) => s.remove);
+  const addExtra = useExtrasStore((s) => s.add);
+  const updateExtra = useExtrasStore((s) => s.update);
   // Subscribe to have-state so rows re-render on tap (we use the Map directly
   // for derived booleans below, but the selector keeps us reactive).
   const haveByName = useHaveStore((s) => s.byName);
@@ -132,6 +134,14 @@ export default function ShoppingList() {
   const [copied, setCopied] = useState(false);
   const [revealText, setRevealText] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  // Inline edit mode (spec §10 manual add + edit). Tapping "Edit list" swaps
+  // the buy list for an editable view: recipe-derived quantities become
+  // editable, extras get full name/qty edit + delete, and a "+ Add item" row
+  // appends user items via the extras store. The bottom action becomes
+  // "Confirm" while editing.
+  const [editing, setEditing] = useState(false);
+  const [addName, setAddName] = useState('');
+  const [addQty, setAddQty] = useState('');
   /** {name, isExtraId?} for the long-press action sheet. Null = closed. */
   const [menu, setMenu] = useState<{
     name: string;
@@ -376,6 +386,23 @@ export default function ShoppingList() {
   const dismissItem = (name: string) =>
     setDismissed((prev) => new Set(prev).add(`item:${name}`));
 
+  /** Inline-edit a recipe-derived line's quantity (session-local override —
+   *  `buy` is already a free-form string, so no reparse needed). */
+  const editItemQty = (name: string, qty: string) =>
+    setItems((prev) => prev.map((i) => (i.name === name ? { ...i, buy: qty } : i)));
+
+  /** Add a manual item to the list via the extras store (spec §10). */
+  const submitAdd = () => {
+    const name = addName.trim();
+    if (!name) return;
+    const { amount, unit } = parseQty(addQty);
+    addExtra([
+      { canonicalName: name, amount, unit, originLabel: 'added by you', originId: null },
+    ]);
+    setAddName('');
+    setAddQty('');
+  };
+
   // Shortcut Instacart path (spec §11 cross-app integrations — Developer
   // Platform path replaced with a copy-and-open until the API actually
   // accepts a key): copy the consolidated buy list to the clipboard, then
@@ -470,6 +497,107 @@ export default function ShoppingList() {
           <SummaryRow label="Already have" value={`${haveCount}`} tone="ok" />
         </Card>
 
+        {editing ? (
+          <View style={styles.section}>
+            <SectionLabel color="textMuted">Add an item</SectionLabel>
+            <View style={styles.editAddRow}>
+              <TextInput
+                value={addName}
+                onChangeText={setAddName}
+                placeholder="Item name"
+                placeholderTextColor={colors.textFaint}
+                style={[styles.editInput, styles.editName]}
+                onSubmitEditing={submitAdd}
+                returnKeyType="done"
+              />
+              <TextInput
+                value={addQty}
+                onChangeText={setAddQty}
+                placeholder="Qty"
+                placeholderTextColor={colors.textFaint}
+                style={[styles.editInput, styles.editQtyInput]}
+                onSubmitEditing={submitAdd}
+                returnKeyType="done"
+              />
+              <Button label="Add" glyph="add" onPress={submitAdd} disabled={!addName.trim()} />
+            </View>
+
+            {visibleItems.length > 0 ? (
+              <>
+                <SectionLabel color="textMuted" style={styles.editGroupLabel}>
+                  From your recipes
+                </SectionLabel>
+                {visibleItems.map((item) => (
+                  <View key={`edit:${item.name}`} style={styles.editRow}>
+                    <Text style={styles.editName} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <TextInput
+                      value={item.buy}
+                      onChangeText={(t) => editItemQty(item.name, t)}
+                      placeholder="Qty"
+                      placeholderTextColor={colors.textFaint}
+                      style={[styles.editInput, styles.editQtyInput]}
+                    />
+                    <Pressable
+                      onPress={() => dismissItem(item.name)}
+                      hitSlop={8}
+                      style={styles.editDelete}
+                      accessibilityLabel={`Remove ${item.name}`}>
+                      <Glyph name="close" size={16} color="textMuted" />
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            ) : null}
+
+            {extras.length > 0 ? (
+              <>
+                <SectionLabel color="textMuted" style={styles.editGroupLabel}>
+                  Added items
+                </SectionLabel>
+                {extras.map((ex) => (
+                  <View key={`edit-extra:${ex.id}`} style={styles.editRow}>
+                    <TextInput
+                      defaultValue={ex.canonicalName}
+                      onEndEditing={(e) => {
+                        const t = e.nativeEvent.text.trim();
+                        if (t) updateExtra(ex.id, { canonicalName: t });
+                      }}
+                      placeholder="Item name"
+                      placeholderTextColor={colors.textFaint}
+                      style={[styles.editInput, styles.editName]}
+                    />
+                    <TextInput
+                      defaultValue={extraQty(ex)}
+                      onEndEditing={(e) => {
+                        const { amount, unit } = parseQty(e.nativeEvent.text);
+                        updateExtra(ex.id, { amount, unit });
+                      }}
+                      placeholder="Qty"
+                      placeholderTextColor={colors.textFaint}
+                      style={[styles.editInput, styles.editQtyInput]}
+                    />
+                    <Pressable
+                      onPress={() => removeExtra(ex.id)}
+                      hitSlop={8}
+                      style={styles.editDelete}
+                      accessibilityLabel={`Remove ${ex.canonicalName}`}>
+                      <Glyph name="close" size={16} color="textMuted" />
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            ) : null}
+
+            {visibleItems.length === 0 && extras.length === 0 ? (
+              <Text color="textMuted" style={styles.empty}>
+                Nothing on the list yet. Add items above.
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          <>
         {showOnboard && (visibleItems.length > 0 || extras.length > 0) ? (
           <Pressable onPress={dismissOnboard} style={styles.onboard}>
             <Text color="textMuted" style={styles.onboardText}>
@@ -713,6 +841,8 @@ export default function ShoppingList() {
         </Card>
           </View>
         </View>
+          </>
+        )}
 
         {revealText ? (
           <Card style={styles.revealCard}>
@@ -808,20 +938,20 @@ export default function ShoppingList() {
 
       <BottomActionBar>
         <Button
-          label="Edit list"
+          label={editing ? 'Done editing' : 'Edit list'}
           variant="secondary"
           flex
-          onPress={() =>
-            setHint('Inline list editing arrives with Pantry consolidation — spec §10.')
-          }
+          onPress={() => setEditing((v) => !v)}
         />
-        <Button
-          label={copied ? 'Copied — Instacart opening' : 'Copy → Instacart'}
-          glyph="next"
-          flex
-          disabled={buyLines.length === 0}
-          onPress={copyAndOpen}
-        />
+        {!editing ? (
+          <Button
+            label={copied ? 'Copied — Instacart opening' : 'Copy → Instacart'}
+            glyph="next"
+            flex
+            disabled={buyLines.length === 0}
+            onPress={copyAndOpen}
+          />
+        ) : null}
       </BottomActionBar>
     </SafeAreaView>
   );
@@ -1044,6 +1174,23 @@ function extraQty(ex: ExtraItem): string {
   return formatAmount(ex.amount, ex.unit) || 'some';
 }
 
+/** Loose "2 cups" / "3" / "a pinch" → {amount, unit} parse for manual adds and
+ *  inline qty edits. A leading number splits into amount + unit; anything else
+ *  is kept whole as the unit (so "a pinch" / "to taste" survive). */
+function parseQty(raw: string): { amount: number | null; unit: string | null } {
+  const t = raw.trim();
+  if (!t) return { amount: null, unit: null };
+  const m = t.match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
+  if (m) {
+    const amount = Number(m[1]);
+    return {
+      amount: Number.isFinite(amount) ? amount : null,
+      unit: (m[2] ?? '').trim() || null,
+    };
+  }
+  return { amount: null, unit: t };
+}
+
 // ─── Long-press action sheet ────────────────────────────────────────────────
 
 function RowMenu({
@@ -1141,6 +1288,29 @@ const styles = StyleSheet.create({
   summary: { gap: 10 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   section: { gap: 4 },
+  editAddRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  editGroupLabel: { marginTop: 14 },
+  editRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.lineSoft,
+  },
+  editInput: {
+    backgroundColor: colors.bg2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: colors.text,
+    fontFamily: fonts.sans,
+  },
+  editName: { flex: 2 },
+  editQtyInput: { flex: 1 },
+  editDelete: { padding: 6 },
   rowSurface: { backgroundColor: colors.bg },
   item: {
     flexDirection: 'row',
