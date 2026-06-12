@@ -6,9 +6,18 @@ import path from 'node:path';
 // from src/. Runs in node; Stock's pure helpers don't need a DOM.
 export default defineConfig({
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, 'src'),
-    },
+    // Order matters: the specific bridge alias must precede the generic '@'.
+    // Tests run in node, so resolve the WEB Claude bridge (fetch-based, no
+    // Anthropic SDK / native SQLite) exactly as the shipped web build does —
+    // the native bridge's `typeof import()` / require() graph isn't meant for
+    // the unit harness and trips vite's SSR parser.
+    alias: [
+      {
+        find: /^@\/lib\/api\/claudeBridge$/,
+        replacement: path.resolve(__dirname, 'src/lib/api/claudeBridge.web.ts'),
+      },
+      { find: '@', replacement: path.resolve(__dirname, 'src') },
+    ],
   },
   test: {
     include: ['tests/**/*.test.ts'],
