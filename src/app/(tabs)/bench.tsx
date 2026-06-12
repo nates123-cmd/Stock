@@ -14,6 +14,7 @@ import { colors, fonts, glyph, layout } from '@/design';
 import {
   convertToGrams,
   findSubstitutes,
+  localGramsFromUnit,
   localParseRecipe,
   type Substitute,
 } from '@/lib/parsing';
@@ -30,14 +31,14 @@ type ConvertRow = {
   bakersPercent?: number;
 };
 
-/** Static gram weight for amounts already in a mass unit — no Claude needed. */
+/**
+ * Gram weight for amounts already in a mass unit — no Claude needed. Backed by
+ * convert-units (parsing/units.ts), so it now also handles oz/lb locally, not
+ * just g/kg/mg; volume units (cup, tbsp…) return null and still go to Claude
+ * for a density estimate.
+ */
 function localGrams(amount: number | null, unit: string | null): number | null {
-  if (amount == null || amount <= 0 || !unit) return null;
-  const u = unit.trim().toLowerCase();
-  if (u === 'g') return amount;
-  if (u === 'kg') return amount * 1000;
-  if (u === 'mg') return amount / 1000;
-  return null;
+  return localGramsFromUnit(amount, unit);
 }
 
 /** Bench (workbench) — Convert recipe amounts to grams + baker's %, and look

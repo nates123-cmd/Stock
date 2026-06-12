@@ -15,12 +15,13 @@ describe('localBestGuess (pre-cook hunch parser)', () => {
     expect(out[0]!.confidence).toBe('guessed');
   });
 
-  it('parses amount + recognized unit (keeps the raw token, no normalization)', () => {
-    // Unlike localRecipe, localBestGuess does NOT canonicalize units — it only
-    // membership-checks the UNITS set, so "cups" stays "cups" (not "cup").
+  it('parses amount + unit, normalized to a canonical Stock unit', () => {
+    // localBestGuess now runs the shared parse-ingredient first pass, which
+    // normalizes UOMs onto Stock's canonical set (spec §4) — so "cups" → "cup",
+    // matching localRecipe. (Previously it kept the raw token un-normalized.)
     const out = localBestGuess('2 cups rice');
     expect(out[0]!.value.amount).toBe(2);
-    expect(out[0]!.value.unit).toBe('cups');
+    expect(out[0]!.value.unit).toBe('cup');
     expect(out[0]!.value.canonicalName).toBe('rice');
   });
 

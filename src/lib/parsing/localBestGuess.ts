@@ -8,6 +8,7 @@
 import type { Ingredient } from '@/types';
 import { uid } from '@/lib/id';
 import type { Confidenced } from './confidence';
+import { parseIngredientLine } from './freeText';
 
 const FRACTIONS: Record<string, number> = {
   '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125,
@@ -41,13 +42,26 @@ export function localBestGuess(freeText: string): Confidenced<Ingredient>[] {
     .map((l) => l.trim())
     .filter(Boolean)
     .map((line) => {
-      const m = line.match(LINE_RE);
-      const amount = qty(m?.[1]);
-      let unit: string | null = null;
-      let name = (m?.[3] ?? '').trim();
-      const maybeUnit = (m?.[2] ?? '').toLowerCase();
-      if (maybeUnit && UNITS.has(maybeUnit)) unit = maybeUnit;
-      else if (maybeUnit) name = `${maybeUnit} ${name}`.trim();
+      // First pass: parse-ingredient (shared free-text parser). It yields
+      // Stock-canonical units and a clean food name; we fall back to the
+      // hand-rolled regex only when it can't extract a name.
+      const lib = parseIngredientLine(line);
+      let amount: number | null;
+      let unit: string | null;
+      let name: string;
+      if (lib) {
+        amount = lib.amount;
+        unit = lib.unit;
+        name = lib.name;
+      } else {
+        const m = line.match(LINE_RE);
+        amount = qty(m?.[1]);
+        unit = null;
+        name = (m?.[3] ?? '').trim();
+        const maybeUnit = (m?.[2] ?? '').toLowerCase();
+        if (maybeUnit && UNITS.has(maybeUnit)) unit = maybeUnit;
+        else if (maybeUnit) name = `${maybeUnit} ${name}`.trim();
+      }
       if (!name) name = line.toLowerCase();
       const ingredient: Ingredient = {
         id: uid('ing'),

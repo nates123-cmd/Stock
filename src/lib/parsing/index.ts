@@ -16,5 +16,7 @@ export type { ParsedRecipeDraft } from './recipe';
 export { parseInstacartPaste, bestGuessIngredients } from './instacart';
 export type { ParsedPantryItem } from './instacart';
 export { localParseRecipe } from './localRecipe';
-export { convertToGrams, findSubstitutes } from './units';
+export { convertToGrams, findSubstitutes, localGramsFromUnit } from './units';
+export { parseIngredientLine } from './freeText';
+export type { ParsedLine } from './freeText';
 export type { ConvertedIngredient, GramResult, Substitute } from './units';

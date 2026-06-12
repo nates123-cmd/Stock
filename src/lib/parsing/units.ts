@@ -1,8 +1,43 @@
 /**
  * Bench tools — spec §11 tasks 4, 5 (§9 Bench; build order §13 step 8).
  */
+import convert from 'convert-units';
 import type { Unit } from '@/types';
 import { CLAUDE_AVAILABLE, claudeText } from '@/lib/api/claudeBridge';
+
+/**
+ * Stock unit code → convert-units identifier, for the units convert-units
+ * knows by name. Mass units convert to grams with no density needed; the rest
+ * (cup, tbsp, tsp, etc.) are volume and still need Claude's density estimate,
+ * so they're intentionally absent here. "stick"/"clove"/"can"/"pinch"/"pc"
+ * are counts/ambiguous and never map.
+ */
+const STOCK_TO_CONVERT: Record<string, convert.Unit> = {
+  g: 'g',
+  kg: 'kg',
+  mg: 'mg',
+  oz: 'oz',
+  lb: 'lb',
+};
+
+/**
+ * Convert a mass amount to grams locally via convert-units — no Claude needed.
+ * Returns null for volume/count units (cup, tbsp, stick…) or unknown units,
+ * which still require a density estimate from the Claude path.
+ */
+export function localGramsFromUnit(
+  amount: number | null,
+  unit: string | null,
+): number | null {
+  if (amount == null || amount <= 0 || !unit) return null;
+  const id = STOCK_TO_CONVERT[unit.trim().toLowerCase()];
+  if (!id) return null;
+  try {
+    return convert(amount).from(id).to('g');
+  } catch {
+    return null;
+  }
+}
 
 export type ConvertedIngredient = {
   name: string;

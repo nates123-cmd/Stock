@@ -10,6 +10,7 @@
 import type { Ingredient, Step } from '@/types';
 import { uid } from '@/lib/id';
 import type { ParsedRecipeDraft } from './recipe';
+import { parseIngredientLine } from './freeText';
 
 const FRACTIONS: Record<string, number> = {
   '½': 0.5, '¼': 0.25, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125,
@@ -71,8 +72,30 @@ const INGREDIENT_RE =
   /^[-•*\s]*((?:\d+[\d./]*\s*[½¼¾⅓⅔⅛]?)|[½¼¾⅓⅔⅛])\s*([a-zA-Z]+)?\s*(.*)$/;
 
 function toIngredient(line: string): Ingredient | null {
+  // A genuine ingredient is quantity-led ("2 cups flour"). Bail before the
+  // library on lines with no leading number so unnumbered prose still routes
+  // to step/title detection in localParseRecipe (and "1. Preheat…" ordinal
+  // steps are handled by the caller, which runs before this).
   const m = line.match(INGREDIENT_RE);
   if (!m) return null;
+
+  // First pass: the parse-ingredient library (richer UOM + quantity grammar).
+  // Falls through to the hand-rolled regex below if it can't name the food.
+  const lib = parseIngredientLine(line);
+  if (lib && lib.amount != null) {
+    const name = lib.name;
+    if (NON_INGREDIENT_NAMES.has(name.toLowerCase())) return null;
+    return {
+      id: uid('ing'),
+      amount: lib.amount,
+      unit: lib.unit,
+      canonicalName: name.replace(/\s+/g, ' ').toLowerCase(),
+      originalText: line.trim(),
+      modificationHistory: [],
+    };
+  }
+
+  // Fallback: original deterministic regex.
   const amount = parseQuantity(m[1] as string);
   if (amount == null) return null;
   let unit: string | null = null;
