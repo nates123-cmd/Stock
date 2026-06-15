@@ -75,7 +75,12 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
   );
 }
 
-export default function ShoppingList() {
+/**
+ * `embedded` renders the list inside another screen (the Pantry tab's "Shop"
+ * segment) rather than as a standalone modal: no top safe-area inset (the host
+ * already owns it) and no "Done" back button (a tab has nowhere to go back to).
+ */
+export default function ShoppingList({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter();
   const params = useLocalSearchParams<{ weekStart?: string; entryIds?: string }>();
   const weekStart = useMemo(
@@ -474,7 +479,7 @@ export default function ShoppingList() {
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={styles.root} edges={embedded ? [] : ['top']}>
       <View style={styles.header}>
         <View style={styles.flex}>
           <Heading variant="screenTitle">Shopping list</Heading>
@@ -484,11 +489,13 @@ export default function ShoppingList() {
             {refining ? ' · estimating…' : ''}
           </Text>
         </View>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text variant="bodyStrong" color="textMuted">
-            Done
-          </Text>
-        </Pressable>
+        {embedded ? null : (
+          <Pressable onPress={() => router.back()} hitSlop={8}>
+            <Text variant="bodyStrong" color="textMuted">
+              Done
+            </Text>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>

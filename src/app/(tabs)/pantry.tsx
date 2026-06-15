@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
   Screen,
@@ -13,6 +14,7 @@ import {
   Glyph,
   Overlay,
 } from '@/components';
+import ShoppingList from '@/app/shopping';
 import { colors } from '@/design';
 import { usePantryStore } from '@/store/pantry';
 import { useExtrasStore } from '@/store/extras';
@@ -94,6 +96,9 @@ export default function PantryScreen() {
   const [menu, setMenu] = useState<PantryItem | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [pushedToShop, setPushedToShop] = useState<number | null>(null);
+  // Have | Shop segment — the pantry tab now owns both inventory ("Have") and
+  // the shopping list ("Shop"); same domain, what you've got vs what you need.
+  const [mode, setMode] = useState<'have' | 'shop'>('have');
 
   // Manual single-item add (spec §10 — was paste-only; this is the in-tab path).
   const [adding, setAdding] = useState(false);
@@ -192,7 +197,28 @@ export default function PantryScreen() {
 
   return (
     <View style={styles.root}>
-      <Screen>
+      <SafeAreaView edges={['top']} style={styles.segmentSafe}>
+        <View style={styles.segment}>
+          {(['have', 'shop'] as const).map((m) => {
+            const active = mode === m;
+            return (
+              <Pressable
+                key={m}
+                onPress={() => setMode(m)}
+                style={[styles.segmentBtn, active && styles.segmentBtnActive]}>
+                <Text variant="bodyStrong" color={active ? 'bg' : 'text'}>
+                  {m === 'have' ? 'Have' : 'Shop'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </SafeAreaView>
+
+      {mode === 'shop' ? (
+        <ShoppingList embedded />
+      ) : (
+      <Screen edges={[]}>
         <View style={styles.header}>
           <Heading variant="screenTitle">Pantry</Heading>
           <View style={styles.headerRight}>
@@ -340,6 +366,7 @@ export default function PantryScreen() {
           </View>
         ) : null}
       </Screen>
+      )}
 
       <Overlay visible={menu != null} onClose={closeMenu}>
         {menu ? (
@@ -656,7 +683,28 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root: { flex: 1, backgroundColor: colors.bg },
+  segmentSafe: { backgroundColor: colors.bg },
+  segment: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  segmentBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    alignItems: 'center',
+  },
+  segmentBtnActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
   flex: { flex: 1 },
   flexShrink: { flexShrink: 1 },
   header: {
