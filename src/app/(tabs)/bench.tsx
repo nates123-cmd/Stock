@@ -128,15 +128,21 @@ function ConvertTool({ initialText }: { initialText: string }) {
   const [scaleX, setScaleX] = useState('');
   const [targetG, setTargetG] = useState('');
   const [source, setSource] = useState<'x' | 'target' | null>(null);
+  /** Pivot row for "target grams" — tap any output row to scale off it. Null =
+   *  default (flour total, else first weighed row). */
+  const [pivotIdx, setPivotIdx] = useState<number | null>(null);
 
   const hasFlour = rows?.some((r) => r.bakersPercent != null) ?? false;
-  /** Reference weight for "target grams": the flour total, else the first row. */
+  /** Reference weight for "target grams": the pinned row, else flour, else first. */
   const refGrams = useMemo(() => {
     if (!rows) return null;
+    if (pivotIdx != null && rows[pivotIdx]?.grams != null) return rows[pivotIdx]!.grams;
     const flour = rows.find((r) => r.bakersPercent != null && r.grams != null);
     if (flour) return flour.grams;
     return rows.find((r) => r.grams != null)?.grams ?? null;
-  }, [rows]);
+  }, [rows, pivotIdx]);
+  const refLabel =
+    pivotIdx != null && rows?.[pivotIdx] ? rows[pivotIdx]!.name : hasFlour ? 'flour' : 'base';
 
   const multiplier = useMemo(() => {
     if (source === 'x') {
@@ -191,6 +197,7 @@ function ConvertTool({ initialText }: { initialText: string }) {
       setScaleX('');
       setTargetG('');
       setSource(null);
+      setPivotIdx(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Conversion failed.');
     } finally {
@@ -235,7 +242,9 @@ function ConvertTool({ initialText }: { initialText: string }) {
               placeholderTextColor={colors.textFaint}
               style={styles.scaleInput}
             />
-            <Text color="textMuted">g {hasFlour ? 'flour' : 'base'}</Text>
+            <Text color="textMuted" numberOfLines={1} style={styles.refLabel}>
+              g {refLabel}
+            </Text>
           </View>
         </View>
         <Text color="textFaint" style={styles.scaleOr}>
@@ -283,19 +292,33 @@ function ConvertTool({ initialText }: { initialText: string }) {
               <Numeric color="textMuted">×{Math.round(multiplier * 100) / 100}</Numeric>
             ) : null}
           </View>
-          {rows.map((r, i) => (
-            <View key={`${r.name}-${i}`} style={styles.outRow}>
-              <Numeric color="accent" style={styles.outGrams}>
-                {r.grams != null ? `${Math.round(r.grams * multiplier)} g` : '—'}
-              </Numeric>
-              <Numeric color="textMuted" style={styles.outPct}>
-                {r.bakersPercent != null ? `${r.bakersPercent}%` : ''}
-              </Numeric>
-              <Text style={styles.outName} numberOfLines={1}>
-                {r.name}
-              </Text>
-            </View>
-          ))}
+          <Text color="textFaint" style={styles.pivotHint}>
+            Tap a row to scale off it — set how much you have in Target.
+          </Text>
+          {rows.map((r, i) => {
+            const isPivot = pivotIdx === i;
+            return (
+              <Pressable
+                key={`${r.name}-${i}`}
+                disabled={r.grams == null}
+                onPress={() => {
+                  setPivotIdx(i);
+                  setScaleX('');
+                  setSource('target');
+                }}
+                style={[styles.outRow, isPivot && styles.outRowPivot]}>
+                <Numeric color="accent" style={styles.outGrams}>
+                  {r.grams != null ? `${Math.round(r.grams * multiplier)} g` : '—'}
+                </Numeric>
+                <Numeric color="textMuted" style={styles.outPct}>
+                  {r.bakersPercent != null ? `${r.bakersPercent}%` : ''}
+                </Numeric>
+                <Text style={styles.outName} numberOfLines={1}>
+                  {isPivot ? '📌 ' : ''}{r.name}
+                </Text>
+              </Pressable>
+            );
+          })}
           <View style={styles.outActions}>
             <Button label="Save as recipe" glyph="add" flex onPress={saveAsRecipe} />
             <Button label="Edit" variant="secondary" flex onPress={() => setRows(null)} />
@@ -500,11 +523,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 10,
-    paddingVertical: 3,
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+    borderRadius: 8,
   },
+  outRowPivot: { backgroundColor: colors.bg3 },
   outGrams: { width: 72 },
   outPct: { width: 56 },
   outName: { flex: 1 },
+  refLabel: { maxWidth: 90 },
+  pivotHint: { fontStyle: 'italic', fontSize: 12, paddingTop: 4, paddingBottom: 2 },
   outActions: {
     flexDirection: 'row',
     gap: 10,

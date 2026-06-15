@@ -62,6 +62,11 @@ export default function RecipeDetail() {
   const [convertOff, setConvertOff] = useState<Set<string>>(new Set());
   /** Non-null while the Scale overlay is open; carries the proposed serves. */
   const [scalingTo, setScalingTo] = useState<number | null>(null);
+  /** Scale overlay mode: by servings (×N) or pinned to one ingredient's amount. */
+  const [scaleMode, setScaleMode] = useState<'serves' | 'ingredient'>('serves');
+  /** Ingredient mode: which ingredient is pinned + the amount you actually have. */
+  const [pivotId, setPivotId] = useState<string | null>(null);
+  const [pivotTarget, setPivotTarget] = useState('');
   const [editingSource, setEditingSource] = useState(false);
   const [sourceNameInput, setSourceNameInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
@@ -206,6 +211,41 @@ export default function RecipeDetail() {
     setScalingTo(null);
   };
 
+  // Ingredient-pivot scaling (spec §9 extension): pin one ingredient to the
+  // amount you actually have, scale everything else by that ratio. Use case:
+  // only 600 g of pepper on hand → set pepper to 600 g, the rest follows.
+  const scalable = recipe.ingredients.filter((i) => i.amount != null);
+  const pivot = recipe.ingredients.find((i) => i.id === pivotId) ?? null;
+  const pivotRatio = (() => {
+    const t = parseFloat(pivotTarget);
+    if (!pivot || pivot.amount == null || !Number.isFinite(t) || t <= 0) return null;
+    return t / pivot.amount;
+  })();
+
+  const applyScaleByIngredient = async () => {
+    if (!pivot || pivot.amount == null || pivotRatio == null) {
+      setScalingTo(null);
+      return;
+    }
+    const ratio = pivotRatio;
+    const updated = recipe.ingredients.map((ing) =>
+      ing.amount == null
+        ? ing
+        : { ...ing, amount: Math.round(ing.amount * ratio * 100) / 100 },
+    );
+    const newServes = Math.max(1, Math.round(recipe.yield.serves * ratio));
+    await save({
+      ...recipe,
+      ingredients: updated,
+      yield: { ...recipe.yield, serves: newServes },
+      modifiedAt: new Date(),
+    });
+    setHint(
+      `Scaled to ${formatAmount(Math.round((parseFloat(pivotTarget)) * 100) / 100, pivot.unit)} ${pivot.canonicalName}.`,
+    );
+    setScalingTo(null);
+  };
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <TopBar
@@ -331,7 +371,12 @@ export default function RecipeDetail() {
             label="Scale"
             variant="secondary"
             flex
-            onPress={() => setScalingTo(recipe.yield.serves)}
+            onPress={() => {
+              setScaleMode('serves');
+              setPivotId(recipe.ingredients.find((i) => i.amount != null)?.id ?? null);
+              setPivotTarget('');
+              setScalingTo(recipe.yield.serves);
+            }}
           />
         </View>
         {hint ? (
@@ -435,42 +480,104 @@ export default function RecipeDetail() {
         {scalingTo != null ? (
           <View style={styles.scaleSheet}>
             <Text variant="recipeTitle">Scale recipe</Text>
-            <Text color="textFaint" style={styles.scaleHint}>
-              Multiplies all amounts. Tweak anything weird afterward (tap an
-              ingredient to fine-tune).
-            </Text>
-            <View style={styles.scaleControl}>
-              <Pressable
-                onPress={() => setScalingTo(Math.max(1, scalingTo - 1))}
-                style={styles.scaleBtn}
-                hitSlop={8}>
-                <Text variant="recipeTitle">−</Text>
-              </Pressable>
-              <View style={styles.scaleNumWrap}>
-                <Numeric color="text" style={styles.scaleNum}>
-                  {scalingTo}
-                </Numeric>
-                <Text color="textMuted">servings</Text>
-              </View>
-              <Pressable
-                onPress={() => setScalingTo(Math.min(99, scalingTo + 1))}
-                style={styles.scaleBtn}
-                hitSlop={8}>
-                <Text variant="recipeTitle">+</Text>
-              </Pressable>
-            </View>
-            <Text color="textMuted" style={styles.scaleRatio}>
-              {scalingTo === recipe.yield.serves
-                ? `Same as current (${recipe.yield.serves})`
-                : `${(scalingTo / recipe.yield.serves).toFixed(scalingTo / recipe.yield.serves >= 1 ? 2 : 2).replace(/\.?0+$/, '')}× from ${recipe.yield.serves}`}
-            </Text>
+            <ChipRow>
+              <FilterChip
+                label="By servings"
+                active={scaleMode === 'serves'}
+                onPress={() => setScaleMode('serves')}
+              />
+              <FilterChip
+                label="By ingredient"
+                active={scaleMode === 'ingredient'}
+                onPress={() => setScaleMode('ingredient')}
+              />
+            </ChipRow>
+
+            {scaleMode === 'serves' ? (
+              <>
+                <Text color="textFaint" style={styles.scaleHint}>
+                  Multiplies all amounts. Tweak anything weird afterward (tap an
+                  ingredient to fine-tune).
+                </Text>
+                <View style={styles.scaleControl}>
+                  <Pressable
+                    onPress={() => setScalingTo(Math.max(1, scalingTo - 1))}
+                    style={styles.scaleBtn}
+                    hitSlop={8}>
+                    <Text variant="recipeTitle">−</Text>
+                  </Pressable>
+                  <View style={styles.scaleNumWrap}>
+                    <Numeric color="text" style={styles.scaleNum}>
+                      {scalingTo}
+                    </Numeric>
+                    <Text color="textMuted">servings</Text>
+                  </View>
+                  <Pressable
+                    onPress={() => setScalingTo(Math.min(99, scalingTo + 1))}
+                    style={styles.scaleBtn}
+                    hitSlop={8}>
+                    <Text variant="recipeTitle">+</Text>
+                  </Pressable>
+                </View>
+                <Text color="textMuted" style={styles.scaleRatio}>
+                  {scalingTo === recipe.yield.serves
+                    ? `Same as current (${recipe.yield.serves})`
+                    : `${(scalingTo / recipe.yield.serves).toFixed(2).replace(/\.?0+$/, '')}× from ${recipe.yield.serves}`}
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text color="textFaint" style={styles.scaleHint}>
+                  Pin one ingredient to the amount you actually have — everything
+                  else scales to match.
+                </Text>
+                <ChipRow>
+                  {scalable.map((ing) => (
+                    <FilterChip
+                      key={ing.id}
+                      label={ing.canonicalName}
+                      active={pivotId === ing.id}
+                      onPress={() => setPivotId(ing.id)}
+                    />
+                  ))}
+                </ChipRow>
+                {pivot ? (
+                  <View style={styles.pivotInputRow}>
+                    <Text color="textMuted">I have</Text>
+                    <TextInput
+                      value={pivotTarget}
+                      onChangeText={setPivotTarget}
+                      keyboardType="numeric"
+                      placeholder={
+                        pivot.amount != null ? String(pivot.amount) : '—'
+                      }
+                      placeholderTextColor={colors.textFaint}
+                      style={styles.pivotInput}
+                    />
+                    <Text color="textMuted">
+                      {pivot.unit ?? ''} {pivot.canonicalName}
+                    </Text>
+                  </View>
+                ) : null}
+                <Text color="textMuted" style={styles.scaleRatio}>
+                  {pivotRatio == null
+                    ? 'Enter an amount to preview'
+                    : `${(Math.round(pivotRatio * 100) / 100)}× from ${formatAmount(pivot!.amount, pivot!.unit)}`}
+                </Text>
+              </>
+            )}
+
             <ScrollView style={styles.scaleList}>
               {recipe.ingredients.map((ing) => {
                 if (ing.amount == null) return null;
+                const ratio =
+                  scaleMode === 'serves'
+                    ? scalingTo / recipe.yield.serves
+                    : pivotRatio;
                 const newAmt =
-                  Math.round(
-                    ing.amount * (scalingTo / recipe.yield.serves) * 100,
-                  ) / 100;
+                  ratio == null
+                    ? ing.amount
+                    : Math.round(ing.amount * ratio * 100) / 100;
                 return (
                   <View key={ing.id} style={styles.scaleRow}>
                     <Text style={styles.convertName} numberOfLines={1}>
@@ -495,8 +602,14 @@ export default function RecipeDetail() {
                 label="Apply"
                 glyph="done"
                 flex
-                disabled={scalingTo === recipe.yield.serves}
-                onPress={applyScale}
+                disabled={
+                  scaleMode === 'serves'
+                    ? scalingTo === recipe.yield.serves
+                    : pivotRatio == null || pivotRatio === 1
+                }
+                onPress={
+                  scaleMode === 'serves' ? applyScale : applyScaleByIngredient
+                }
               />
             </View>
           </View>
@@ -1026,6 +1139,19 @@ const styles = StyleSheet.create({
   scaleNumWrap: { alignItems: 'center', minWidth: 90 },
   scaleNum: { fontSize: 28 },
   scaleRatio: { textAlign: 'center', fontStyle: 'italic' },
+  pivotInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  pivotInput: {
+    minWidth: 72,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.bg2,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 16,
+    color: colors.text,
+    textAlign: 'center',
+  },
   scaleList: { maxHeight: 240 },
   scaleRow: {
     flexDirection: 'row',
