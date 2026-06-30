@@ -10,7 +10,7 @@
  * Dates are stored as ISO-8601 TEXT.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS recipes (
@@ -75,6 +75,20 @@ export const SCHEMA_STATEMENTS: string[] = [
      UNIQUE (date, meal)
    );`,
   `CREATE INDEX IF NOT EXISTS idx_plan_date ON plan_entries(date);`,
+
+  // Cook Plans (v2) — a multi-component, multi-phase production. Like recipes,
+  // nested data lives in the JSON blob; queryable scalars are mirrored.
+  `CREATE TABLE IF NOT EXISTS cook_plans (
+     id          TEXT PRIMARY KEY NOT NULL,
+     title       TEXT NOT NULL,
+     status      TEXT NOT NULL,
+     serve_at    TEXT,
+     cook_count  INTEGER NOT NULL DEFAULT 0,
+     created_at  TEXT NOT NULL,
+     modified_at TEXT NOT NULL,
+     data        TEXT NOT NULL
+   );`,
+  `CREATE INDEX IF NOT EXISTS idx_cook_plans_status ON cook_plans(status);`,
 
   `CREATE TABLE IF NOT EXISTS shopping_lists (
      id           TEXT PRIMARY KEY NOT NULL,

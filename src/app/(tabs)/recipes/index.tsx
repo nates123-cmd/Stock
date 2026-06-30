@@ -10,15 +10,17 @@ import {
   FilterChip,
   ChipRow,
   RecipeCard,
+  CookPlanCard,
   Fab,
 } from '@/components';
 import { useRecipeStore } from '@/store/recipes';
+import { useCookPlanStore } from '@/store/cookPlans';
 import { usePantryStore } from '@/store/pantry';
 import { isModified } from '@/lib/recipe';
 import { canMakeNow, recipeCoverage } from '@/lib/pantry';
 import type { Recipe } from '@/types';
 
-const FILTERS = ['All', 'Have it', 'Weeknight', 'Baking', 'Project', 'Modified'] as const;
+const FILTERS = ['All', 'Cook plans', 'Have it', 'Weeknight', 'Baking', 'Project', 'Modified'] as const;
 type Filter = (typeof FILTERS)[number];
 
 const TAG_FILTER: Partial<Record<Filter, string>> = {
@@ -30,6 +32,7 @@ const TAG_FILTER: Partial<Record<Filter, string>> = {
 export default function RecipesLibrary() {
   const router = useRouter();
   const recipes = useRecipeStore((s) => s.recipes);
+  const cookPlans = useCookPlanStore((s) => s.plans);
   const pantry = usePantryStore((s) => s.items);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('All');
@@ -79,6 +82,20 @@ export default function RecipesLibrary() {
   const recentlyCooked = filtered.filter((r) => r.cookCount > 0).sort(byRecent);
   const library = filtered.filter((r) => r.cookCount === 0).sort(byRecent);
 
+  const plansMode = filter === 'Cook plans';
+  const filteredPlans = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return cookPlans
+      .filter((p) => p.status !== 'archived')
+      .filter(
+        (p) =>
+          !q ||
+          p.title.toLowerCase().includes(q) ||
+          p.spread.some((s) => s.toLowerCase().includes(q)),
+      )
+      .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
+  }, [cookPlans, query]);
+
   return (
     <View style={styles.root}>
       <Screen>
@@ -104,7 +121,7 @@ export default function RecipesLibrary() {
           </ChipRow>
         </View>
 
-        {userTags.length > 0 ? (
+        {!plansMode && userTags.length > 0 ? (
           <View style={styles.chips}>
             <ChipRow>
               {userTags.map((t) => (
@@ -129,7 +146,29 @@ export default function RecipesLibrary() {
           </View>
         ) : null}
 
-        {recentlyCooked.length > 0 ? (
+        {plansMode ? (
+          filteredPlans.length > 0 ? (
+            <Section label="Cook plans">
+              {filteredPlans.map((p) => (
+                <View key={p.id} style={styles.cardCell}>
+                  <CookPlanCard
+                    plan={p}
+                    onPress={() =>
+                      router.push({ pathname: '/cook-plan/[id]', params: { id: p.id } })
+                    }
+                  />
+                </View>
+              ))}
+            </Section>
+          ) : (
+            <View style={styles.empty}>
+              <Text color="textMuted">No cook plans yet.</Text>
+              <Text color="textFaint">Tap + to build a whole-meal production.</Text>
+            </View>
+          )
+        ) : null}
+
+        {!plansMode && recentlyCooked.length > 0 ? (
           <Section label="Recently cooked">
             {recentlyCooked.map((r) => (
               <View key={r.id} style={styles.cardCell}>
@@ -144,7 +183,7 @@ export default function RecipesLibrary() {
           </Section>
         ) : null}
 
-        {library.length > 0 ? (
+        {!plansMode && library.length > 0 ? (
           <Section label="Library">
             {library.map((r) => (
               <View key={r.id} style={styles.cardCell}>
@@ -159,7 +198,7 @@ export default function RecipesLibrary() {
           </Section>
         ) : null}
 
-        {filtered.length === 0 ? (
+        {!plansMode && filtered.length === 0 ? (
           <View style={styles.empty}>
             <Text color="textMuted">No recipes match.</Text>
             <Text color="textFaint">Tap + to capture one.</Text>
@@ -167,7 +206,7 @@ export default function RecipesLibrary() {
         ) : null}
       </Screen>
 
-      <Fab onPress={() => router.push('/capture')} />
+      <Fab onPress={() => router.push(plansMode ? '/cook-plan-capture' : '/capture')} />
     </View>
   );
 }

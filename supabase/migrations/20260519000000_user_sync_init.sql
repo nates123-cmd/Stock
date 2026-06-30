@@ -17,7 +17,7 @@ end $$;
 do $body$
 declare t text;
 begin
-  foreach t in array array['recipes','plan_entries','pantry_items','pipeline_ideas','cooks']
+  foreach t in array array['recipes','plan_entries','pantry_items','pipeline_ideas','cooks','cook_plans']
   loop
     execute format($f$
       create table if not exists public.%I (
