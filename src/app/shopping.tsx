@@ -40,6 +40,7 @@ import {
   type ShoppingSource,
 } from '@/lib/shopping';
 import { formatAmount } from '@/lib/format';
+import { sendToInstacart, toJobItems, INSTACART_AVAILABLE } from '@/lib/instacart';
 import type { Recipe, ShoppingCategory } from '@/types';
 
 const CAT_LABEL: Record<ShoppingCategory, string> = {
@@ -139,6 +140,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const [copied, setCopied] = useState(false);
   const [revealText, setRevealText] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   // Inline edit mode (spec §10 manual add + edit). Tapping "Edit list" swaps
   // the buy list for an editable view: recipe-derived quantities become
   // editable, extras get full name/qty edit + delete, and a "+ Add item" row
@@ -475,6 +477,26 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     if (didCopy) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  // Send the buy list to the Instacart auto-fill agent: queues a job the
+  // Beelink poller claims and fills the Wegmans cart with. Checkout stays
+  // manual (Pickup). Requires sign-in (RLS scopes the job to the user).
+  const sendCart = async () => {
+    if (!INSTACART_AVAILABLE()) {
+      setHint('Sign in to send your list to Instacart.');
+      return;
+    }
+    try {
+      setSending(true);
+      setHint('Sending to your Wegmans cart…');
+      await sendToInstacart(toJobItems(buyLines));
+      setHint('Sent. The cart is filling — open Instacart in ~30s, review, pick Pickup.');
+    } catch (e) {
+      setHint(`Couldn't send: ${(e as Error).message}`);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -961,10 +983,17 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             />
             <Button
               label={copied ? 'Copied — Instacart opening' : 'Copy → Instacart'}
-              glyph="next"
+              variant="secondary"
               flex
               disabled={buyLines.length === 0}
               onPress={copyAndOpen}
+            />
+            <Button
+              label={sending ? 'Sending…' : 'Send to cart'}
+              glyph="next"
+              flex
+              disabled={sending || buyLines.length === 0}
+              onPress={sendCart}
             />
           </>
         )}
