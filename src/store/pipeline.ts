@@ -20,7 +20,8 @@ type PipelineState = {
   hydrated: boolean;
   hydrate: () => Promise<void>;
   getById: (id: string) => PipelineIdea | undefined;
-  capture: (title: string, note: string) => Promise<string>;
+  capture: (title: string, note: string, kind?: PipelineIdea['kind']) => Promise<string>;
+  setKind: (id: string, kind: PipelineIdea['kind']) => Promise<void>;
   setDetails: (id: string, patch: { title?: string; note?: string }) => Promise<void>;
   setStatus: (id: string, status: PipelineIdea['status']) => Promise<void>;
   addReference: (id: string, ref: Ref) => Promise<void>;
@@ -65,11 +66,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
 
   getById: (id) => get().ideas.find((i) => i.id === id),
 
-  capture: async (title, note) => {
+  capture: async (title, note, kind = 'idea') => {
     const idea: PipelineIdea = {
       id: uid('idea'),
       title: title.trim() || 'Untitled idea',
       note: note.trim(),
+      kind,
       status: 'captured',
       references: [],
       createdAt: new Date(),
@@ -77,6 +79,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     set((s) => ({ ideas: [idea, ...s.ideas] }));
     await persist(idea);
     return idea.id;
+  },
+
+  setKind: async (id, kind) => {
+    let updated: PipelineIdea | undefined;
+    set((s) => ({
+      ideas: s.ideas.map((i) => {
+        if (i.id !== id) return i;
+        updated = { ...i, kind };
+        return updated;
+      }),
+    }));
+    if (updated) await persist(updated);
   },
 
   setDetails: async (id, patch) => {

@@ -70,6 +70,8 @@ export type Recipe = {
   imageUrl?: string;
   /** per-serving; extracted from source JSON-LD or estimated by Claude */
   nutrition?: Nutrition;
+  /** user-pinned favorite — surfaces under the Recipes "Favorites" segment */
+  isFavorite?: boolean;
 };
 
 export type Ingredient = {
@@ -141,6 +143,11 @@ export type PipelineIdea = {
   id: string;
   title: string;
   note: string;
+  /**
+   * What the To-Try item actually is (redesign — mixed-type capture bin).
+   * Optional so existing persisted rows revive fine; absent reads as 'idea'.
+   */
+  kind?: 'idea' | 'ingredient' | 'link' | 'recipe';
   status: 'captured' | 'researching' | 'ready' | 'attempted' | 'promoted';
   references: { url: string; label: string }[];
   /** for plan-as-experiment */

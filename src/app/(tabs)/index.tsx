@@ -16,6 +16,7 @@ import {
   Button,
   Overlay,
   BottomActionBar,
+  SegmentedControl,
 } from '@/components';
 import { colors, layout, type ColorToken } from '@/design';
 import { usePlanStore } from '@/store/plan';
@@ -34,6 +35,9 @@ export default function PlanScreen() {
 
   const [daysAhead, setDaysAhead] = useState(6); // today + next 5
   const [manage, setManage] = useState<PlanEntry | null>(null);
+  // Redesign: Plan tab hosts three segments. Plan = the grid below; Shop and
+  // Pantry are Phase A stubs that route to the standalone screens for now.
+  const [segment, setSegment] = useState<'plan' | 'shop' | 'pantry'>('plan');
 
   // "Today" anchor (midnight ms). The rolling window is memoized off this, so
   // a session left open past midnight — or a PWA restored from bfcache without
@@ -123,7 +127,48 @@ export default function PlanScreen() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <AccountBar />
-      <ScrollView contentContainerStyle={styles.grid}>
+
+      <View style={styles.segments}>
+        <SegmentedControl
+          segments={[
+            { key: 'plan', label: 'Plan' },
+            { key: 'shop', label: 'Shop' },
+            { key: 'pantry', label: 'Pantry' },
+          ]}
+          value={segment}
+          onChange={(k) => setSegment(k as 'plan' | 'shop' | 'pantry')}
+        />
+      </View>
+
+      {segment === 'shop' ? (
+        <View style={styles.pane}>
+          <SectionLabel>Shopping</SectionLabel>
+          <Text color="textMuted">
+            {toShop} item{toShop === 1 ? '' : 's'} to shop from{' '}
+            {plannedRecipes.length} planned recipe
+            {plannedRecipes.length === 1 ? '' : 's'}.
+          </Text>
+          {/* TODO(phaseD): embed shopping body */}
+          <Button
+            label="Open shopping list"
+            glyph="next"
+            onPress={() => router.push('/shopping' as never)}
+          />
+        </View>
+      ) : segment === 'pantry' ? (
+        <View style={styles.pane}>
+          <SectionLabel>Pantry</SectionLabel>
+          <Text color="textMuted">Have, low and out — low and out surface onto Shop.</Text>
+          {/* TODO(phaseB/D): embed pantry body */}
+          <Button
+            label="Open pantry"
+            glyph="next"
+            onPress={() => router.push('/(tabs)/pantry' as never)}
+          />
+        </View>
+      ) : (
+        <>
+          <ScrollView contentContainerStyle={styles.grid}>
         {days.map((day) => {
           const today = isSameDay(day, new Date(todayMs));
           const key = dateKey(day);
@@ -233,7 +278,9 @@ export default function PlanScreen() {
             })
           }
         />
-      </BottomActionBar>
+          </BottomActionBar>
+        </>
+      )}
 
       {/* Manage a pinned entry */}
       <Overlay visible={!!manage} onClose={() => setManage(null)}>
@@ -459,6 +506,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPadding,
     paddingTop: 10,
   },
+  segments: {
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  pane: { padding: layout.screenPadding, gap: 12 },
   moreDays: { alignItems: 'center', paddingVertical: 16 },
   // Day-row hierarchy (spec §5): grouping is visual, not structural — each
   // day's rows share a card-like container with a left gutter pinning the

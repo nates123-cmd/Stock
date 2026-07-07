@@ -24,3 +24,7 @@ export { StepBody } from './StepBody';
 export { Overlay } from './Overlay';
 export { TimerStrip } from './TimerStrip';
 export { AwakeIndicator } from './AwakeIndicator';
+export { SegmentedControl } from './SegmentedControl';
+export type { Segment } from './SegmentedControl';
+export { CaptureSheet } from './CaptureSheet';
+export { GlobalCapture } from './GlobalCapture';

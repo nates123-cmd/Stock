@@ -8,7 +8,6 @@ import {
   SectionLabel,
   FilterChip,
   ChipRow,
-  Fab,
   Glyph,
   Overlay,
 } from '@/components';
@@ -273,8 +272,6 @@ export default function PipelineScreen() {
           ) : null}
         </View>
       </Screen>
-
-      <Fab onPress={() => router.push('/idea-capture')} />
 
       <Overlay visible={planTarget != null} onClose={() => setPlanTarget(null)}>
         {planTarget ? (

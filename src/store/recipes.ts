@@ -19,6 +19,8 @@ type RecipeState = {
   hydrate: () => Promise<void>;
   getById: (id: string) => Recipe | undefined;
   save: (recipe: Recipe) => Promise<void>;
+  /** Flip a recipe's isFavorite flag and persist via the save path. */
+  toggleFavorite: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
 };
 
@@ -63,6 +65,12 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
         console.warn('[stock] recipe persist failed', e);
       }
     }
+  },
+
+  toggleFavorite: async (id) => {
+    const current = get().recipes.find((r) => r.id === id);
+    if (!current) return;
+    await get().save({ ...current, isFavorite: !current.isFavorite });
   },
 
   remove: async (id) => {

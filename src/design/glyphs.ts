@@ -12,6 +12,7 @@ export const glyph = {
   //               emoji presentation, rendered colorful next to the other
   //               monochrome geometric glyphs. ▦ stays text-style + on-family.
   pantry: '▣', // Pantry / inventory
+  cook: '◈', // Cook / whole-meal launcher (monochrome geometric, on-family)
   plan: '◷', // Plan / week / time
   next: '→', // Next action, navigation
   back: '←', // Back
