@@ -23,7 +23,7 @@ import type { Recipe } from '@/types';
  */
 export default function CookScreen() {
   const router = useRouter();
-  const entries = usePlanStore((s) => s.entries);
+  const planMeals = usePlanStore((s) => s.meals);
   const recipes = useRecipeStore((s) => s.recipes);
 
   const recipeById = useMemo(() => {
@@ -32,19 +32,23 @@ export default function CookScreen() {
     return m;
   }, [recipes]);
 
-  // Today's cookable entry — same date helper the Plan screen uses (isSameDay).
-  // Prefer dinner, else the first planned meal that carries a recipe.
+  // Tonight's cookable dish — same date helper the Plan screen uses. Prefer a
+  // dinner-typed meal, else the first non-skipped meal that carries a recipe
+  // dish (Phase B model: Day→Meals→Dishes).
   const tonight = useMemo(() => {
     const today = new Date();
-    const todays = entries.filter(
-      (e) => isSameDay(e.date, today) && e.recipeId && e.status !== 'skipped',
-    );
-    const dinner = todays.find((e) => e.meal === 'dinner');
-    const entry = dinner ?? todays[0];
-    if (!entry?.recipeId) return null;
-    const recipe = recipeById.get(entry.recipeId);
-    return recipe ? { entry, recipe } : null;
-  }, [entries, recipeById]);
+    const todays = planMeals
+      .filter((m) => isSameDay(m.date, today) && (m.status ?? 'planned') !== 'skipped')
+      .sort((a, b) => (a.type === 'dinner' ? -1 : b.type === 'dinner' ? 1 : 0));
+    for (const meal of todays) {
+      const dish = meal.dishes.find((d) => d.recipeId && recipeById.get(d.recipeId));
+      if (dish?.recipeId) {
+        const recipe = recipeById.get(dish.recipeId);
+        if (recipe) return { meal, recipe };
+      }
+    }
+    return null;
+  }, [planMeals, recipeById]);
 
   const cookable = useMemo(
     () => recipes.filter((r) => r.status !== 'archived'),
@@ -66,7 +70,8 @@ export default function CookScreen() {
         <Card bordered style={styles.tonightCard}>
           <Text variant="recipeTitle">{tonight.recipe.title}</Text>
           <Text color="textMuted">
-            planned {tonight.entry.meal} · serves {tonight.recipe.yield.serves}
+            planned{tonight.meal.type ? ` ${tonight.meal.type}` : ''} · serves{' '}
+            {tonight.recipe.yield.serves}
           </Text>
           <Button
             label="Start cooking"

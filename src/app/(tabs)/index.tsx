@@ -6,44 +6,71 @@ import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 // Inside a Swipeable, RN's Pressable consumes pointer events before the Pan
-// handler can pick them up — swaps below use gesture-handler's Pressable so
-// the swipe actually registers on web.
+// handler can pick them up — rows below use gesture-handler's Pressable so the
+// swipe actually registers on web.
 import { Pressable as GHPressable } from 'react-native-gesture-handler';
 import {
   Text,
   Numeric,
   SectionLabel,
   Button,
+  Glyph,
   Overlay,
   BottomActionBar,
   SegmentedControl,
 } from '@/components';
-import { colors, layout, type ColorToken } from '@/design';
+import { colors, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { useAuthStore } from '@/store/auth';
 import { useHaveStore } from '@/store/have';
-import type { Meal, PlanEntry, Recipe } from '@/types';
+import type { Dish, Meal, MealType, Recipe } from '@/types';
 import { dateKey, dayLabel, isSameDay } from '@/lib/week';
+
+type PlanView = 'horizontal' | 'vertical';
+const VIEW_KEY = 'stock:plan-view';
+
+/** Persisted view choice (web-only localStorage, mirrors the shopping
+ *  onboarding pattern). Native falls back to the default until an AsyncStorage
+ *  pass lands — the toggle still works in-session. */
+function loadPlanView(): PlanView {
+  if (typeof window === 'undefined') return 'horizontal';
+  try {
+    return window.localStorage?.getItem(VIEW_KEY) === 'vertical'
+      ? 'vertical'
+      : 'horizontal';
+  } catch {
+    return 'horizontal';
+  }
+}
 
 export default function PlanScreen() {
   const router = useRouter();
-  const entries = usePlanStore((s) => s.entries);
+  const planMeals = usePlanStore((s) => s.meals);
   const setStatus = usePlanStore((s) => s.setStatus);
-  const removeEntry = usePlanStore((s) => s.remove);
+  const removeDish = usePlanStore((s) => s.removeDish);
+  const setMealType = usePlanStore((s) => s.setMealType);
+  const splitMeal = usePlanStore((s) => s.splitMeal);
   const recipes = useRecipeStore((s) => s.recipes);
 
   const [daysAhead, setDaysAhead] = useState(6); // today + next 5
-  const [manage, setManage] = useState<PlanEntry | null>(null);
-  // Redesign: Plan tab hosts three segments. Plan = the grid below; Shop and
-  // Pantry are Phase A stubs that route to the standalone screens for now.
+  const [manage, setManage] = useState<{ meal: Meal; dish: Dish } | null>(null);
+  // Redesign: Plan tab hosts three segments. Plan = the meal model below; Shop
+  // and Pantry route to the standalone screens (embedded fully in Phase D).
   const [segment, setSegment] = useState<'plan' | 'shop' | 'pantry'>('plan');
+  // Plan has two layouts; the choice persists (spec Phase B).
+  const [planView, setPlanView] = useState<PlanView>(loadPlanView);
+  const setView = (v: PlanView) => {
+    setPlanView(v);
+    try {
+      window.localStorage?.setItem(VIEW_KEY, v);
+    } catch {
+      /* ignore (native / private mode) */
+    }
+  };
 
-  // "Today" anchor (midnight ms). The rolling window is memoized off this, so
-  // a session left open past midnight — or a PWA restored from bfcache without
-  // a remount — would otherwise keep rendering yesterday's date until a hard
-  // refresh. Re-anchor whenever the screen regains focus or the app returns to
-  // the foreground (RN-web maps AppState 'active' to document visibility).
+  // "Today" anchor (midnight ms). Re-anchor on focus / foreground so a session
+  // left open past midnight doesn't keep rendering yesterday.
   const [todayMs, setTodayMs] = useState(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -62,10 +89,7 @@ export default function PlanScreen() {
     return () => sub.remove();
   }, [refreshToday]);
 
-  // Rolling view — always starts today, so it's always editable (no past weeks).
-  const readOnly = false;
-  // Today + the next (daysAhead - 1) days. setDate handles month/DST rollovers;
-  // "+ show more days" extends the window a week at a time.
+  // Today + the next (daysAhead - 1) days, anchored today-forward.
   const days = useMemo(() => {
     const start = new Date(todayMs);
     return Array.from({ length: daysAhead }, (_, i) => {
@@ -74,38 +98,60 @@ export default function PlanScreen() {
       return d;
     });
   }, [daysAhead, todayMs]);
+
+  // Horizontal view: which day's meals are shown below the chip strip.
+  const [selectedKey, setSelectedKey] = useState(() => dateKey(new Date(todayMs)));
+  useEffect(() => {
+    // If the selected day fell outside the window (e.g. after re-anchoring at
+    // midnight), snap back to today.
+    if (!days.some((d) => dateKey(d) === selectedKey)) {
+      setSelectedKey(dateKey(new Date(todayMs)));
+    }
+  }, [days, selectedKey, todayMs]);
+
   const recipeById = useMemo(() => {
     const m = new Map<string, Recipe>();
     recipes.forEach((r) => m.set(r.id, r));
     return m;
   }, [recipes]);
 
-  // Grid lookup derived from the SAME subscribed `entries` the action bar
-  // and shopping list use — keeps every surface provably in sync. (Replaces
-  // the store's imperative entryFor(), which read get() outside the reactive
-  // path and could render stale after returning from the picker modal.)
-  const entryIndex = useMemo(() => {
-    const m = new Map<string, PlanEntry>();
-    for (const e of entries) m.set(`${dateKey(e.date)}|${e.meal}`, e);
+  // Meals grouped by local day key — derived from the SAME subscribed store the
+  // action bar + shopping list read, so every surface stays in sync.
+  const mealsByDay = useMemo(() => {
+    const m = new Map<string, Meal[]>();
+    for (const meal of planMeals) {
+      const k = dateKey(meal.date);
+      (m.get(k) ?? m.set(k, []).get(k)!).push(meal);
+    }
     return m;
-  }, [entries]);
-  const entryFor = (key: string, meal: Meal) => entryIndex.get(`${key}|${meal}`);
+  }, [planMeals]);
 
-  // Action-bar stats: this week's pinned, non-skipped recipes (spec §5).
-  const weekKeys = new Set(days.map(dateKey));
-  const planned = entries.filter(
-    (e) => weekKeys.has(dateKey(e.date)) && e.status !== 'skipped' && e.recipeId,
-  );
-  const plannedRecipes = planned
-    .map((e) => recipeById.get(e.recipeId as string))
-    .filter((r): r is Recipe => !!r);
-  const ingredientNames = new Set(
-    plannedRecipes.flatMap((r) => r.ingredients.map((i) => i.canonicalName)),
+  const dishLabel = (dish: Dish): string => {
+    if (dish.recipeId) return recipeById.get(dish.recipeId)?.title ?? dish.title;
+    return dish.title || (dish.pipelineId ? 'experimental idea' : 'dish');
+  };
+
+  // Action-bar stats: this window's planned, non-skipped recipe dishes.
+  const weekKeys = useMemo(() => new Set(days.map(dateKey)), [days]);
+  const plannedRecipes = useMemo(() => {
+    const out: Recipe[] = [];
+    for (const meal of planMeals) {
+      if (!weekKeys.has(dateKey(meal.date))) continue;
+      if ((meal.status ?? 'planned') === 'skipped') continue;
+      for (const d of meal.dishes) {
+        const r = d.recipeId ? recipeById.get(d.recipeId) : undefined;
+        if (r) out.push(r);
+      }
+    }
+    return out;
+  }, [planMeals, weekKeys, recipeById]);
+  const ingredientNames = useMemo(
+    () =>
+      new Set(plannedRecipes.flatMap((r) => r.ingredients.map((i) => i.canonicalName))),
+    [plannedRecipes],
   );
 
-  // Pantry coverage (spec §5): count of distinct planned canonicals already
-  // covered by the user's "always have" pins. Until the full Pantry pillar
-  // ships (§10) the always-have set is the proxy for in-stock inventory.
+  // Pantry coverage proxy: planned canonicals already covered by "always have".
   const alwaysHaveMap = useHaveStore((s) => s.alwaysHave);
   const pantryCovers = useMemo(() => {
     let n = 0;
@@ -116,13 +162,30 @@ export default function PlanScreen() {
   }, [ingredientNames, alwaysHaveMap]);
   const toShop = Math.max(0, ingredientNames.size - pantryCovers);
 
-  const openPicker = (date: Date, meal: Meal) => {
-    if (readOnly) return;
+  const openPicker = (date: Date, type?: MealType | null) => {
     router.push({
       pathname: '/plan-picker',
-      params: { date: date.toISOString(), meal },
+      params: type ? { date: date.toISOString(), type } : { date: date.toISOString() },
     });
   };
+
+  const selectedDay = useMemo(() => {
+    const d = days.find((day) => dateKey(day) === selectedKey);
+    return d ?? days[0] ?? new Date(todayMs);
+  }, [days, selectedKey, todayMs]);
+
+  const renderDay = (day: Date) => (
+    <DayMeals
+      key={dateKey(day)}
+      day={day}
+      today={isSameDay(day, new Date(todayMs))}
+      meals={mealsByDay.get(dateKey(day)) ?? []}
+      dishLabel={dishLabel}
+      onAdd={() => openPicker(day)}
+      onDelete={(mealId, dishId) => removeDish(mealId, dishId)}
+      onOpenDish={(meal, dish) => setManage({ meal, dish })}
+    />
+  );
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -159,7 +222,7 @@ export default function PlanScreen() {
         <View style={styles.pane}>
           <SectionLabel>Pantry</SectionLabel>
           <Text color="textMuted">Have, low and out — low and out surface onto Shop.</Text>
-          {/* TODO(phaseB/D): embed pantry body */}
+          {/* TODO(phaseD): embed pantry body */}
           <Button
             label="Open pantry"
             glyph="next"
@@ -168,138 +231,119 @@ export default function PlanScreen() {
         </View>
       ) : (
         <>
-          <ScrollView contentContainerStyle={styles.grid}>
-        {days.map((day) => {
-          const today = isSameDay(day, new Date(todayMs));
-          const key = dateKey(day);
-          const breakfast = entryFor(key, 'breakfast');
-          const lunch = entryFor(key, 'lunch');
-          const dinner = entryFor(key, 'dinner');
-          const { dow, date } = dayLabel(day);
-          return (
-            <View key={key} style={styles.dayRow}>
-              <View style={styles.dayCol}>
-                <Text
-                  variant="sectionLabel"
-                  color={today ? 'accent' : 'textMuted'}>
-                  {today ? 'TODAY' : dow}
-                </Text>
-                <Numeric color={today ? 'accent' : 'text'} style={styles.dayNum}>
-                  {date}
-                </Numeric>
-              </View>
-
-              <View style={styles.cells}>
-                {breakfast ? (
-                  <SwipeableMeal
-                    onDelete={readOnly ? undefined : () => removeEntry(breakfast.id)}>
-                    <MealCell
-                      entry={breakfast}
-                      meal="breakfast"
-                      recipe={recipeById.get(breakfast.recipeId ?? '')}
-                      onPress={() => setManage(breakfast)}
-                    />
-                  </SwipeableMeal>
-                ) : !readOnly ? (
-                  <Pressable
-                    style={styles.addSide}
-                    onPress={() => openPicker(day, 'breakfast')}>
-                    <Text color="textFaint">+ breakfast</Text>
-                  </Pressable>
-                ) : null}
-
-                {lunch ? (
-                  <SwipeableMeal
-                    onDelete={readOnly ? undefined : () => removeEntry(lunch.id)}>
-                    <MealCell
-                      entry={lunch}
-                      meal="lunch"
-                      recipe={recipeById.get(lunch.recipeId ?? '')}
-                      onPress={() => setManage(lunch)}
-                    />
-                  </SwipeableMeal>
-                ) : !readOnly ? (
-                  <Pressable
-                    style={styles.addSide}
-                    onPress={() => openPicker(day, 'lunch')}>
-                    <Text color="textFaint">+ lunch</Text>
-                  </Pressable>
-                ) : null}
-
-                {dinner ? (
-                  <SwipeableMeal
-                    onDelete={readOnly ? undefined : () => removeEntry(dinner.id)}>
-                    <MealCell
-                      entry={dinner}
-                      meal="dinner"
-                      recipe={recipeById.get(dinner.recipeId ?? '')}
-                      onPress={() => setManage(dinner)}
-                      readOnly={readOnly}
-                    />
-                  </SwipeableMeal>
-                ) : (
-                  <MealCell
-                    entry={undefined}
-                    meal="dinner"
-                    onPress={() => openPicker(day, 'dinner')}
-                    readOnly={readOnly}
-                  />
-                )}
-              </View>
-            </View>
-          );
-        })}
-        <Pressable style={styles.moreDays} onPress={() => setDaysAhead((n) => n + 7)}>
-          <Text color="textFaint">+ Show more days</Text>
-        </Pressable>
-      </ScrollView>
-
-      <BottomActionBar
-        meta={
-          <View>
-            <Numeric color="textMuted">
-              {plannedRecipes.length} recipes · {ingredientNames.size} ingredients
-              {pantryCovers > 0 ? ` · pantry covers ${pantryCovers}` : ''}
-            </Numeric>
-            <Text color="textFaint">
-              {toShop} items to shop
-            </Text>
+          <View style={styles.viewToggleRow}>
+            <ViewToggle value={planView} onChange={setView} />
           </View>
-        }>
-        <Button
-          label="Shopping list"
-          glyph="next"
-          flex
-          disabled={plannedRecipes.length === 0}
-          onPress={() =>
-            router.push({
-              pathname: '/shopping-confirm',
-              params: { days: String(daysAhead) },
-            })
-          }
-        />
+
+          {planView === 'horizontal' ? (
+            <>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipStrip}>
+                {days.map((day) => {
+                  const key = dateKey(day);
+                  const today = isSameDay(day, new Date(todayMs));
+                  const selected = key === selectedKey;
+                  const { dow, date } = dayLabel(day);
+                  const count = (mealsByDay.get(key) ?? []).reduce(
+                    (n, m) => n + m.dishes.length,
+                    0,
+                  );
+                  return (
+                    <Pressable
+                      key={key}
+                      onPress={() => setSelectedKey(key)}
+                      style={[styles.dayChip, selected && styles.dayChipOn]}>
+                      <Text
+                        variant="sectionLabel"
+                        color={today ? 'accent' : selected ? 'text' : 'textMuted'}>
+                        {today ? 'TODAY' : dow}
+                      </Text>
+                      <Numeric color={selected ? 'text' : 'textMuted'} style={styles.dayChipNum}>
+                        {date}
+                      </Numeric>
+                      {count > 0 ? (
+                        <View style={[styles.dot, selected && styles.dotOn]} />
+                      ) : (
+                        <View style={styles.dotSpacer} />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <ScrollView contentContainerStyle={styles.dayScroll}>
+                {renderDay(selectedDay)}
+              </ScrollView>
+            </>
+          ) : (
+            <ScrollView contentContainerStyle={styles.agenda}>
+              {days.map((day) => renderDay(day))}
+              <Pressable
+                style={styles.moreDays}
+                onPress={() => setDaysAhead((n) => n + 7)}>
+                <Text color="textFaint">+ Show more days</Text>
+              </Pressable>
+            </ScrollView>
+          )}
+
+          <BottomActionBar
+            meta={
+              <View>
+                <Numeric color="textMuted">
+                  {plannedRecipes.length} recipes · {ingredientNames.size} ingredients
+                  {pantryCovers > 0 ? ` · pantry covers ${pantryCovers}` : ''}
+                </Numeric>
+                <Text color="textFaint">{toShop} items to shop</Text>
+              </View>
+            }>
+            <Button
+              label="Shopping list"
+              glyph="next"
+              flex
+              disabled={plannedRecipes.length === 0}
+              onPress={() =>
+                router.push({
+                  pathname: '/shopping-confirm',
+                  params: { days: String(daysAhead) },
+                })
+              }
+            />
           </BottomActionBar>
         </>
       )}
 
-      {/* Manage a pinned entry */}
+      {/* Manage a dish */}
       <Overlay visible={!!manage} onClose={() => setManage(null)}>
         {manage ? (
           <ManageSheet
-            entry={manage}
-            recipe={recipeById.get(manage.recipeId ?? '')}
-            readOnly={readOnly}
+            meal={manage.meal}
+            dish={manage.dish}
+            title={dishLabel(manage.dish)}
             onOpenRecipe={() => {
-              const id = manage.recipeId;
+              const id = manage.dish.recipeId;
               setManage(null);
               if (id) router.push({ pathname: '/recipes/[id]', params: { id } });
             }}
             onStatus={async (st) => {
-              await setStatus(manage.id, st);
+              await setStatus(manage.meal.id, st);
+              setManage(null);
+            }}
+            onSplit={async (type) => {
+              // Split when the meal has siblings; otherwise just label it.
+              if (manage.meal.dishes.length > 1) {
+                await splitMeal(manage.meal.id, manage.dish.id, type);
+              } else {
+                await setMealType(manage.meal.id, type);
+              }
+              setManage(null);
+            }}
+            onMerge={async () => {
+              await setMealType(manage.meal.id, null);
               setManage(null);
             }}
             onRemove={async () => {
-              await removeEntry(manage.id);
+              await removeDish(manage.meal.id, manage.dish.id);
               setManage(null);
             }}
           />
@@ -314,9 +358,8 @@ function AccountBar() {
   const user = useAuthStore((s) => s.user);
   return (
     <Pressable
-      // Cast: expo's typedRoutes generates .expo/types/router.d.ts only on
-      // `expo start`; `expo export` doesn't refresh it, so a newly-added route
-      // isn't in the typed Href union yet. Runtime resolution works fine.
+      // Cast: typedRoutes' generated Href union isn't refreshed by `expo
+      // export`; runtime resolution is fine.
       onPress={() => router.push('/sign-in' as never)}
       hitSlop={8}
       style={styles.accountBar}>
@@ -333,18 +376,150 @@ function AccountBar() {
   );
 }
 
-/** Wraps a pinned MealCell with the swipe-left → Delete affordance. When
- *  `onDelete` is omitted (e.g., a read-only past week) the swipe is a no-op
- *  — children render bare so we don't pay the Reanimated overhead. */
-function SwipeableMeal({
+/** Compact two-icon layout toggle (day-chips vs agenda). */
+function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: PlanView;
+  onChange: (v: PlanView) => void;
+}) {
+  return (
+    <View style={styles.toggle}>
+      <Pressable
+        onPress={() => onChange('horizontal')}
+        accessibilityRole="button"
+        accessibilityLabel="Day-chips view"
+        accessibilityState={{ selected: value === 'horizontal' }}
+        style={[styles.toggleBtn, value === 'horizontal' && styles.toggleBtnOn]}>
+        <Glyph name="dayChips" size={16} color={value === 'horizontal' ? 'bg' : 'textMuted'} />
+      </Pressable>
+      <Pressable
+        onPress={() => onChange('vertical')}
+        accessibilityRole="button"
+        accessibilityLabel="Agenda view"
+        accessibilityState={{ selected: value === 'vertical' }}
+        style={[styles.toggleBtn, value === 'vertical' && styles.toggleBtnOn]}>
+        <Glyph name="agenda" size={16} color={value === 'vertical' ? 'bg' : 'textMuted'} />
+      </Pressable>
+    </View>
+  );
+}
+
+/** A day section: its meal(s) and their dishes, plus an add-dish affordance. */
+function DayMeals({
+  day,
+  today,
+  meals,
+  dishLabel,
+  onAdd,
+  onDelete,
+  onOpenDish,
+}: {
+  day: Date;
+  today: boolean;
+  meals: Meal[];
+  dishLabel: (d: Dish) => string;
+  onAdd: () => void;
+  onDelete: (mealId: string, dishId: string) => void;
+  onOpenDish: (meal: Meal, dish: Dish) => void;
+}) {
+  const { dow, date } = dayLabel(day);
+  const empty = meals.every((m) => m.dishes.length === 0);
+  return (
+    <View style={styles.dayBlock}>
+      <View style={styles.dayHead}>
+        <Text variant="sectionLabel" color={today ? 'accent' : 'textMuted'}>
+          {today ? 'TODAY' : dow}
+        </Text>
+        <Numeric color={today ? 'accent' : 'text'} style={styles.dayHeadNum}>
+          {date}
+        </Numeric>
+      </View>
+
+      {empty ? (
+        <Text color="textFaint" style={styles.dayEmpty}>
+          Nothing planned.
+        </Text>
+      ) : (
+        meals.map((meal) =>
+          meal.dishes.length === 0 ? null : (
+            <View key={meal.id} style={styles.meal}>
+              {meal.type ? (
+                <Text variant="sectionLabel" color="textMuted" style={styles.mealType}>
+                  {meal.type}
+                </Text>
+              ) : null}
+              {meal.dishes.map((dish) => (
+                <SwipeableDish key={dish.id} onDelete={() => onDelete(meal.id, dish.id)}>
+                  <DishRow
+                    meal={meal}
+                    label={dishLabel(dish)}
+                    experimental={!!dish.pipelineId}
+                    onPress={() => onOpenDish(meal, dish)}
+                  />
+                </SwipeableDish>
+              ))}
+            </View>
+          ),
+        )
+      )}
+
+      <Pressable style={styles.addDish} onPress={onAdd}>
+        <Glyph name="add" size={14} color="textFaint" />
+        <Text color="textFaint">Add dish</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function DishRow({
+  meal,
+  label,
+  experimental,
+  onPress,
+}: {
+  meal: Meal;
+  label: string;
+  experimental: boolean;
+  onPress: () => void;
+}) {
+  const cooked = meal.status === 'cooked';
+  const skipped = meal.status === 'skipped';
+  const stateStyle = cooked
+    ? styles.dishCooked
+    : skipped
+      ? styles.dishSkipped
+      : experimental
+        ? styles.dishExp
+        : styles.dishPlanned;
+  return (
+    <GHPressable onPress={onPress} style={[styles.dish, stateStyle]}>
+      <Text
+        color={cooked ? 'ok' : skipped ? 'textFaint' : 'text'}
+        numberOfLines={1}
+        style={[styles.dishTitle, skipped && styles.strike]}>
+        {cooked ? '✓ ' : ''}
+        {label}
+      </Text>
+      {experimental ? (
+        <Text variant="sectionLabel" color="warn">
+          exp
+        </Text>
+      ) : null}
+    </GHPressable>
+  );
+}
+
+/** Wraps a DishRow with the swipe-left → Delete affordance. */
+function SwipeableDish({
   onDelete,
   children,
 }: {
-  onDelete?: () => void;
+  onDelete: () => void;
   children: ReactNode;
 }) {
   const swipeRef = useRef<SwipeableMethods | null>(null);
-  if (!onDelete) return <>{children}</>;
   return (
     <ReanimatedSwipeable
       ref={swipeRef}
@@ -352,15 +527,13 @@ function SwipeableMeal({
       rightThreshold={48}
       overshootRight={false}
       onSwipeableOpen={() => {
-        // Snap back first so the row animation finishes cleanly even though
-        // the parent will unmount us when removeEntry runs.
         swipeRef.current?.close();
         onDelete();
       }}
       renderRightActions={() => (
         <View
           style={styles.deleteAction}
-          accessibilityLabel="Swipe to delete meal from plan">
+          accessibilityLabel="Swipe to remove dish from plan">
           <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
             Delete
           </Text>
@@ -371,130 +544,71 @@ function SwipeableMeal({
   );
 }
 
-function MealMarker({ meal, tone }: { meal: Meal; tone: 'primary' | 'muted' | 'warn' }) {
-  // B / L are secondary (cream/outlined); D is primary (espresso-filled).
-  const letter = meal === 'dinner' ? 'D' : meal === 'lunch' ? 'L' : 'B';
-  const isPrimary = meal === 'dinner';
-  const bg =
-    tone === 'warn'
-      ? colors.warn
-      : tone === 'muted'
-        ? 'transparent'
-        : isPrimary
-          ? colors.text
-          : 'transparent';
-  const border = tone === 'muted' ? colors.textFaint : !isPrimary ? colors.line : bg;
-  const fg: ColorToken =
-    isPrimary && tone === 'primary' ? 'bg' : tone === 'muted' ? 'textFaint' : 'text';
-  return (
-    <View style={[styles.marker, { backgroundColor: bg, borderColor: border }]}>
-      <Text variant="sectionLabel" color={fg}>
-        {letter}
-      </Text>
-    </View>
-  );
-}
-
-function MealCell({
-  entry,
-  meal,
-  recipe,
-  onPress,
-  readOnly,
-}: {
-  entry?: PlanEntry;
-  meal: Meal;
-  recipe?: Recipe;
-  onPress: () => void;
-  readOnly?: boolean;
-}) {
-  // Breakfast + lunch are the small/secondary cells; dinner is the main row.
-  const small = meal !== 'dinner';
-
-  if (!entry) {
-    return (
-      <Pressable
-        onPress={onPress}
-        disabled={readOnly}
-        style={[styles.cell, styles.cellEmpty, small && styles.cellSmall]}>
-        <Text color="textFaint" style={styles.emptyText}>
-          {readOnly ? '—' : 'tap to add'}
-        </Text>
-      </Pressable>
-    );
-  }
-
-  const experimental = !!entry.pipelineIdeaId;
-  const title = recipe?.title ?? (experimental ? 'experimental idea' : 'recipe');
-  const stateStyle =
-    entry.status === 'cooked'
-      ? styles.cellCooked
-      : entry.status === 'skipped'
-        ? styles.cellSkipped
-        : experimental
-          ? styles.cellExp
-          : styles.cellPlanned;
-  const tone = entry.status === 'planned' && !experimental ? 'primary' : experimental ? 'warn' : 'muted';
-
-  return (
-    <GHPressable
-      onPress={onPress}
-      style={[styles.cell, stateStyle, small && styles.cellSmall]}>
-      <MealMarker meal={meal} tone={tone} />
-      <Text
-        variant={small ? 'body' : 'recipeTitle'}
-        color={entry.status === 'cooked' ? 'ok' : entry.status === 'skipped' ? 'textFaint' : 'text'}
-        numberOfLines={1}
-        style={[styles.cellTitle, entry.status === 'skipped' && styles.strike]}>
-        {entry.status === 'cooked' ? '✓ ' : ''}
-        {title}
-      </Text>
-      {experimental ? <Text variant="sectionLabel" color="warn">exp</Text> : null}
-    </GHPressable>
-  );
-}
-
 function ManageSheet({
-  entry,
-  recipe,
-  readOnly,
+  meal,
+  dish,
+  title,
   onOpenRecipe,
   onStatus,
+  onSplit,
+  onMerge,
   onRemove,
 }: {
-  entry: PlanEntry;
-  recipe?: Recipe;
-  readOnly?: boolean;
+  meal: Meal;
+  dish: Dish;
+  title: string;
   onOpenRecipe: () => void;
-  onStatus: (s: PlanEntry['status']) => void;
+  onStatus: (s: NonNullable<Meal['status']>) => void;
+  onSplit: (type: MealType) => void;
+  onMerge: () => void;
   onRemove: () => void;
 }) {
+  const status = meal.status ?? 'planned';
   return (
     <View style={styles.sheet}>
-      <Text variant="recipeTitle">{recipe?.title ?? 'Planned'}</Text>
+      <Text variant="recipeTitle">{title}</Text>
       <SectionLabel color="textMuted">
-        {entry.meal} · {entry.status}
+        {meal.type ?? 'meal'} · {status}
       </SectionLabel>
-      {entry.recipeId ? (
+      {dish.recipeId ? (
         <Button label="Open recipe" glyph="next" variant="secondary" onPress={onOpenRecipe} />
       ) : null}
-      {!readOnly ? (
-        <>
-          {entry.status !== 'cooked' ? (
-            <Button label="Mark cooked" glyph="done" onPress={() => onStatus('cooked')} />
-          ) : (
-            <Button label="Back to planned" variant="secondary" onPress={() => onStatus('planned')} />
-          )}
-          {entry.status !== 'skipped' ? (
-            <Button label="Skip" variant="secondary" onPress={() => onStatus('skipped')} />
-          ) : (
-            <Button label="Unskip" variant="secondary" onPress={() => onStatus('planned')} />
-          )}
-          <Pressable onPress={onRemove} style={styles.removeRow}>
-            <Text color="accent">Remove from plan</Text>
-          </Pressable>
-        </>
+
+      {status !== 'cooked' ? (
+        <Button label="Mark cooked" glyph="done" onPress={() => onStatus('cooked')} />
+      ) : (
+        <Button label="Back to planned" variant="secondary" onPress={() => onStatus('planned')} />
+      )}
+      {status !== 'skipped' ? (
+        <Button label="Skip" variant="secondary" onPress={() => onStatus('skipped')} />
+      ) : (
+        <Button label="Unskip" variant="secondary" onPress={() => onStatus('planned')} />
+      )}
+
+      {/* Optional lunch/dinner split (merge-by-default is the norm). */}
+      <View style={styles.splitRow}>
+        <Button
+          label="→ Lunch"
+          variant="secondary"
+          flex
+          onPress={() => onSplit('lunch')}
+        />
+        <Button
+          label="→ Dinner"
+          variant="secondary"
+          flex
+          onPress={() => onSplit('dinner')}
+        />
+      </View>
+      {meal.type ? (
+        <Pressable onPress={onMerge} style={styles.mergeRow}>
+          <Text color="textMuted">Clear split (merge into the day)</Text>
+        </Pressable>
       ) : null}
+
+      <Pressable onPress={onRemove} style={styles.removeRow}>
+        <Text color="accent">Remove from plan</Text>
+      </Pressable>
     </View>
   );
 }
@@ -512,80 +626,117 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   pane: { padding: layout.screenPadding, gap: 12 },
-  moreDays: { alignItems: 'center', paddingVertical: 16 },
-  // Day-row hierarchy (spec §5): grouping is visual, not structural — each
-  // day's rows share a card-like container with a left gutter pinning the
-  // day label so empty + breakfast / + lunch cells anchor to a date instead
-  // of floating as free text. (Pre-fix the day label sat in its own narrow
-  // column with no shared background, which read as flat list of strings.)
-  grid: { padding: layout.screenPadding, gap: 14 },
-  dayRow: {
+  viewToggleRow: {
     flexDirection: 'row',
-    gap: 14,
-    paddingTop: 6,
+    justifyContent: 'flex-end',
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: 4,
     paddingBottom: 4,
+  },
+  toggle: {
+    flexDirection: 'row',
+    gap: 4,
+    backgroundColor: colors.bg2,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 3,
+  },
+  toggleBtn: {
+    width: 34,
+    height: 28,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toggleBtnOn: { backgroundColor: colors.accent },
+
+  // Horizontal day-chip strip.
+  chipStrip: {
+    paddingHorizontal: layout.screenPadding,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  dayChip: {
+    minWidth: 56,
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: colors.bg2,
+    borderWidth: 1,
+    borderColor: colors.line,
+    gap: 2,
+  },
+  dayChipOn: { borderColor: colors.accent, backgroundColor: colors.bg3 },
+  dayChipNum: { fontSize: 18 },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.textFaint,
+    marginTop: 2,
+  },
+  dotOn: { backgroundColor: colors.accent },
+  dotSpacer: { width: 5, height: 5, marginTop: 2 },
+
+  dayScroll: { padding: layout.screenPadding, paddingTop: 6, gap: 14 },
+  agenda: { padding: layout.screenPadding, gap: 14 },
+  moreDays: { alignItems: 'center', paddingVertical: 16 },
+
+  dayBlock: {
+    gap: 8,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.lineSoft,
   },
-  dayCol: { width: 44, alignItems: 'flex-start', paddingTop: 12, paddingLeft: 2 },
-  dayNum: { fontSize: 19 },
-  cells: { flex: 1, gap: 6 },
-  cell: {
+  dayHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  dayHeadNum: { fontSize: 19 },
+  dayEmpty: { fontStyle: 'italic', paddingVertical: 2 },
+  meal: { gap: 6 },
+  mealType: { textTransform: 'capitalize' },
+  dish: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    minHeight: 64,
+    minHeight: 52,
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  cellSmall: { minHeight: 36, paddingVertical: 8, backgroundColor: colors.bg3 },
-  cellPlanned: { backgroundColor: colors.bg2 },
-  cellCooked: {
+  dishPlanned: { backgroundColor: colors.bg2 },
+  dishCooked: {
     backgroundColor: colors.bg,
     borderWidth: 1,
     borderColor: colors.lineSoft,
   },
-  cellSkipped: {
+  dishSkipped: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
     borderColor: colors.line,
     borderStyle: 'dashed',
     opacity: 0.5,
   },
-  cellExp: {
+  dishExp: {
     borderWidth: 1.5,
     borderColor: colors.warn,
     borderStyle: 'dashed',
     backgroundColor: 'rgba(194,139,43,0.08)',
   },
-  cellEmpty: {
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    borderStyle: 'dashed',
-    backgroundColor: 'transparent',
-  },
-  emptyText: { fontStyle: 'italic' },
-  // minWidth: 0 lets the title shrink on narrow phones — RN/web flex
-  // children default to min-content sizing, so without this a long recipe
-  // title shoves the `exp` tag off the row. Same defensive pattern used in
-  // shopping.tsx (#10 overlapping text on mobile).
-  cellTitle: { flex: 1, minWidth: 0 },
+  // minWidth: 0 lets the title shrink on narrow phones (RN/web flex children
+  // default to min-content sizing).
+  dishTitle: { flex: 1, minWidth: 0 },
   strike: { textDecorationLine: 'line-through' },
-  addSide: {
-    minHeight: 32,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-  },
-  marker: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
+  addDish: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
+    minHeight: 34,
+    paddingHorizontal: 4,
   },
   sheet: { gap: 12 },
+  splitRow: { flexDirection: 'row', gap: 10 },
+  mergeRow: { alignItems: 'center', paddingVertical: 4 },
   removeRow: { alignItems: 'center', paddingVertical: 8 },
   deleteAction: {
     flexDirection: 'row',
@@ -597,5 +748,4 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   deleteLabel: { fontSize: 13 },
-  emptyWeek: { textAlign: 'center', paddingVertical: 24, fontStyle: 'italic' },
 });

@@ -24,7 +24,7 @@ export function weekDays(start: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => new Date(start.getTime() + i * DAY_MS));
 }
 
-/** Stable local day key 'YYYY-MM-DD' — PlanEntry identity by (key, meal). */
+/** Stable local day key 'YYYY-MM-DD' — meals are grouped onto a day by this. */
 export function dateKey(d: Date): string {
   const m = `${d.getMonth() + 1}`.padStart(2, '0');
   const day = `${d.getDate()}`.padStart(2, '0');

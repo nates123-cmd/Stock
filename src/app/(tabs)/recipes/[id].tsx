@@ -21,7 +21,7 @@ import { dayTag, isSameDay } from '@/lib/week';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { convertToGrams } from '@/lib/parsing';
 import { uid } from '@/lib/id';
-import type { Ingredient, Meal, Recipe, Step, Unit } from '@/types';
+import type { Ingredient, MealType, Recipe, Step, Unit } from '@/types';
 import { formatMinutes, formatAmount } from '@/lib/format';
 import type { Nutrition, RecipeSource } from '@/types';
 
@@ -66,11 +66,12 @@ export default function RecipeDetail() {
   const [sourceNameInput, setSourceNameInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [editing, setEditing] = useState(false);
-  // "Add to plan" sheet (spec §5/§6 cross-link): pick a day + meal to pin this
-  // recipe straight from the recipe tab, without going through the Plan grid.
-  const setPlanRecipe = usePlanStore((s) => s.setRecipe);
+  // "Add to plan" sheet (spec §5/§6 cross-link): pick a day (and optionally a
+  // lunch/dinner split) to add this recipe as a dish, straight from the recipe
+  // tab. Merge-by-default (Phase B): no split → the day's default meal.
+  const addDish = usePlanStore((s) => s.addDish);
   const [planning, setPlanning] = useState(false);
-  const [planMeal, setPlanMeal] = useState<Meal>('dinner');
+  const [planMeal, setPlanMeal] = useState<MealType | null>(null);
   // Today + next 13 days — same rolling, always-editable window as the Plan
   // grid. Anchored at mount; the recipe screen is opened fresh each time.
   const planDays = useMemo(() => {
@@ -120,15 +121,17 @@ export default function RecipeDetail() {
   const time = formatMinutes(recipe.yield.totalMinutes);
   const steps = [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal);
 
-  const MEAL_LABELS: Record<Meal, string> = {
-    breakfast: 'Breakfast',
-    lunch: 'Lunch',
-    dinner: 'Dinner',
-  };
+  const SPLIT_OPTIONS: { key: MealType | null; label: string }[] = [
+    { key: null, label: 'Any meal' },
+    { key: 'lunch', label: 'Lunch' },
+    { key: 'dinner', label: 'Dinner' },
+  ];
   const addToPlan = async (day: Date) => {
-    await setPlanRecipe(day, planMeal, recipe.id);
+    await addDish(day, { recipeId: recipe.id, title: recipe.title }, { type: planMeal });
     setPlanning(false);
-    setHint(`Added to ${dayTag(day)} · ${MEAL_LABELS[planMeal]}`);
+    setHint(
+      `Added to ${dayTag(day)}${planMeal ? ` · ${planMeal}` : ''}`,
+    );
   };
 
   const previewConvertToGrams = async () => {
@@ -507,15 +510,16 @@ export default function RecipeDetail() {
         <View style={styles.planSheet}>
           <Text variant="recipeTitle">Add to plan</Text>
           <Text color="textFaint" style={styles.planHint}>
-            Pick a meal, then a day. Pins “{recipe.title}” to your week.
+            Pick a day. Dishes merge into that day’s meal — optionally split it
+            into lunch or dinner.
           </Text>
           <ChipRow>
-            {(['breakfast', 'lunch', 'dinner'] as Meal[]).map((m) => (
+            {SPLIT_OPTIONS.map((opt) => (
               <FilterChip
-                key={m}
-                label={MEAL_LABELS[m]}
-                active={planMeal === m}
-                onPress={() => setPlanMeal(m)}
+                key={opt.label}
+                label={opt.label}
+                active={planMeal === opt.key}
+                onPress={() => setPlanMeal(opt.key)}
               />
             ))}
           </ChipRow>

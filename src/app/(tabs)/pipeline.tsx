@@ -72,7 +72,7 @@ export default function PipelineScreen() {
     () => new Set(extraItems.map((x) => x.originId)),
     [extraItems],
   );
-  const setExperiment = usePlanStore((s) => s.setExperiment);
+  const addDish = usePlanStore((s) => s.addDish);
   const [tab, setTab] = useState<Tab>('Active');
   const [pushed, setPushed] = useState<{ id: string; count: number } | null>(null);
   // Day-picker overlay state for the inline "+ Plan" action (spec §8).
@@ -116,14 +116,13 @@ export default function PipelineScreen() {
       },
     });
 
-  // "+ Plan" — pin the idea to a target day's dinner slot as an experiment.
-  // Replaces whatever was there (setExperiment is destructive by design;
-  // user can undo via swipe-delete on the plan).
+  // "+ Plan" — add the idea to a target day as an experiment dish (Phase B:
+  // merges into that day's default meal; user can swipe-delete on the plan).
   const planForDay = async (idea: PipelineIdea, offsetDays: number, label: string) => {
     const d = new Date();
     d.setDate(d.getDate() + offsetDays);
     d.setHours(0, 0, 0, 0);
-    await setExperiment(d, 'dinner', idea.id);
+    await addDish(d, { pipelineId: idea.id, title: idea.title });
     setPlanTarget(null);
     setPlanned({ id: idea.id, label });
     setTimeout(() => setPlanned(null), 4000);

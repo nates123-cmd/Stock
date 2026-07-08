@@ -189,17 +189,40 @@ export type PantryItem = {
   statusUpdatedAt?: Date;
 };
 
-export type Meal = 'breakfast' | 'lunch' | 'dinner';
+/**
+ * Optional meal split (redesign Phase B). The default plan model merges every
+ * dish for a day into ONE unlabeled meal; assigning a `type` splits a day into
+ * lunch vs dinner. No forced breakfast label — context implies (spec note 2).
+ */
+export type MealType = 'lunch' | 'dinner';
 
-export type PlanEntry = {
+export type MealStatus = 'planned' | 'cooked' | 'skipped';
+
+/**
+ * A single dish within a meal. Points at a recipe, a To-Try / pipeline item,
+ * or is just a free-text title. `title` is the display fallback — for recipe /
+ * pipeline dishes the live record's title wins when it resolves.
+ */
+export type Dish = {
   id: string;
-  /** year-month-day */
-  date: Date;
-  meal: Meal;
   recipeId?: string;
-  /** if experimental */
-  pipelineIdeaId?: string;
-  status: 'planned' | 'cooked' | 'skipped';
+  pipelineId?: string;
+  title: string;
+};
+
+/**
+ * A meal on a day — holds one or more dishes (redesign Phase B, Day→Meals→
+ * Dishes). Merge-by-default: a day carries a single unlabeled meal (`type`
+ * null/absent) unless the user splits it into lunch/dinner.
+ */
+export type Meal = {
+  id: string;
+  /** local year-month-day */
+  date: Date;
+  /** null/absent = the day's default unlabeled meal */
+  type?: MealType | null;
+  dishes: Dish[];
+  status?: MealStatus;
   /** link once cooked */
   cookId?: string;
 };

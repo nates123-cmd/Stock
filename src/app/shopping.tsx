@@ -82,14 +82,15 @@ export default function ShoppingList() {
     () => (params.weekStart ? new Date(params.weekStart) : startOfWeek(new Date())),
     [params.weekStart],
   );
-  // Launched from the confirm step: scope to the chosen plan entries instead
-  // of a calendar week.
+  // Launched from the confirm step: scope to the chosen plan meals instead
+  // of a calendar week. (Param name kept `entryIds` for route stability; the
+  // ids are now meal ids.)
   const selectedEntryIds = useMemo(
     () =>
       params.entryIds ? new Set(params.entryIds.split(',').filter(Boolean)) : null,
     [params.entryIds],
   );
-  const entries = usePlanStore((s) => s.entries);
+  const planMeals = usePlanStore((s) => s.meals);
   const recipes = useRecipeStore((s) => s.recipes);
   const extras = useExtrasStore((s) => s.items);
   const removeExtra = useExtrasStore((s) => s.remove);
@@ -176,19 +177,26 @@ export default function ShoppingList() {
   const { width: viewportWidth } = useWindowDimensions();
   const wide = viewportWidth >= 1024;
 
+  // Consolidate the shopping list from plan → meals → dishes → recipes
+  // (Phase B model). Every recipe dish in an in-scope, planned meal contributes
+  // its ingredients; the downstream consolidation is unchanged.
   const weekRecipes = useMemo(() => {
     const keys = new Set(weekDays(weekStart).map(dateKey));
     const byId = new Map<string, Recipe>(recipes.map((r) => [r.id, r]));
-    return entries
-      .filter((e) => {
-        const inScope = selectedEntryIds
-          ? selectedEntryIds.has(e.id)
-          : keys.has(dateKey(e.date));
-        return inScope && e.status === 'planned' && e.recipeId;
-      })
-      .map((e) => byId.get(e.recipeId as string))
-      .filter((r): r is Recipe => !!r);
-  }, [entries, recipes, weekStart, selectedEntryIds]);
+    const out: Recipe[] = [];
+    for (const m of planMeals) {
+      const inScope = selectedEntryIds
+        ? selectedEntryIds.has(m.id)
+        : keys.has(dateKey(m.date));
+      if (!inScope || (m.status ?? 'planned') !== 'planned') continue;
+      for (const d of m.dishes) {
+        if (!d.recipeId) continue;
+        const r = byId.get(d.recipeId);
+        if (r) out.push(r);
+      }
+    }
+    return out;
+  }, [planMeals, recipes, weekStart, selectedEntryIds]);
 
   // Render the local merge instantly, then upgrade with Claude's fuzzier
   // estimate when it resolves (graceful — consolidateSmart self-falls-back).

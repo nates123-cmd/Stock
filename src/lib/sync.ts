@@ -25,7 +25,7 @@ import { useCookStore } from '@/store/cooks';
 import { useHaveStore, type HaveRecord } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
 import { reviveRecipeDates } from './db/repositories';
-import type { Cook, PantryItem, PipelineIdea, PlanEntry } from '@/types';
+import type { Cook, Meal, PantryItem, PipelineIdea } from '@/types';
 
 type CloudTable =
   | 'recipes'
@@ -46,8 +46,12 @@ function reviveModDatesAny(item: {
   });
 }
 
-function revivePlanEntry(p: PlanEntry): PlanEntry {
+function reviveMeal(p: Meal): Meal {
   p.date = new Date(p.date as unknown as string);
+  // Tolerate legacy cloud rows (old PlanEntry shape) — an absent dishes array
+  // would crash every reader that maps over it. Reset to empty rather than drop
+  // (the row still round-trips; the UI just shows an empty meal).
+  if (!Array.isArray(p.dishes)) p.dishes = [];
   return p;
 }
 
@@ -180,12 +184,13 @@ const collections: Collection[] = [
     revive: (raw) => reviveRecipeDates(raw as never),
   },
   {
+    // Cloud table name kept as-is (JSON blob store); the row shape is now Meal.
     table: 'plan_entries',
-    read: () => usePlanStore.getState().entries,
+    read: () => usePlanStore.getState().meals,
     replace: (next) =>
-      usePlanStore.setState({ entries: next as ReturnType<typeof usePlanStore.getState>['entries'] }),
+      usePlanStore.setState({ meals: next as ReturnType<typeof usePlanStore.getState>['meals'] }),
     subscribe: (l) => usePlanStore.subscribe(l),
-    revive: (raw) => revivePlanEntry(raw as PlanEntry),
+    revive: (raw) => reviveMeal(raw as Meal),
   },
   {
     table: 'pantry_items',

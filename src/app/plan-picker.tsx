@@ -23,7 +23,7 @@ import { usePipelineStore } from '@/store/pipeline';
 import { bestGuessIngredients } from '@/lib/parsing';
 import { dayTag } from '@/lib/week';
 import { formatMinutes } from '@/lib/format';
-import type { Meal, PipelineIdea, Recipe } from '@/types';
+import type { MealType, PipelineIdea, Recipe } from '@/types';
 
 const TABS = ['All', 'Frequent', 'Pipeline'] as const;
 type Tab = (typeof TABS)[number];
@@ -32,16 +32,15 @@ type Chip = (typeof CHIPS)[number];
 
 export default function PlanPicker() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ date: string; meal: Meal }>();
+  const params = useLocalSearchParams<{ date: string; type?: string }>();
   const date = useMemo(() => new Date(params.date), [params.date]);
-  const meal: Meal =
-    params.meal === 'breakfast' || params.meal === 'lunch'
-      ? params.meal
-      : 'dinner';
+  // Optional lunch/dinner split target (Phase B). Absent = merge into the
+  // day's default unlabeled meal.
+  const mealType: MealType | null =
+    params.type === 'lunch' || params.type === 'dinner' ? params.type : null;
 
   const recipes = useRecipeStore((s) => s.recipes);
-  const setRecipe = usePlanStore((s) => s.setRecipe);
-  const setExperiment = usePlanStore((s) => s.setExperiment);
+  const addDish = usePlanStore((s) => s.addDish);
   const ideas = usePipelineStore((s) => s.ideas);
   const setBestGuess = usePipelineStore((s) => s.setBestGuess);
 
@@ -82,7 +81,11 @@ export default function PlanPicker() {
           guessed.map((g) => g.value),
         );
       }
-      await setExperiment(date, meal, expIdea.id);
+      await addDish(
+        date,
+        { pipelineId: expIdea.id, title: expIdea.title },
+        { type: mealType },
+      );
       setExpIdea(null);
       router.back();
     } finally {
@@ -109,7 +112,7 @@ export default function PlanPicker() {
   }, [recipes, query, chip, tab]);
 
   const pick = async (r: Recipe) => {
-    await setRecipe(date, meal, r.id);
+    await addDish(date, { recipeId: r.id, title: r.title }, { type: mealType });
     router.back();
   };
 
@@ -117,7 +120,8 @@ export default function PlanPicker() {
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
         <Text variant="sectionLabel" color="accent">
-          {dayTag(date)} · {meal}
+          {dayTag(date)}
+          {mealType ? ` · ${mealType}` : ''}
         </Text>
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <Text variant="bodyStrong" color="textMuted">

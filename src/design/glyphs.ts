@@ -21,6 +21,8 @@ export const glyph = {
   add: '+', // Add / new
   sep: '·', // Separator in meta lines
   expand: '▾', // Expand / dropdown
+  agenda: '≡', // Plan vertical agenda view (stacked days)
+  dayChips: '⊞', // Plan horizontal day-chips view (grid of days)
   pageLeft: '‹', // Pagination / week-nav
   pageRight: '›',
   timer: '⏱', // Timer prefix in step text

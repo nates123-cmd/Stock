@@ -7,13 +7,7 @@ import { colors, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { dateKey, dayTag } from '@/lib/week';
-import type { Meal, Recipe } from '@/types';
-
-const MEAL_LABEL: Record<Meal, string> = {
-  breakfast: 'Breakfast',
-  lunch: 'Lunch',
-  dinner: 'Dinner',
-};
+import type { Recipe } from '@/types';
 
 // Graceful fallback (Expo Router route boundary) instead of a blank screen.
 export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
@@ -38,9 +32,12 @@ export default function ShoppingConfirmScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ days?: string }>();
   const daysAhead = Math.min(60, Math.max(1, Number(params.days) || 6));
-  const entries = usePlanStore((s) => s.entries);
+  const planMeals = usePlanStore((s) => s.meals);
   const recipes = useRecipeStore((s) => s.recipes);
 
+  // One row per planned meal in the window (Phase B model). Each row lists the
+  // recipe dishes that meal contributes; the whole meal is (de)selected as a
+  // unit — its id is what the shopping screen scopes to.
   const meals = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -52,18 +49,22 @@ export default function ShoppingConfirmScreen() {
       }),
     );
     const byId = new Map<string, Recipe>(recipes.map((r) => [r.id, r]));
-    return entries
+    return planMeals
       .filter(
-        (e) =>
-          e.status === 'planned' && e.recipeId && windowKeys.has(dateKey(e.date)),
+        (m) => (m.status ?? 'planned') === 'planned' && windowKeys.has(dateKey(m.date)),
       )
-      .map((e) => ({ entry: e, recipe: byId.get(e.recipeId as string) }))
-      .filter((m) => !!m.recipe)
+      .map((m) => ({
+        meal: m,
+        recipes: m.dishes
+          .map((d) => (d.recipeId ? byId.get(d.recipeId) : undefined))
+          .filter((r): r is Recipe => !!r),
+      }))
+      .filter((row) => row.recipes.length > 0)
       .sort(
         (a, b) =>
-          new Date(a.entry.date).getTime() - new Date(b.entry.date).getTime(),
+          new Date(a.meal.date).getTime() - new Date(b.meal.date).getTime(),
       );
-  }, [entries, recipes, daysAhead]);
+  }, [planMeals, recipes, daysAhead]);
 
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
   const toggle = (id: string) =>
@@ -75,7 +76,7 @@ export default function ShoppingConfirmScreen() {
     });
 
   const selectedIds = meals
-    .map((m) => m.entry.id)
+    .map((m) => m.meal.id)
     .filter((id) => !excluded.has(id));
 
   const buildList = () => {
@@ -107,20 +108,23 @@ export default function ShoppingConfirmScreen() {
             No planned meals in the next {daysAhead} days yet.
           </Text>
         ) : (
-          meals.map(({ entry, recipe }) => {
-            const checked = !excluded.has(entry.id);
+          meals.map(({ meal, recipes: mealRecipes }) => {
+            const checked = !excluded.has(meal.id);
             return (
               <Pressable
-                key={entry.id}
+                key={meal.id}
                 style={styles.row}
-                onPress={() => toggle(entry.id)}>
+                onPress={() => toggle(meal.id)}>
                 <View style={[styles.box, checked && styles.boxOn]}>
                   {checked ? <Text style={styles.check}>✓</Text> : null}
                 </View>
                 <View style={styles.flex}>
-                  <Text numberOfLines={1}>{recipe!.title}</Text>
+                  <Text numberOfLines={1}>
+                    {mealRecipes.map((r) => r.title).join(' · ')}
+                  </Text>
                   <Text color="textMuted" variant="sectionLabel">
-                    {dayTag(new Date(entry.date))} · {MEAL_LABEL[entry.meal]}
+                    {dayTag(new Date(meal.date))}
+                    {meal.type ? ` · ${meal.type}` : ''}
                   </Text>
                 </View>
               </Pressable>

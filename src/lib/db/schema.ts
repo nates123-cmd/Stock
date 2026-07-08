@@ -10,7 +10,9 @@
  * Dates are stored as ISO-8601 TEXT.
  */
 
-export const SCHEMA_VERSION = 1;
+// Bumped to 2 for the Phase B plan meal model — the old (date, meal) UNIQUE
+// plan_entries table is replaced by plan_meals keyed on the meal id.
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS recipes (
@@ -63,18 +65,15 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_pantry_canonical ON pantry_items(canonical_name);`,
   `CREATE INDEX IF NOT EXISTS idx_pantry_staple ON pantry_items(is_staple);`,
 
-  `CREATE TABLE IF NOT EXISTS plan_entries (
-     id               TEXT PRIMARY KEY NOT NULL,
-     date             TEXT NOT NULL,
-     meal             TEXT NOT NULL,
-     recipe_id        TEXT,
-     pipeline_idea_id TEXT,
-     status           TEXT NOT NULL,
-     cook_id          TEXT,
-     data             TEXT NOT NULL,
-     UNIQUE (date, meal)
+  // Phase B meal model (Day→Meals→Dishes). One row per Meal; the full meal
+  // (its dishes, type, status) lives in the JSON `data` blob. Merge-by-default
+  // means a day usually has a single row.
+  `CREATE TABLE IF NOT EXISTS plan_meals (
+     id    TEXT PRIMARY KEY NOT NULL,
+     date  TEXT NOT NULL,
+     data  TEXT NOT NULL
    );`,
-  `CREATE INDEX IF NOT EXISTS idx_plan_date ON plan_entries(date);`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_meals_date ON plan_meals(date);`,
 
   `CREATE TABLE IF NOT EXISTS shopping_lists (
      id           TEXT PRIMARY KEY NOT NULL,

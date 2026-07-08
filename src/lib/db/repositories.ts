@@ -6,10 +6,10 @@
  */
 import type {
   Cook,
+  Meal,
   Modification,
   PantryItem,
   PipelineIdea,
-  PlanEntry,
   Recipe,
 } from '@/types';
 import { getDb } from './client';
@@ -109,54 +109,40 @@ export const cookRepo = {
 };
 
 export const planRepo = {
-  async all(): Promise<PlanEntry[]> {
+  async all(): Promise<Meal[]> {
     const rows = await getDb().getAllAsync<{ data: string }>(
-      'SELECT data FROM plan_entries ORDER BY date ASC',
+      'SELECT data FROM plan_meals ORDER BY date ASC',
     );
-    return rows.map((r) => {
-      const p = JSON.parse(r.data) as PlanEntry;
-      p.date = new Date(p.date as unknown as string);
-      return p;
-    });
+    const out: Meal[] = [];
+    for (const r of rows) {
+      try {
+        const m = JSON.parse(r.data) as Meal;
+        // Drop (don't crash on) any legacy PlanEntry rows lacking dishes.
+        if (!Array.isArray(m.dishes)) continue;
+        m.date = new Date(m.date as unknown as string);
+        out.push(m);
+      } catch {
+        /* skip unparseable row */
+      }
+    }
+    return out;
   },
 
-  async upsert(entry: PlanEntry): Promise<void> {
-    const db = getDb();
-    // Store the LOCAL day key, not toISOString().slice(0,10) (UTC) — the
-    // store matches entries by local dateKey(), so a UTC column drifts a day
-    // east of UTC and desyncs the grid from what's persisted.
-    const day = dateKey(entry.date);
-    // (date, meal) is UNIQUE. The old ON CONFLICT(id)-only upsert threw
-    // "UNIQUE constraint failed" when re-pinning a slot that held a row with
-    // a different id (e.g. a seed), and setRecipe swallowed it — the pin was
-    // silently lost. Clear the slot first so the write is idempotent.
-    await db.runAsync(
-      'DELETE FROM plan_entries WHERE date = ? AND meal = ? AND id <> ?',
-      day,
-      entry.meal,
-      entry.id,
-    );
-    await db.runAsync(
-      `INSERT INTO plan_entries
-         (id, date, meal, recipe_id, pipeline_idea_id, status, cook_id, data)
-       VALUES (?,?,?,?,?,?,?,?)
-       ON CONFLICT(id) DO UPDATE SET
-         date=excluded.date, meal=excluded.meal,
-         recipe_id=excluded.recipe_id, pipeline_idea_id=excluded.pipeline_idea_id,
-         status=excluded.status, cook_id=excluded.cook_id, data=excluded.data`,
-      entry.id,
-      day,
-      entry.meal,
-      entry.recipeId ?? null,
-      entry.pipelineIdeaId ?? null,
-      entry.status,
-      entry.cookId ?? null,
-      JSON.stringify(entry),
+  async upsert(meal: Meal): Promise<void> {
+    // Store the LOCAL day key (not the UTC ISO slice) — the store matches by
+    // local dateKey(), so a UTC column would drift a day east of UTC.
+    await getDb().runAsync(
+      `INSERT INTO plan_meals (id, date, data)
+       VALUES (?,?,?)
+       ON CONFLICT(id) DO UPDATE SET date=excluded.date, data=excluded.data`,
+      meal.id,
+      dateKey(meal.date),
+      JSON.stringify(meal),
     );
   },
 
   async remove(id: string): Promise<void> {
-    await getDb().runAsync('DELETE FROM plan_entries WHERE id = ?', id);
+    await getDb().runAsync('DELETE FROM plan_meals WHERE id = ?', id);
   },
 };
 
