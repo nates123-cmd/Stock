@@ -83,6 +83,32 @@ Groceries."**
   Reminder", Course Shortcuts deeplinks). **"Remaining" = everything not tagged Wegmans**
   (Stop One + unassigned).
 
+## Shop leads + the buy loop (follow-on, 2026-07-08)
+
+Nate: "shopping list should lead." Shop/Pantry were already co-located as Plan-tab
+segments, but the Shop + Pantry segments were `TODO(phaseD)` stubs that routed to
+the standalone screens, and nothing flowed from buying into the pantry. Three deltas:
+
+1. **Shop leads.** Plan tab segments reordered `Shop · Plan · Have` and the tab now
+   opens on **Shop** (was `Plan`). "Pantry" segment renamed **Have**. The Shop and
+   Have segments now embed the real screens (`<ShoppingList embedded />`,
+   `<PantryScreen />`) instead of routing away.
+2. **The buy loop (new).** Checking a Shop item off opens a **BuySheet** confirm
+   (location Shelf/Fridge/Freezer, default by category; optional qty prefilled from
+   the line) → `pantry.applyPaste()` restock-merges it in at `fine`, then the row
+   leaves the buy list (into Already-have). Restock rows (low/out staples) buy the
+   same way — `applyPaste` flips them back to `fine` so they drop off on their own.
+   "Already had it" clears a row without touching the pantry (the old behavior).
+   Closes the loop: bought → pantry → depletes to low/out → resurfaces on Shop.
+3. **Standing list.** Kept the derive-per-render model (plan auto-merges + dedupes
+   via `consolidateSmart`) — manual adds (`extras`), suppressions (`shopMeta`), and
+   always-have (`have.ts`) already persist, so with the buy loop the list *behaves*
+   standing without materializing snapshot rows (which would lose live plan sync).
+
+Touched: `app/(tabs)/index.tsx` (embed + reorder + default), `app/shopping.tsx`
+(applyPaste selector, `buying` state, `openBuy`/`commitBuy`/`skipBuy`, 4 buy-row
+check-offs rerouted, `BuySheet` + `locForName`). NOT browser-verified — see PR.
+
 ## Visual (note 8) — DEFERRED to its own session
 Nate: "less Claude-y." Current parchment-cream + serif + tomato IS the AI-default cliché.
 This restructure keeps existing tokens as-is but is built **token-clean** (no hardcoded

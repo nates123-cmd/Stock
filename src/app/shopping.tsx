@@ -27,7 +27,7 @@ import { useHaveStore } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
 import { usePantryStore } from '@/store/pantry';
 import { useShopMetaStore } from '@/store/shopMeta';
-import type { PantryStatus } from '@/types';
+import type { PantryLocation, PantryStatus } from '@/types';
 import { matchKey } from '@/lib/pantry';
 import { alwaysHaveKey, isAlwaysHave } from '@/lib/alwaysHave';
 import {
@@ -134,6 +134,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // keyed on the canonical-match key so a row's name matches even when the
   // exact string differs ("kosher salt" vs "salt").
   const pantryItems = usePantryStore((s) => s.items);
+  // The buy loop: checking a bought item off the list feeds it into the pantry
+  // (restock-merge — sets it 'fine', extends the cycle). Shopping leads; the
+  // pantry is downstream of it.
+  const applyPaste = usePantryStore((s) => s.applyPaste);
   const statusByKey = useMemo(() => {
     const m = new Map<string, PantryStatus>();
     for (const p of pantryItems) {
@@ -175,6 +179,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     name: string;
     extraId: string | null;
   } | null>(null);
+  /** Buy-confirm sheet (the buy loop). Checking a row off opens this to place
+   *  the item into the pantry (location + qty) before it leaves the list. */
+  const [buying, setBuying] = useState<{ name: string; qty: string } | null>(null);
   /** Shop view grouping: by shelf category (default) or by store tag (note 3). */
   const [groupByStore, setGroupByStore] = useState(false);
 
@@ -444,6 +451,41 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     if (showOnboard) dismissOnboard();
   };
 
+  /** Open the buy-confirm sheet for a row (checkbox / swipe-right on a buy
+   *  row). Pre-fills the quantity from the line when it's a real amount. */
+  const openBuy = (name: string) => {
+    const line = buyLines.find((l) => l.name === name);
+    const q = line && line.buy && line.buy !== 'as needed' ? line.buy : '';
+    setBuying({ name, qty: q });
+  };
+
+  /** Confirm a buy: restock-merge it into the pantry at the chosen location,
+   *  then drop it off the buy list (into Already-have). Closes the loop —
+   *  bought → pantry → depletes → resurfaces on Shop. */
+  const commitBuy = async (location: PantryLocation, qtyStr: string) => {
+    if (!buying) return;
+    const { amount, unit } = parseQty(qtyStr);
+    await applyPaste([
+      {
+        canonicalName: buying.name,
+        location,
+        amount: amount ?? undefined,
+        unit: unit ?? undefined,
+      },
+    ]);
+    markHave(buying.name);
+    if (showOnboard) dismissOnboard();
+    setBuying(null);
+  };
+
+  /** "Already had it": clear the row without touching the pantry. */
+  const skipBuy = () => {
+    if (!buying) return;
+    markHave(buying.name);
+    if (showOnboard) dismissOnboard();
+    setBuying(null);
+  };
+
   /** Dismiss a consolidated row for this run (session-local). */
   const dismissItem = (name: string) =>
     setDismissed((prev) => new Set(prev).add(`item:${name}`));
@@ -588,10 +630,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         expanded={expanded.has(line.name)}
         storeName={meta.store ? storeLabel(meta.store) : null}
         onTap={() => toggleExpand(line.name)}
-        onToggleHave={() => {
-          if (ps === 'out') return;
-          toggleHave(line.name);
-        }}
+        onToggleHave={() => openBuy(line.name)}
         onDelete={() => (extraId ? removeExtra(extraId) : deleteItem(line.name))}
         onAlwaysHave={() => alwaysHaveIt(line.name)}
         onLongPress={() => setMenu({ name: line.name, extraId })}
@@ -852,11 +891,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                       expanded={expanded.has(item.name)}
                       storeName={meta.store ? storeLabel(meta.store) : null}
                       onTap={() => toggleExpand(item.name)}
-                      onToggleHave={() => {
-                        // Spec §5: 'out' suppresses the have toggle.
-                        if (ps === 'out') return;
-                        toggleHave(item.name);
-                      }}
+                      onToggleHave={() => openBuy(item.name)}
                       onDelete={() => deleteItem(item.name)}
                       onAlwaysHave={() => alwaysHaveIt(item.name)}
                       onLongPress={() => setMenu({ name: item.name, extraId: null })}
@@ -900,10 +935,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                     onTap={() => {
                       /* extras are flat — nothing to expand */
                     }}
-                    onToggleHave={() => {
-                      if (ps === 'out') return;
-                      toggleHave(ex.canonicalName);
-                    }}
+                    onToggleHave={() => openBuy(ex.canonicalName)}
                     onDelete={() => removeExtra(ex.id)}
                     onAlwaysHave={() => alwaysHaveIt(ex.canonicalName)}
                     onLongPress={() =>
@@ -940,10 +972,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                       // 'out' is locked on; 'low' drops for this run on tap.
                       if (ps !== 'out') dismissItem(p.name);
                     }}
-                    onToggleHave={() => {
-                      if (ps === 'out') return;
-                      dismissItem(p.name);
-                    }}
+                    // Check off = bought it → into the pantry (restock-merge
+                    // flips it back to 'fine', so it leaves this restock list).
+                    onToggleHave={() => openBuy(p.name)}
                     onDelete={() => dismissItem(p.name)}
                     onLongPress={() => setMenu({ name: p.name, extraId: null })}
                     marked={false}
@@ -1121,6 +1152,19 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
               setMenu(null);
             }}
             onClose={() => setMenu(null)}
+          />
+        ) : null}
+      </Overlay>
+
+      <Overlay visible={buying !== null} onClose={() => setBuying(null)}>
+        {buying ? (
+          <BuySheet
+            name={buying.name}
+            defaultQty={buying.qty}
+            defaultLoc={locForName(buying.name)}
+            onConfirm={commitBuy}
+            onSkip={skipBuy}
+            onClose={() => setBuying(null)}
           />
         ) : null}
       </Overlay>
@@ -1628,6 +1672,93 @@ function RowDetailSheet({
   );
 }
 
+// ─── Buy-confirm sheet (the buy loop) ────────────────────────────────────────
+
+/** Sensible default pantry location for a bought item, from its category —
+ *  mirrors the pantry store's defaultLocation so the picker starts where the
+ *  item usually lives. */
+function locForName(name: string): PantryLocation {
+  const c = categorizeIngredient(name);
+  if (c === 'frozen') return 'freezer';
+  if (c === 'dairy' || c === 'meat' || c === 'produce') return 'fridge';
+  return 'pantry';
+}
+
+function BuySheet({
+  name,
+  defaultQty,
+  defaultLoc,
+  onConfirm,
+  onSkip,
+  onClose,
+}: {
+  name: string;
+  defaultQty: string;
+  defaultLoc: PantryLocation;
+  onConfirm: (loc: PantryLocation, qty: string) => void;
+  onSkip: () => void;
+  onClose: () => void;
+}) {
+  const [loc, setLoc] = useState<PantryLocation>(defaultLoc);
+  const [qty, setQty] = useState(defaultQty);
+  const pretty = name.charAt(0).toUpperCase() + name.slice(1);
+  return (
+    <View style={styles.menu}>
+      <Text variant="bodyStrong" style={styles.menuTitle}>
+        Got {pretty}?
+      </Text>
+      <Text color="textFaint" style={styles.menuHint}>
+        Add it to your pantry so it tracks — or just clear it off the list.
+      </Text>
+
+      <SectionLabel color="textMuted">Where</SectionLabel>
+      <View style={styles.locRow}>
+        {(['pantry', 'fridge', 'freezer'] as PantryLocation[]).map((l) => {
+          const on = loc === l;
+          return (
+            <Pressable
+              key={l}
+              onPress={() => setLoc(l)}
+              style={[styles.locBtn, on && styles.locBtnOn]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}>
+              <Text variant="bodyStrong" color={on ? 'bg' : 'text'}>
+                {l === 'pantry' ? 'Shelf' : l === 'fridge' ? 'Fridge' : 'Freezer'}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
+        Quantity
+      </SectionLabel>
+      <TextInput
+        value={qty}
+        onChangeText={setQty}
+        placeholder="optional — e.g. 2 lbs"
+        placeholderTextColor={colors.textFaint}
+        style={styles.editInput}
+        returnKeyType="done"
+        onSubmitEditing={() => onConfirm(loc, qty)}
+      />
+
+      <View style={styles.buyConfirm}>
+        <Button label="Add to pantry" glyph="done" flex onPress={() => onConfirm(loc, qty)} />
+      </View>
+      <Pressable style={styles.menuItem} onPress={onSkip} accessibilityRole="button">
+        <Text variant="bodyStrong">Already had it</Text>
+        <Text color="textFaint" style={styles.menuItemHint}>
+          Clears it off the list without adding to the pantry.
+        </Text>
+      </Pressable>
+      <Pressable style={styles.menuCancel} onPress={onClose}>
+        <Text color="textMuted">Cancel</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function SummaryRow({
   label,
   value,
@@ -1742,6 +1873,19 @@ const styles = StyleSheet.create({
   },
   storeChipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   detailFieldLabel: { marginTop: 8 },
+  // Buy-confirm sheet: location picker + confirm.
+  locRow: { flexDirection: 'row', gap: 8, paddingTop: 2 },
+  locBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    alignItems: 'center',
+  },
+  locBtnOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  buyConfirm: { flexDirection: 'row', paddingTop: 12 },
   rightActions: { flexDirection: 'row' },
   alwaysAction: {
     flexDirection: 'row',

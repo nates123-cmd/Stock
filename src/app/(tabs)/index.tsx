@@ -20,6 +20,8 @@ import {
   SegmentedControl,
 } from '@/components';
 import { colors, layout } from '@/design';
+import ShoppingList from '@/app/shopping';
+import PantryScreen from './pantry';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { useCookPlanStore } from '@/store/cookPlans';
@@ -59,9 +61,10 @@ export default function PlanScreen() {
 
   const [daysAhead, setDaysAhead] = useState(6); // today + next 5
   const [manage, setManage] = useState<{ meal: Meal; dish: Dish } | null>(null);
-  // Redesign: Plan tab hosts three segments. Plan = the meal model below; Shop
-  // and Pantry route to the standalone screens (embedded fully in Phase D).
-  const [segment, setSegment] = useState<'plan' | 'shop' | 'pantry'>('plan');
+  // Redesign: Plan tab hosts three segments, Shop leading (shopping is the
+  // front door — you live in the list, plan + pantry feed it). Shop and Pantry
+  // ("Have") embed the real screens; Plan is the meal model below.
+  const [segment, setSegment] = useState<'shop' | 'plan' | 'pantry'>('shop');
   // Plan has two layouts; the choice persists (spec Phase B).
   const [planView, setPlanView] = useState<PlanView>(loadPlanView);
   const setView = (v: PlanView) => {
@@ -219,40 +222,26 @@ export default function PlanScreen() {
       <View style={styles.segments}>
         <SegmentedControl
           segments={[
-            { key: 'plan', label: 'Plan' },
             { key: 'shop', label: 'Shop' },
-            { key: 'pantry', label: 'Pantry' },
+            { key: 'plan', label: 'Plan' },
+            { key: 'pantry', label: 'Have' },
           ]}
           value={segment}
-          onChange={(k) => setSegment(k as 'plan' | 'shop' | 'pantry')}
+          onChange={(k) => setSegment(k as 'shop' | 'plan' | 'pantry')}
         />
       </View>
 
       {segment === 'shop' ? (
-        <View style={styles.pane}>
-          <SectionLabel>Shopping</SectionLabel>
-          <Text color="textMuted">
-            {toShop} item{toShop === 1 ? '' : 's'} to shop from{' '}
-            {plannedRecipes.length} planned recipe
-            {plannedRecipes.length === 1 ? '' : 's'}.
-          </Text>
-          {/* TODO(phaseD): embed shopping body */}
-          <Button
-            label="Open shopping list"
-            glyph="next"
-            onPress={() => router.push('/shopping' as never)}
-          />
+        // The shopping list IS the front door (embedded — no own safe-area /
+        // Done button). Plan + pantry low/out feed it; buying feeds the pantry.
+        <View style={styles.embed}>
+          <ShoppingList embedded />
         </View>
       ) : segment === 'pantry' ? (
-        <View style={styles.pane}>
-          <SectionLabel>Pantry</SectionLabel>
-          <Text color="textMuted">Have, low and out — low and out surface onto Shop.</Text>
-          {/* TODO(phaseD): embed pantry body */}
-          <Button
-            label="Open pantry"
-            glyph="next"
-            onPress={() => router.push('/(tabs)/pantry' as never)}
-          />
+        // "Have" = the pantry: what you've got, what's low/out. Low + out
+        // surface back onto Shop; buying an item lands it here.
+        <View style={styles.embed}>
+          <PantryScreen />
         </View>
       ) : (
         <>
@@ -708,7 +697,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 6,
   },
-  pane: { padding: layout.screenPadding, gap: 12 },
+  embed: { flex: 1 },
   viewToggleRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
