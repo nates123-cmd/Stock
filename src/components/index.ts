@@ -28,3 +28,5 @@ export { SegmentedControl } from './SegmentedControl';
 export type { Segment } from './SegmentedControl';
 export { CaptureSheet } from './CaptureSheet';
 export { GlobalCapture } from './GlobalCapture';
+export { BenchPanel, BenchSheet, ConvertTool, SubTool } from './BenchTools';
+export type { BenchTab, BenchPanelProps } from './BenchTools';

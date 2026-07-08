@@ -353,17 +353,20 @@ export default function RecipeDetail() {
                   <Pressable
                     key={ing.id}
                     style={styles.ingRow}
-                    // Long-press → Bench Sub, amount pre-loaded (spec §9).
+                    // Long-press → the folded-in Bench (Sub), amount pre-loaded
+                    // (spec §9). Bench is no longer its own tab (redesign Phase
+                    // C): it opens as a sheet on the Cook surface.
                     onLongPress={() =>
                       router.push({
-                        pathname: '/(tabs)/bench',
+                        pathname: '/(tabs)/cook',
                         params: {
+                          bench: '1',
                           tab: 'sub',
                           sub: ing.canonicalName,
                           amount: ing.amount != null ? String(ing.amount) : '',
                           unit: ing.unit ?? '',
                         },
-                      })
+                      } as never)
                     }>
                     <IngredientAmount
                       ing={ing}

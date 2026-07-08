@@ -95,6 +95,14 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen
+              name="cook/meal/[id]"
+              options={{
+                headerShown: false,
+                presentation: 'fullScreenModal',
+                gestureEnabled: false,
+              }}
+            />
+            <Stack.Screen
               name="plan-picker"
               options={{ headerShown: false, presentation: 'modal' }}
             />
