@@ -6,6 +6,7 @@
  */
 import type {
   Cook,
+  CookPlan,
   Meal,
   Modification,
   PantryItem,
@@ -77,6 +78,61 @@ export const recipeRepo = {
 
   async remove(id: string): Promise<void> {
     await getDb().runAsync('DELETE FROM recipes WHERE id = ?', id);
+  },
+};
+
+/** JSON round-trips Dates to ISO strings; restore the §4 Date fields. */
+export function reviveCookPlanDates(p: CookPlan): CookPlan {
+  p.createdAt = new Date(p.createdAt as unknown as string);
+  p.modifiedAt = new Date(p.modifiedAt as unknown as string);
+  if (p.serveAt) p.serveAt = new Date(p.serveAt as unknown as string);
+  p.components?.forEach((c) =>
+    c.ingredients?.forEach((i) => reviveModDates(i.modificationHistory)),
+  );
+  return p;
+}
+
+const reviveCookPlan = (raw: string): CookPlan =>
+  reviveCookPlanDates(JSON.parse(raw) as CookPlan);
+
+export const cookPlanRepo = {
+  async all(): Promise<CookPlan[]> {
+    const rows = await getDb().getAllAsync<{ data: string }>(
+      'SELECT data FROM cook_plans ORDER BY modified_at DESC',
+    );
+    return rows.map((r) => reviveCookPlan(r.data));
+  },
+
+  async byId(id: string): Promise<CookPlan | null> {
+    const row = await getDb().getFirstAsync<{ data: string }>(
+      'SELECT data FROM cook_plans WHERE id = ?',
+      id,
+    );
+    return row ? reviveCookPlan(row.data) : null;
+  },
+
+  async upsert(plan: CookPlan): Promise<void> {
+    await getDb().runAsync(
+      `INSERT INTO cook_plans
+         (id, title, status, serve_at, cook_count, created_at, modified_at, data)
+       VALUES (?,?,?,?,?,?,?,?)
+       ON CONFLICT(id) DO UPDATE SET
+         title=excluded.title, status=excluded.status,
+         serve_at=excluded.serve_at, cook_count=excluded.cook_count,
+         modified_at=excluded.modified_at, data=excluded.data`,
+      plan.id,
+      plan.title,
+      plan.status,
+      plan.serveAt ? plan.serveAt.toISOString() : null,
+      plan.cookCount,
+      plan.createdAt.toISOString(),
+      plan.modifiedAt.toISOString(),
+      JSON.stringify(plan),
+    );
+  },
+
+  async remove(id: string): Promise<void> {
+    await getDb().runAsync('DELETE FROM cook_plans WHERE id = ?', id);
   },
 };
 

@@ -22,6 +22,7 @@ import {
 import { colors, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
+import { useCookPlanStore } from '@/store/cookPlans';
 import { useAuthStore } from '@/store/auth';
 import { useHaveStore } from '@/store/have';
 import { useShopMetaStore } from '@/store/shopMeta';
@@ -54,6 +55,7 @@ export default function PlanScreen() {
   const setMealType = usePlanStore((s) => s.setMealType);
   const splitMeal = usePlanStore((s) => s.splitMeal);
   const recipes = useRecipeStore((s) => s.recipes);
+  const cookPlans = useCookPlanStore((s) => s.plans);
 
   const [daysAhead, setDaysAhead] = useState(6); // today + next 5
   const [manage, setManage] = useState<{ meal: Meal; dish: Dish } | null>(null);
@@ -116,6 +118,19 @@ export default function PlanScreen() {
     recipes.forEach((r) => m.set(r.id, r));
     return m;
   }, [recipes]);
+
+  // Cook Plans scheduled within the rolling window — the Plan-tab "shadow" of
+  // a plan that lives in the Recipes library (see CookPlanCard / detail).
+  const upcomingPlans = useMemo(() => {
+    const windowEnd = todayMs + daysAhead * 86_400_000;
+    return cookPlans
+      .filter((p) => p.serveAt && p.status !== 'archived')
+      .filter((p) => {
+        const t = (p.serveAt as Date).getTime();
+        return t >= todayMs && t < windowEnd;
+      })
+      .sort((a, b) => (a.serveAt as Date).getTime() - (b.serveAt as Date).getTime());
+  }, [cookPlans, todayMs, daysAhead]);
 
   // Meals grouped by local day key — derived from the SAME subscribed store the
   // action bar + shopping list read, so every surface stays in sync.
@@ -244,6 +259,40 @@ export default function PlanScreen() {
           <View style={styles.viewToggleRow}>
             <ViewToggle value={planView} onChange={setView} />
           </View>
+
+          {upcomingPlans.length > 0 ? (
+            <View style={styles.planShadow}>
+              <SectionLabel color="textMuted">Cook plans coming up</SectionLabel>
+              {upcomingPlans.map((p) => (
+                <Pressable
+                  key={p.id}
+                  style={styles.planShadowRow}
+                  onPress={() =>
+                    router.push({ pathname: '/cook-plan/[id]', params: { id: p.id } })
+                  }>
+                  <View style={styles.planMarker}>
+                    <Text variant="sectionLabel" color="bg">
+                      ◷
+                    </Text>
+                  </View>
+                  <View style={styles.flex}>
+                    <Text variant="bodyStrong" numberOfLines={1}>
+                      {p.title}
+                    </Text>
+                    <Text variant="sectionLabel" color="accent">
+                      {(p.serveAt as Date).toLocaleString(undefined, {
+                        weekday: 'short',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}{' '}
+                      · {p.phases.length} phases
+                    </Text>
+                  </View>
+                  <Text color="textFaint">›</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
 
           {planView === 'horizontal' ? (
             <>
@@ -625,6 +674,30 @@ function ManageSheet({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
+  planShadow: {
+    gap: 8,
+    paddingBottom: 6,
+  },
+  planShadowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.bg2,
+    borderRadius: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.warn,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  planMarker: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.warn,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   accountBar: {
     alignItems: 'flex-end',
     paddingHorizontal: layout.screenPadding,

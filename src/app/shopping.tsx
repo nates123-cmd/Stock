@@ -51,6 +51,7 @@ import {
   type ShoppingSource,
 } from '@/lib/shopping';
 import { formatAmount } from '@/lib/format';
+import { sendToInstacart, toJobItems, INSTACART_AVAILABLE } from '@/lib/instacart';
 import type { Recipe, ShoppingCategory } from '@/types';
 
 const CAT_LABEL: Record<ShoppingCategory, string> = {
@@ -86,7 +87,12 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
   );
 }
 
-export default function ShoppingList() {
+/**
+ * `embedded` renders the list inside another screen (the Pantry tab's "Shop"
+ * segment) rather than as a standalone modal: no top safe-area inset (the host
+ * already owns it) and no "Done" back button (a tab has nowhere to go back to).
+ */
+export default function ShoppingList({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter();
   const params = useLocalSearchParams<{ weekStart?: string; entryIds?: string }>();
   const weekStart = useMemo(
@@ -155,6 +161,7 @@ export default function ShoppingList() {
   const [copied, setCopied] = useState(false);
   const [revealText, setRevealText] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   // Inline edit mode (spec §10 manual add + edit). Tapping "Edit list" swaps
   // the buy list for an editable view: recipe-derived quantities become
   // editable, extras get full name/qty edit + delete, and a "+ Add item" row
@@ -607,8 +614,34 @@ export default function ShoppingList() {
     }))
     .filter((b) => b.lines.length > 0);
 
+  // Send the Wegmans-tagged buy lines to the Instacart auto-fill agent: queues
+  // a job the Beelink poller claims and fills the Wegmans cart with. Checkout
+  // stays manual (Pickup). Requires sign-in (RLS scopes the job to the user).
+  //
+  // Store-tag routing (Phase D): non-Wegmans lines go into the `local` set so
+  // toJobItems marks them dest:'LO' — sendToInstacart drops those; they're the
+  // ones the "Add remaining to Reminders" route handles. Wegmans-tagged lines
+  // become dest:'IC' and are the only ones sent to the cart.
+  const sendCart = async () => {
+    if (!INSTACART_AVAILABLE()) {
+      setHint('Sign in to send your list to Instacart.');
+      return;
+    }
+    try {
+      setSending(true);
+      setHint('Sending to your Wegmans cart…');
+      const localSet = new Set(remainingLines.map((l) => l.name));
+      await sendToInstacart(toJobItems(buyLines, localSet));
+      setHint('Sent. The cart is filling — open Instacart in ~30s, review, pick Pickup.');
+    } catch (e) {
+      setHint(`Couldn't send: ${(e as Error).message}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={styles.root} edges={embedded ? [] : ['top']}>
       <View style={styles.header}>
         <View style={styles.flex}>
           <Heading variant="screenTitle">Shopping list</Heading>
@@ -618,11 +651,13 @@ export default function ShoppingList() {
             {refining ? ' · estimating…' : ''}
           </Text>
         </View>
-        <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text variant="bodyStrong" color="textMuted">
-            Done
-          </Text>
-        </Pressable>
+        {embedded ? null : (
+          <Pressable onPress={() => router.back()} hitSlop={8}>
+            <Text variant="bodyStrong" color="textMuted">
+              Done
+            </Text>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
@@ -1189,10 +1224,17 @@ export default function ShoppingList() {
             />
             <Button
               label={copied ? 'Copied — Instacart opening' : 'Copy → Instacart'}
-              glyph="next"
+              variant="secondary"
               flex
               disabled={buyLines.length === 0}
               onPress={copyAndOpen}
+            />
+            <Button
+              label={sending ? 'Sending…' : 'Send to cart'}
+              glyph="next"
+              flex
+              disabled={sending || wegmansCount === 0}
+              onPress={sendCart}
             />
           </>
         )}

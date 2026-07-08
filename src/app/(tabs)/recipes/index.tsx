@@ -12,16 +12,19 @@ import {
   RecipeCard,
   SegmentedControl,
   Pill,
+  CookPlanCard,
+  Fab,
 } from '@/components';
 import { colors } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
+import { useCookPlanStore } from '@/store/cookPlans';
 import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
 import { isModified } from '@/lib/recipe';
 import { canMakeNow, recipeCoverage } from '@/lib/pantry';
 import type { PipelineIdea, Recipe } from '@/types';
 
-const FILTERS = ['All', 'Have it', 'Weeknight', 'Baking', 'Project', 'Modified'] as const;
+const FILTERS = ['All', 'Cook plans', 'Have it', 'Weeknight', 'Baking', 'Project', 'Modified'] as const;
 type Filter = (typeof FILTERS)[number];
 
 const TAG_FILTER: Partial<Record<Filter, string>> = {
@@ -35,6 +38,7 @@ type Segment = 'favorites' | 'totry' | 'all';
 export default function RecipesLibrary() {
   const router = useRouter();
   const recipes = useRecipeStore((s) => s.recipes);
+  const cookPlans = useCookPlanStore((s) => s.plans);
   const pantry = usePantryStore((s) => s.items);
   const ideas = usePipelineStore((s) => s.ideas);
   const [segment, setSegment] = useState<Segment>('all');
@@ -105,6 +109,20 @@ export default function RecipesLibrary() {
     { key: 'favorites', label: 'Favorites', count: favoriteCount },
     { key: 'all', label: 'All' },
   ];
+
+  const plansMode = filter === 'Cook plans';
+  const filteredPlans = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return cookPlans
+      .filter((p) => p.status !== 'archived')
+      .filter(
+        (p) =>
+          !q ||
+          p.title.toLowerCase().includes(q) ||
+          p.spread.some((s) => s.toLowerCase().includes(q)),
+      )
+      .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
+  }, [cookPlans, query]);
 
   return (
     <View style={styles.root}>
@@ -195,51 +213,83 @@ export default function RecipesLibrary() {
               </View>
             ) : null}
 
-            {recentlyCooked.length > 0 ? (
-              <Section label="Recently cooked">
-                {recentlyCooked.map((r) => (
-                  <View key={r.id} style={styles.cardCell}>
-                    <RecipeCard
-                      recipe={r}
-                      onPress={() =>
-                        router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
-                      }
-                    />
-                  </View>
-                ))}
-              </Section>
-            ) : null}
+            {plansMode ? (
+              filteredPlans.length > 0 ? (
+                <Section label="Cook plans">
+                  {filteredPlans.map((p) => (
+                    <View key={p.id} style={styles.cardCell}>
+                      <CookPlanCard
+                        plan={p}
+                        onPress={() =>
+                          router.push({ pathname: '/cook-plan/[id]', params: { id: p.id } })
+                        }
+                      />
+                    </View>
+                  ))}
+                </Section>
+              ) : (
+                <View style={styles.empty}>
+                  <Text color="textMuted">No cook plans yet.</Text>
+                  <Text color="textFaint">Tap + to build a whole-meal production.</Text>
+                </View>
+              )
+            ) : (
+              <>
+                {recentlyCooked.length > 0 ? (
+                  <Section label="Recently cooked">
+                    {recentlyCooked.map((r) => (
+                      <View key={r.id} style={styles.cardCell}>
+                        <RecipeCard
+                          recipe={r}
+                          onPress={() =>
+                            router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
+                          }
+                        />
+                      </View>
+                    ))}
+                  </Section>
+                ) : null}
 
-            {library.length > 0 ? (
-              <Section label="Library">
-                {library.map((r) => (
-                  <View key={r.id} style={styles.cardCell}>
-                    <RecipeCard
-                      recipe={r}
-                      onPress={() =>
-                        router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
-                      }
-                    />
-                  </View>
-                ))}
-              </Section>
-            ) : null}
+                {library.length > 0 ? (
+                  <Section label="Library">
+                    {library.map((r) => (
+                      <View key={r.id} style={styles.cardCell}>
+                        <RecipeCard
+                          recipe={r}
+                          onPress={() =>
+                            router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
+                          }
+                        />
+                      </View>
+                    ))}
+                  </Section>
+                ) : null}
 
-            {shown.length === 0 ? (
-              <View style={styles.empty}>
-                <Text color="textMuted">
-                  {segment === 'favorites' ? 'No favorites yet.' : 'No recipes match.'}
-                </Text>
-                <Text color="textFaint">
-                  {segment === 'favorites'
-                    ? 'Star a recipe to pin it here.'
-                    : 'Tap + to capture one.'}
-                </Text>
-              </View>
-            ) : null}
+                {shown.length === 0 ? (
+                  <View style={styles.empty}>
+                    <Text color="textMuted">
+                      {segment === 'favorites' ? 'No favorites yet.' : 'No recipes match.'}
+                    </Text>
+                    <Text color="textFaint">
+                      {segment === 'favorites'
+                        ? 'Star a recipe to pin it here.'
+                        : 'Tap + to capture one.'}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
           </>
         )}
       </Screen>
+
+      {/* Phase A moved capture to a single global FAB (GlobalCapture, over every
+          tab), so no per-screen capture button in normal mode. But that FAB has
+          no cook-plan option — so when the Cook plans filter is active, surface
+          main's Fab as the one entry point to build a whole-meal production. */}
+      {plansMode ? (
+        <Fab onPress={() => router.push('/cook-plan-capture')} />
+      ) : null}
     </View>
   );
 }

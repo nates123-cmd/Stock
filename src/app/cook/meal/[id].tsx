@@ -18,7 +18,7 @@ import { colors, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { dayTag } from '@/lib/week';
-import { combineMeal, type CombineDish, type CombinedPlan } from '@/lib/cookPlan';
+import { combineMeal, type CombineDish, type CombinedPlan } from '@/lib/combineMeal';
 import type { Recipe } from '@/types';
 
 /**

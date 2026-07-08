@@ -157,6 +157,93 @@ export type PipelineIdea = {
   promotedRecipeId?: string;
 };
 
+/* ---------------------------------------------------------------------------
+ * Cook Plan — a multi-component, multi-phase production (a whole meal / event),
+ * one level above a Recipe. A Recipe is one dish; a CookPlan bundles several
+ * component recipes plus a phased, time-anchored timeline you run live during
+ * the cook. Rare-but-worthy feature: the big Friday fried-chicken spread.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * A live-cook timer attached to a plan step.
+ *  - `duration`: a fixed countdown (fry 12 min) — seconds.
+ *  - `clock`: a long window with a min/max (brine 8-12h) — alarm fires at min,
+ *    window stays open until max. Seconds.
+ *  - `temp`: a target temperature (oil 375°F) — display only, no countdown.
+ */
+export type PlanTimer = {
+  kind: 'duration' | 'clock' | 'temp';
+  label: string;
+  /** duration kind: the single countdown length, in seconds */
+  seconds?: number;
+  /** clock kind: alarm-at, in seconds */
+  minSeconds?: number;
+  /** clock kind: window-closes-at, in seconds */
+  maxSeconds?: number;
+  /** temp kind: target in Fahrenheit (a range collapses to its low end) */
+  tempF?: number;
+  /** temp kind: high end when the source gave a range (e.g. 325-335) */
+  tempHighF?: number;
+};
+
+export type PlanStep = {
+  id: string;
+  ordinal: number;
+  text: string;
+  /** optional link back to the component this step builds */
+  componentId?: string;
+  timer?: PlanTimer;
+};
+
+/**
+ * A timeline phase ("Tonight", "Tomorrow AM", "Cook night"). When the plan is
+ * scheduled, `offsetFromServe` lets the app back-compute a wall-clock window
+ * from the serve time (brine = serve − 8-12h).
+ */
+export type PlanPhase = {
+  id: string;
+  label: string;
+  /** ordered work for this phase */
+  steps: PlanStep[];
+  /** hours-before-serve window for scheduling; omitted = unscheduled/relative */
+  offsetFromServe?: { minHours: number; maxHours: number };
+};
+
+/**
+ * A sub-recipe within a plan (the ginger-scallion oil, the dry brine, the
+ * slaw dressing…). Ingredients reuse the Recipe `Ingredient` shape so a future
+ * shopping rollup / baker's-% scaling can treat them uniformly.
+ */
+export type PlanComponent = {
+  id: string;
+  name: string;
+  ingredients: Ingredient[];
+  notes?: string;
+  /** baker's-% anchor (e.g. slaw anchored on rice vinegar = 100%) */
+  bakersPercent?: { anchorIngredientId: string };
+  /** optional link to a standalone Recipe if this component was promoted */
+  recipeId?: string;
+};
+
+export type CookPlan = {
+  id: string;
+  title: string;
+  status: 'draft' | 'active' | 'archived';
+  /** the menu — what lands on the table ("fried chicken, rice, broth, …") */
+  spread: string[];
+  components: PlanComponent[];
+  phases: PlanPhase[];
+  myNotes?: string;
+  /** set when the plan is scheduled; drives the Plan-tab shadow + phase windows */
+  serveAt?: Date;
+  createdAt: Date;
+  modifiedAt: Date;
+  /** how many times this whole spread has been run */
+  cookCount: number;
+  /** provenance of how it was created */
+  origin?: 'paste' | 'manual';
+};
+
 export type PantryLocation = 'pantry' | 'fridge' | 'freezer';
 
 /** Running-low signal — spec §10. Defaults to 'fine'. */

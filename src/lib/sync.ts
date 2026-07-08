@@ -22,10 +22,11 @@ import { usePlanStore } from '@/store/plan';
 import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
 import { useCookStore } from '@/store/cooks';
+import { useCookPlanStore } from '@/store/cookPlans';
 import { useHaveStore, type HaveRecord } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
-import { reviveRecipeDates } from './db/repositories';
-import type { Cook, Meal, PantryItem, PipelineIdea } from '@/types';
+import { reviveRecipeDates, reviveCookPlanDates } from './db/repositories';
+import type { Cook, CookPlan, Meal, PantryItem, PipelineIdea } from '@/types';
 
 type CloudTable =
   | 'recipes'
@@ -33,6 +34,7 @@ type CloudTable =
   | 'pantry_items'
   | 'pipeline_ideas'
   | 'cooks'
+  | 'cook_plans'
   | 'have_records'
   | 'extras';
 
@@ -217,6 +219,14 @@ const collections: Collection[] = [
     revive: (raw) => reviveCook(raw as Cook),
   },
   {
+    table: 'cook_plans',
+    read: () => useCookPlanStore.getState().plans,
+    replace: (next) =>
+      useCookPlanStore.setState({ plans: next as ReturnType<typeof useCookPlanStore.getState>['plans'] }),
+    subscribe: (l) => useCookPlanStore.subscribe(l),
+    revive: (raw) => reviveCookPlanDates(raw as CookPlan),
+  },
+  {
     table: 'have_records',
     read: readHaveRows,
     replace: (next) => replaceHaveRows(next as HaveRow[]),
@@ -247,6 +257,7 @@ const refCache: Record<CloudTable, Map<string, Item>> = {
   pantry_items: new Map(),
   pipeline_ideas: new Map(),
   cooks: new Map(),
+  cook_plans: new Map(),
   have_records: new Map(),
   extras: new Map(),
 };

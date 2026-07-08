@@ -4,6 +4,7 @@ export { SCHEMA_VERSION } from './schema';
 export {
   recipeRepo,
   cookRepo,
+  cookPlanRepo,
   planRepo,
   pantryRepo,
   pipelineRepo,

@@ -11,7 +11,8 @@
  */
 
 // Bumped to 2 for the Phase B plan meal model — the old (date, meal) UNIQUE
-// plan_entries table is replaced by plan_meals keyed on the meal id.
+// plan_entries table is replaced by plan_meals keyed on the meal id — plus the
+// v2 cook_plans table (main's multi-phase productions).
 export const SCHEMA_VERSION = 2;
 
 export const SCHEMA_STATEMENTS: string[] = [
@@ -74,6 +75,20 @@ export const SCHEMA_STATEMENTS: string[] = [
      data  TEXT NOT NULL
    );`,
   `CREATE INDEX IF NOT EXISTS idx_plan_meals_date ON plan_meals(date);`,
+
+  // Cook Plans (v2) — a multi-component, multi-phase production. Like recipes,
+  // nested data lives in the JSON blob; queryable scalars are mirrored.
+  `CREATE TABLE IF NOT EXISTS cook_plans (
+     id          TEXT PRIMARY KEY NOT NULL,
+     title       TEXT NOT NULL,
+     status      TEXT NOT NULL,
+     serve_at    TEXT,
+     cook_count  INTEGER NOT NULL DEFAULT 0,
+     created_at  TEXT NOT NULL,
+     modified_at TEXT NOT NULL,
+     data        TEXT NOT NULL
+   );`,
+  `CREATE INDEX IF NOT EXISTS idx_cook_plans_status ON cook_plans(status);`,
 
   `CREATE TABLE IF NOT EXISTS shopping_lists (
      id           TEXT PRIMARY KEY NOT NULL,

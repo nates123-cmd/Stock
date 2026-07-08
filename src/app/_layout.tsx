@@ -15,6 +15,7 @@ import { usePlanStore } from '@/store/plan';
 import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
 import { useCookStore } from '@/store/cooks';
+import { useCookPlanStore } from '@/store/cookPlans';
 import { useAuthStore } from '@/store/auth';
 import { useHaveStore } from '@/store/have';
 import { useExtrasStore } from '@/store/extras';
@@ -49,6 +50,7 @@ export default function RootLayout() {
   const hydratePantry = usePantryStore((s) => s.hydrate);
   const hydratePipeline = usePipelineStore((s) => s.hydrate);
   const hydrateCooks = useCookStore((s) => s.hydrate);
+  const hydrateCookPlans = useCookPlanStore((s) => s.hydrate);
   const hydrateAuth = useAuthStore((s) => s.hydrate);
   const hydrateHave = useHaveStore((s) => s.hydrate);
   const hydrateExtras = useExtrasStore((s) => s.hydrate);
@@ -63,6 +65,7 @@ export default function RootLayout() {
     hydratePantry();
     hydratePipeline();
     hydrateCooks();
+    hydrateCookPlans();
     hydrateAuth();
     hydrateHave();
     hydrateExtras();
@@ -73,6 +76,7 @@ export default function RootLayout() {
     hydratePantry,
     hydratePipeline,
     hydrateCooks,
+    hydrateCookPlans,
     hydrateAuth,
     hydrateHave,
     hydrateExtras,
@@ -131,6 +135,19 @@ export default function RootLayout() {
               options={{ headerShown: false, presentation: 'modal' }}
             />
             <Stack.Screen name="idea/[id]" options={{ headerShown: false }} />
+            <Stack.Screen name="cook-plan/[id]" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="cook-plan/run/[id]"
+              options={{
+                headerShown: false,
+                presentation: 'fullScreenModal',
+                gestureEnabled: false,
+              }}
+            />
+            <Stack.Screen
+              name="cook-plan-capture"
+              options={{ headerShown: false, presentation: 'modal' }}
+            />
           </Stack>
           <StatusBar style="dark" />
         </ThemeProvider>
