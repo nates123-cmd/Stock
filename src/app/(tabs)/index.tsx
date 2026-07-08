@@ -24,6 +24,8 @@ import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { useAuthStore } from '@/store/auth';
 import { useHaveStore } from '@/store/have';
+import { useShopMetaStore } from '@/store/shopMeta';
+import { isAlwaysHave, alwaysHaveKey } from '@/lib/alwaysHave';
 import type { Dish, Meal, MealType, Recipe } from '@/types';
 import { dateKey, dayLabel, isSameDay } from '@/lib/week';
 
@@ -151,15 +153,23 @@ export default function PlanScreen() {
     [plannedRecipes],
   );
 
-  // Pantry coverage proxy: planned canonicals already covered by "always have".
+  // Pantry coverage proxy: planned canonicals the shopping list will drop —
+  // always-have (canonical isAlwaysHave, same predicate the list uses) plus
+  // items suppressed off prior plan → shopping runs (note 7a). Keeps this
+  // count honest with what Shop actually shows.
   const alwaysHaveMap = useHaveStore((s) => s.alwaysHave);
+  const suppressedMap = useShopMetaStore((s) => s.suppressed);
   const pantryCovers = useMemo(() => {
     let n = 0;
     for (const name of ingredientNames) {
-      if (alwaysHaveMap[name.toLowerCase().trim()]) n += 1;
+      if (
+        isAlwaysHave(name, alwaysHaveMap) ||
+        suppressedMap[alwaysHaveKey(name)] === true
+      )
+        n += 1;
     }
     return n;
-  }, [ingredientNames, alwaysHaveMap]);
+  }, [ingredientNames, alwaysHaveMap, suppressedMap]);
   const toShop = Math.max(0, ingredientNames.size - pantryCovers);
 
   const openPicker = (date: Date, type?: MealType | null) => {

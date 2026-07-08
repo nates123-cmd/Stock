@@ -26,8 +26,19 @@ import { useRecipeStore } from '@/store/recipes';
 import { useHaveStore } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
 import { usePantryStore } from '@/store/pantry';
+import { useShopMetaStore } from '@/store/shopMeta';
 import type { PantryStatus } from '@/types';
-import { matchKey, baseIngredient } from '@/lib/pantry';
+import { matchKey } from '@/lib/pantry';
+import { alwaysHaveKey, isAlwaysHave } from '@/lib/alwaysHave';
+import {
+  STORES,
+  storeLabel,
+  remindersDeepLink,
+  REMINDERS_SHORTCUT,
+  type ShopMeta,
+  type StoreId,
+} from '@/lib/shopStores';
+import { reviewGroups } from '@/lib/cartCombine';
 import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
 import {
   consolidateSmart,
@@ -104,6 +115,15 @@ export default function ShoppingList() {
   const unmarkHave = useHaveStore((s) => s.unmark);
   const setAlways = useHaveStore((s) => s.setAlways);
 
+  // Phase D: per-name suppression (deleted plan-derived items stay gone across
+  // regen — note 7a) + optional store tag / detail (note 3).
+  const suppressedMap = useShopMetaStore((s) => s.suppressed);
+  const suppress = useShopMetaStore((s) => s.suppress);
+  const shopMetaMap = useShopMetaStore((s) => s.meta);
+  const setShopMeta = useShopMetaStore((s) => s.setMeta);
+  const isSuppressed = (name: string) => suppressedMap[alwaysHaveKey(name)] === true;
+  const metaFor = (name: string): ShopMeta => shopMetaMap[alwaysHaveKey(name)] ?? {};
+
   // Pantry-status lookup (spec §5 pantry-status integration). Builds a map
   // keyed on the canonical-match key so a row's name matches even when the
   // exact string differs ("kosher salt" vs "salt").
@@ -143,11 +163,13 @@ export default function ShoppingList() {
   const [editing, setEditing] = useState(false);
   const [addName, setAddName] = useState('');
   const [addQty, setAddQty] = useState('');
-  /** {name, isExtraId?} for the long-press action sheet. Null = closed. */
+  /** {name, isExtraId?} for the long-press detail sheet. Null = closed. */
   const [menu, setMenu] = useState<{
     name: string;
     extraId: string | null;
   } | null>(null);
+  /** Shop view grouping: by shelf category (default) or by store tag (note 3). */
+  const [groupByStore, setGroupByStore] = useState(false);
 
   // First-run polarity hint (spec §5). Dismissed automatically the first time
   // the user toggles any row — the action teaches itself once performed.
@@ -219,71 +241,59 @@ export default function ShoppingList() {
     };
   }, [weekRecipes]);
 
-  // Smart-combine review (spec §8 follow-on): when the Claude pass fuzzily
-  // merges DIFFERENT-named ingredients into one buy line (cherry + grape
-  // tomatoes), surface them for one-tap approval. Kept-combined by default;
-  // "keep separate" splits a line back into its sources.
-  const mergeProposals = useMemo(
-    () =>
-      items.filter(
-        (i) =>
-          i.confidence === 'estimated' &&
-          new Set(i.sources.map((s) => (s.text || '').toLowerCase().trim())).size > 1,
-      ),
-    [items],
-  );
-  const [mergeReviewed, setMergeReviewed] = useState(false);
-  const [mergeOpen, setMergeOpen] = useState(false);
-  const [keepSeparate, setKeepSeparate] = useState<Set<string>>(() => new Set());
+  // Cart-combine review (note 5) — DISTINCT from the Cook combine timeline.
+  // The consolidation groups the SAME ingredient from several recipes into one
+  // buy line; rather than trust that silently, surface each multi-recipe group
+  // for a one-at-a-time decision: Combine (default) / Keep separate / Edit qty.
+  const combineGroups = useMemo(() => reviewGroups(items), [items]);
+  const [combineReviewed, setCombineReviewed] = useState(false);
+  const [combineOpen, setCombineOpen] = useState(false);
+  /** per-group decision, persisted for the session: absent/'combine' = merged. */
+  const [combineDecisions, setCombineDecisions] = useState<
+    Record<string, 'combine' | 'separate'>
+  >({});
   useEffect(() => {
-    if (!refining && !mergeReviewed && mergeProposals.length > 0) setMergeOpen(true);
-  }, [refining, mergeReviewed, mergeProposals.length]);
-  const toggleKeepSeparate = (name: string) =>
-    setKeepSeparate((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  const applyMergeReview = () => {
-    if (keepSeparate.size > 0) {
+    if (!refining && !combineReviewed && combineGroups.length > 0) setCombineOpen(true);
+  }, [refining, combineReviewed, combineGroups.length]);
+  const decideCombine = (name: string, choice: 'combine' | 'separate') =>
+    setCombineDecisions((prev) => ({ ...prev, [name]: choice }));
+  const applyCombineReview = () => {
+    const separate = Object.entries(combineDecisions)
+      .filter(([, c]) => c === 'separate')
+      .map(([n]) => n);
+    if (separate.length > 0) {
+      const set = new Set(separate);
       setItems((prev) =>
-        prev.flatMap((line) =>
-          keepSeparate.has(line.name) ? splitMerged(line) : [line],
-        ),
+        prev.flatMap((line) => (set.has(line.name) ? splitMerged(line) : [line])),
       );
     }
-    setMergeReviewed(true);
-    setMergeOpen(false);
+    setCombineReviewed(true);
+    setCombineOpen(false);
   };
 
+  // Suppressed (deleted plan-derived) items are filtered here — the single
+  // consolidation funnel every path reads from — so a delete survives regen
+  // (note 7a). Session `dismissed` still handles same-run pantry-restock drops.
   const visibleItems = useMemo(
-    () => items.filter((i) => !dismissed.has(`item:${i.name}`)),
-    [items, dismissed],
-  );
-
-  /** Base ingredients the user has pinned as "always have" (head-noun of each
-   *  pinned name), so one "salt" pin covers every salt variant. */
-  const alwaysHaveBases = useMemo(
-    () => new Set(Object.keys(alwaysHaveMap).map(baseIngredient)),
-    [alwaysHaveMap],
+    () =>
+      items.filter((i) => !dismissed.has(`item:${i.name}`) && !isSuppressed(i.name)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, dismissed, suppressedMap],
   );
 
   /** Should this canonical name appear in the Already-have bucket? True if
    *  the user marked it this run OR they've pinned it (or its base staple) as
-   *  "always have". Pantry-status 'low'/'out' overrides everything else — a
-   *  staple you flagged running-low or out is auto-promoted to the buy list
-   *  even if it's an always-have, because "always have" stops being true the
-   *  moment you flag it (spec §5 × §10). 'out' also locks the have toggle;
-   *  'low' stays togglable so you can drop it if you've got enough. */
+   *  "always have" — via the ONE canonical isAlwaysHave predicate, so "Salt" /
+   *  "salt" / "kosher salt" all resolve to a single pinned staple across every
+   *  path. Pantry-status 'low'/'out' overrides everything else — a staple you
+   *  flagged running-low or out is auto-promoted to the buy list even if it's
+   *  an always-have, because "always have" stops being true the moment you
+   *  flag it (spec §5 × §10). 'out' also locks the have toggle; 'low' stays
+   *  togglable so you can drop it if you've got enough. */
   const inHave = (name: string) => {
     const ps = statusFor(name);
     if (ps === 'out' || ps === 'low') return false;
-    return (
-      isMarked(haveByName, name) ||
-      alwaysHaveMap[name.toLowerCase().trim()] === true ||
-      alwaysHaveBases.has(baseIngredient(name))
-    );
+    return isMarked(haveByName, name) || isAlwaysHave(name, alwaysHaveMap);
   };
 
   /** Pantry restock rows: items you've flagged low/out in the pantry that no
@@ -350,6 +360,43 @@ export default function ShoppingList() {
 
   const text = useMemo(() => instacartText(buyLines), [buyLines]);
 
+  // Fulfillment routing (note 4). Store tag = channel: Wegmans → Instacart /
+  // Beelink (external, not wired from the app — items just group under
+  // Wegmans); everything NOT tagged Wegmans (Stop One + Costco + unassigned)
+  // → the Apple Reminders list "Shared Groceries" via the installed Shortcut.
+  const displayLabel = (l: ShoppingLine): string => {
+    const m = metaFor(l.name);
+    const qty = m.qty || (l.buy && l.buy !== 'as needed' ? l.buy : '');
+    const base = l.name.charAt(0).toUpperCase() + l.name.slice(1);
+    return qty ? `${base}, ${qty}` : base;
+  };
+  const wegmansCount = useMemo(
+    () => buyLines.filter((l) => metaFor(l.name).store === 'wegmans').length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [buyLines, shopMetaMap],
+  );
+  const remainingLines = useMemo(
+    () => buyLines.filter((l) => metaFor(l.name).store !== 'wegmans'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [buyLines, shopMetaMap],
+  );
+  const pushToReminders = async () => {
+    const url = remindersDeepLink(remainingLines.map(displayLabel));
+    if (!url) {
+      setHint('Nothing to send to Reminders.');
+      return;
+    }
+    try {
+      if (Platform.OS === 'web') window.location.href = url;
+      else await Linking.openURL(url);
+      setHint(
+        `Sent ${remainingLines.length} to the "${REMINDERS_SHORTCUT}" Shortcut → Reminders "Shared Groceries."`,
+      );
+    } catch {
+      setHint(`Install the "${REMINDERS_SHORTCUT}" Shortcut first — see SHORTCUTS.md.`);
+    }
+  };
+
   /** Always-have names NOT already represented by a row in the week's plan
    *  or extras. We surface these as ghost rows in the Already-have bucket
    *  so the user can verify the pinned set and remove pins from items the
@@ -393,6 +440,40 @@ export default function ShoppingList() {
   /** Dismiss a consolidated row for this run (session-local). */
   const dismissItem = (name: string) =>
     setDismissed((prev) => new Set(prev).add(`item:${name}`));
+
+  /** Delete a plan-derived row: session-hide it AND suppress it so it stays
+   *  gone across future plan → shopping regen (note 7a). */
+  const deleteItem = (name: string) => {
+    suppress(name);
+    dismissItem(name);
+  };
+
+  /** Mark a name always-have from the swipe action — never returns to any
+   *  shopping list (note 7). Writes the ONE always-have source (#1). */
+  const alwaysHaveIt = (name: string) => {
+    setAlways(name, true);
+    dismissItem(name);
+  };
+
+  /** Bulk "clear checked": remove every row the user checked off (marked have)
+   *  this run. Extras go for good; plan-derived rows suppress (note 7). */
+  const checkedNames = useMemo(() => {
+    const out: { name: string; extraId: string | null }[] = [];
+    for (const i of visibleItems)
+      if (isMarked(haveByName, i.name) && !isAlwaysHave(i.name, alwaysHaveMap))
+        out.push({ name: i.name, extraId: null });
+    for (const e of extras)
+      if (isMarked(haveByName, e.canonicalName) && !isAlwaysHave(e.canonicalName, alwaysHaveMap))
+        out.push({ name: e.canonicalName, extraId: e.id });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems, extras, haveByName, alwaysHaveMap]);
+  const clearChecked = () => {
+    for (const c of checkedNames) {
+      if (c.extraId) removeExtra(c.extraId);
+      else deleteItem(c.name);
+    }
+  };
 
   /** Inline-edit a recipe-derived line's quantity (session-local override —
    *  `buy` is already a free-form string, so no reparse needed). */
@@ -481,6 +562,51 @@ export default function ShoppingList() {
     }
   };
 
+  const extraIdFor = (name: string): string | null =>
+    extras.find((e) => e.canonicalName === name)?.id ?? null;
+
+  /** Unified buy-row renderer (used by the by-store view). Resolves whether a
+   *  line is an extra so delete routes correctly (removeExtra vs suppress). */
+  const renderBuyRow = (line: ShoppingLine) => {
+    const ps = statusFor(line.name);
+    const extraId = extraIdFor(line.name);
+    const meta = metaFor(line.name);
+    return (
+      <ShoppingRow
+        key={`buy:${line.name}`}
+        name={line.name}
+        qty={line.buy}
+        math={line.math ?? null}
+        sources={line.sources}
+        expanded={expanded.has(line.name)}
+        storeName={meta.store ? storeLabel(meta.store) : null}
+        onTap={() => toggleExpand(line.name)}
+        onToggleHave={() => {
+          if (ps === 'out') return;
+          toggleHave(line.name);
+        }}
+        onDelete={() => (extraId ? removeExtra(extraId) : deleteItem(line.name))}
+        onAlwaysHave={() => alwaysHaveIt(line.name)}
+        onLongPress={() => setMenu({ name: line.name, extraId })}
+        marked={false}
+        always={false}
+        likely={isLikelyHave(haveByName, line.name)}
+        pantryStatus={ps}
+      />
+    );
+  };
+
+  // By-store buckets (note 3): Wegmans · Costco · Stop One · Unassigned.
+  const storeBuckets = [
+    ...STORES.map((s) => ({ id: s.id as StoreId | null, label: s.label })),
+    { id: null as StoreId | null, label: 'Unassigned' },
+  ]
+    .map((b) => ({
+      ...b,
+      lines: buyLines.filter((l) => (metaFor(l.name).store ?? null) === b.id),
+    }))
+    .filter((b) => b.lines.length > 0);
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
@@ -548,7 +674,7 @@ export default function ShoppingList() {
                       style={[styles.editInput, styles.editQtyInput]}
                     />
                     <Pressable
-                      onPress={() => dismissItem(item.name)}
+                      onPress={() => deleteItem(item.name)}
                       hitSlop={8}
                       style={styles.editDelete}
                       accessibilityLabel={`Remove ${item.name}`}>
@@ -619,12 +745,57 @@ export default function ShoppingList() {
           </Pressable>
         ) : null}
 
+        {visibleItems.length > 0 || extras.length > 0 ? (
+          <View style={styles.controlsRow}>
+            <View style={styles.groupToggle}>
+              <Pressable
+                onPress={() => setGroupByStore(false)}
+                style={[styles.groupBtn, !groupByStore && styles.groupBtnOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !groupByStore }}>
+                <Text
+                  variant="sectionLabel"
+                  color={!groupByStore ? 'bg' : 'textMuted'}>
+                  By category
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setGroupByStore(true)}
+                style={[styles.groupBtn, groupByStore && styles.groupBtnOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: groupByStore }}>
+                <Text
+                  variant="sectionLabel"
+                  color={groupByStore ? 'bg' : 'textMuted'}>
+                  By store
+                </Text>
+              </Pressable>
+            </View>
+            {checkedNames.length > 0 ? (
+              <Pressable onPress={clearChecked} hitSlop={6} accessibilityRole="button">
+                <Text variant="sectionLabel" color="accent">
+                  Clear checked · {checkedNames.length}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         <View style={wide ? styles.twoCol : undefined}>
           <View style={wide ? styles.colLeft : undefined}>
         {visibleItems.length === 0 && extras.length === 0 ? (
           <Text color="textMuted" style={styles.empty}>
             Nothing planned for this week yet. Pin recipes on the Plan tab.
           </Text>
+        ) : groupByStore ? (
+          storeBuckets.map((bucket) => (
+            <View key={bucket.label} style={styles.section}>
+              <SectionLabel color={bucket.id ? 'text' : 'textMuted'}>
+                {bucket.label} · {bucket.lines.length}
+              </SectionLabel>
+              {bucket.lines.map((line) => renderBuyRow(line))}
+            </View>
+          ))
         ) : (
           CATEGORY_ORDER.filter((c) =>
             visibleItems.some((i) => i.category === c && !inHave(i.name)),
@@ -635,6 +806,7 @@ export default function ShoppingList() {
                 .filter((i) => i.category === cat && !inHave(i.name))
                 .map((item) => {
                   const ps = statusFor(item.name);
+                  const meta = metaFor(item.name);
                   return (
                     <ShoppingRow
                       key={item.name}
@@ -643,13 +815,15 @@ export default function ShoppingList() {
                       math={item.math ?? null}
                       sources={item.sources}
                       expanded={expanded.has(item.name)}
+                      storeName={meta.store ? storeLabel(meta.store) : null}
                       onTap={() => toggleExpand(item.name)}
                       onToggleHave={() => {
                         // Spec §5: 'out' suppresses the have toggle.
                         if (ps === 'out') return;
                         toggleHave(item.name);
                       }}
-                      onDelete={() => dismissItem(item.name)}
+                      onDelete={() => deleteItem(item.name)}
+                      onAlwaysHave={() => alwaysHaveIt(item.name)}
                       onLongPress={() => setMenu({ name: item.name, extraId: null })}
                       marked={false}
                       always={false}
@@ -662,7 +836,7 @@ export default function ShoppingList() {
           ))
         )}
 
-        {extras.some((e) => !inHave(e.canonicalName)) ? (
+        {!groupByStore && extras.some((e) => !inHave(e.canonicalName)) ? (
           <View style={styles.section}>
             <SectionLabel color="textMuted">Extras</SectionLabel>
             <Text color="textFaint" style={styles.extrasCaption}>
@@ -679,6 +853,7 @@ export default function ShoppingList() {
               )
               .map((ex) => {
                 const ps = statusFor(ex.canonicalName);
+                const meta = metaFor(ex.canonicalName);
                 return (
                   <ShoppingRow
                     key={ex.id}
@@ -686,6 +861,7 @@ export default function ShoppingList() {
                     qty={extraQty(ex)}
                     math={null}
                     origin={ex.originLabel}
+                    storeName={meta.store ? storeLabel(meta.store) : null}
                     onTap={() => {
                       /* extras are flat — nothing to expand */
                     }}
@@ -694,6 +870,7 @@ export default function ShoppingList() {
                       toggleHave(ex.canonicalName);
                     }}
                     onDelete={() => removeExtra(ex.id)}
+                    onAlwaysHave={() => alwaysHaveIt(ex.canonicalName)}
                     onLongPress={() =>
                       setMenu({ name: ex.canonicalName, extraId: ex.id })
                     }
@@ -707,7 +884,7 @@ export default function ShoppingList() {
           </View>
         ) : null}
 
-        {pantryRestockLines.some((p) => !dismissed.has(`item:${p.name}`)) ? (
+        {!groupByStore && pantryRestockLines.some((p) => !dismissed.has(`item:${p.name}`)) ? (
           <View style={styles.section}>
             <SectionLabel color="accent">Running low · restock</SectionLabel>
             <Text color="textFaint" style={styles.extrasCaption}>
@@ -849,6 +1026,23 @@ export default function ShoppingList() {
         </Card>
           </View>
         </View>
+
+        {buyLines.length > 0 ? (
+          <Card tone="bg2" style={styles.routeCard}>
+            <SectionLabel color="textMuted">Fulfillment</SectionLabel>
+            <Text color="textFaint" style={styles.routeCaption}>
+              Wegmans-tagged items go via Instacart. Everything else (Stop One +
+              unassigned) goes to the Apple Reminders list “Shared Groceries.”
+            </Text>
+            <Button
+              label={`Add remaining to Reminders · ${remainingLines.length}`}
+              glyph="next"
+              variant="secondary"
+              disabled={remainingLines.length === 0}
+              onPress={pushToReminders}
+            />
+          </Card>
+        ) : null}
           </>
         )}
 
@@ -875,18 +1069,20 @@ export default function ShoppingList() {
 
       <Overlay visible={menu !== null} onClose={() => setMenu(null)}>
         {menu ? (
-          <RowMenu
+          <RowDetailSheet
             name={menu.name}
             extraId={menu.extraId}
-            isAlways={alwaysHaveMap[menu.name.toLowerCase().trim()] === true}
+            meta={metaFor(menu.name)}
+            isAlways={isAlwaysHave(menu.name, alwaysHaveMap)}
+            onSetStore={(store) => setShopMeta(menu.name, { store })}
+            onSetField={(patch) => setShopMeta(menu.name, patch)}
             onToggleAlways={() => {
-              const k = menu.name.toLowerCase().trim();
-              setAlways(menu.name, !(alwaysHaveMap[k] === true));
+              setAlways(menu.name, !isAlwaysHave(menu.name, alwaysHaveMap));
               setMenu(null);
             }}
             onDelete={() => {
               if (menu.extraId) removeExtra(menu.extraId);
-              else dismissItem(menu.name);
+              else deleteItem(menu.name);
               setMenu(null);
             }}
             onClose={() => setMenu(null)}
@@ -894,57 +1090,88 @@ export default function ShoppingList() {
         ) : null}
       </Overlay>
 
-      <Overlay visible={mergeOpen} onClose={applyMergeReview}>
-        <View style={{ gap: 12, maxHeight: 460 }}>
-          <Heading variant="recipeTitle">Combine these?</Heading>
+      <Overlay visible={combineOpen} onClose={applyCombineReview}>
+        <View style={styles.combineSheet}>
+          <Heading variant="recipeTitle">Combine duplicates?</Heading>
           <Text color="textMuted">
-            We merged a few similar items. Uncheck any you'd rather buy separately.
+            The same item showed up in more than one recipe. Combine, or keep
+            them separate.
           </Text>
-          <ScrollView style={{ maxHeight: 300 }}>
-            {mergeProposals.map((line) => {
-              const combined = !keepSeparate.has(line.name);
+          <ScrollView style={styles.combineScroll}>
+            {combineGroups.map((g) => {
+              const choice = combineDecisions[g.name] ?? 'combine';
               return (
-                <Pressable
-                  key={line.name}
-                  onPress={() => toggleKeepSeparate(line.name)}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 12,
-                    paddingVertical: 10,
-                  }}>
-                  <View
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 6,
-                      borderWidth: 1.5,
-                      borderColor: combined ? colors.accent : colors.textFaint,
-                      backgroundColor: combined ? colors.accent : 'transparent',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}>
-                    {combined ? (
-                      <Text style={{ color: colors.bg, fontWeight: '700', fontSize: 13 }}>
-                        ✓
+                <View key={g.name} style={styles.combineCard}>
+                  <Text variant="bodyStrong" numberOfLines={1}>
+                    {g.name}
+                  </Text>
+                  <Text color="textFaint" style={styles.combineSources} numberOfLines={3}>
+                    {g.perSource.join(' · ')}
+                  </Text>
+                  <Text color={g.convertible ? 'ok' : 'warn'} style={styles.combineSuggest}>
+                    {choice === 'separate'
+                      ? 'Keeping separate'
+                      : `→ Combine to ${g.suggestion}`}
+                    {!g.convertible && choice !== 'separate' ? ' (mixed units)' : ''}
+                  </Text>
+                  <View style={styles.combineActions}>
+                    <Pressable
+                      onPress={() => decideCombine(g.name, 'combine')}
+                      style={[
+                        styles.combineBtn,
+                        choice === 'combine' && styles.combineBtnOn,
+                      ]}
+                      accessibilityRole="button">
+                      <Text
+                        variant="sectionLabel"
+                        color={choice === 'combine' ? 'bg' : 'textMuted'}>
+                        Combine
                       </Text>
-                    ) : null}
+                    </Pressable>
+                    <Pressable
+                      onPress={() => decideCombine(g.name, 'separate')}
+                      style={[
+                        styles.combineBtn,
+                        choice === 'separate' && styles.combineBtnOn,
+                      ]}
+                      accessibilityRole="button">
+                      <Text
+                        variant="sectionLabel"
+                        color={choice === 'separate' ? 'bg' : 'textMuted'}>
+                        Keep separate
+                      </Text>
+                    </Pressable>
+                    <TextInput
+                      defaultValue={g.suggestion}
+                      onEndEditing={(e) => {
+                        const t = e.nativeEvent.text.trim();
+                        if (t) {
+                          editItemQty(g.name, t);
+                          decideCombine(g.name, 'combine');
+                        }
+                      }}
+                      placeholder="Edit qty"
+                      placeholderTextColor={colors.textFaint}
+                      style={[styles.editInput, styles.combineQty]}
+                      accessibilityLabel={`Edit combined quantity for ${g.name}`}
+                    />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text numberOfLines={1}>{line.buy}</Text>
-                    <Text color="textMuted" variant="sectionLabel" numberOfLines={2}>
-                      {line.math}
-                    </Text>
-                  </View>
-                </Pressable>
+                </View>
               );
             })}
           </ScrollView>
-          <Button label="Looks good" glyph="next" flex onPress={applyMergeReview} />
+          <Button label="Done" glyph="done" flex onPress={applyCombineReview} />
         </View>
       </Overlay>
 
-      <BottomActionBar>
+      <BottomActionBar
+        meta={
+          wegmansCount > 0 ? (
+            <Text color="textFaint">
+              {wegmansCount} tagged Wegmans — order via Instacart
+            </Text>
+          ) : undefined
+        }>
         {editing ? (
           <Button
             label="Confirm"
@@ -990,9 +1217,13 @@ type RowProps = {
   likely: boolean;
   /** Spec §5 pantry-status: 'out' auto-promotes + locks the toggle, 'low' just renders a tag. */
   pantryStatus?: PantryStatus;
+  /** Store tag label (note 3) — shown as a chip when set. */
+  storeName?: string | null;
   onTap: () => void;
   onToggleHave: () => void;
   onDelete: () => void;
+  /** Swipe-left "Always have it" — never returns to any list (note 7). */
+  onAlwaysHave?: () => void;
   onLongPress?: () => void;
 };
 
@@ -1007,9 +1238,11 @@ function ShoppingRow({
   always,
   likely,
   pantryStatus,
+  storeName,
   onTap,
   onToggleHave,
   onDelete,
+  onAlwaysHave,
   onLongPress,
 }: RowProps) {
   // Swipe semantics — asymmetric by direction (spec §5):
@@ -1031,6 +1264,10 @@ function ShoppingRow({
   const handleDeletePress = () => {
     swipeRef.current?.close();
     onDelete();
+  };
+  const handleAlwaysPress = () => {
+    swipeRef.current?.close();
+    onAlwaysHave?.();
   };
   return (
     <ReanimatedSwipeable
@@ -1055,15 +1292,28 @@ function ShoppingRow({
         </View>
       )}
       renderRightActions={() => (
-        <GHPressable
-          onPress={handleDeletePress}
-          style={styles.deleteAction}
-          accessibilityRole="button"
-          accessibilityLabel={`Confirm delete ${name} from this run`}>
-          <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
-            Delete
-          </Text>
-        </GHPressable>
+        <View style={styles.rightActions}>
+          {onAlwaysHave ? (
+            <GHPressable
+              onPress={handleAlwaysPress}
+              style={styles.alwaysAction}
+              accessibilityRole="button"
+              accessibilityLabel={`Always have ${name} — never show it again`}>
+              <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
+                Always
+              </Text>
+            </GHPressable>
+          ) : null}
+          <GHPressable
+            onPress={handleDeletePress}
+            style={styles.deleteAction}
+            accessibilityRole="button"
+            accessibilityLabel={`Confirm delete ${name}`}>
+            <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
+              Delete
+            </Text>
+          </GHPressable>
+        </View>
       )}>
       <View style={styles.rowSurface}>
         <GHPressable
@@ -1108,6 +1358,11 @@ function ShoppingRow({
               ) : likely && !marked ? (
                 <Text color="textFaint" style={styles.likelyTag}>
                   likely already have
+                </Text>
+              ) : null}
+              {storeName ? (
+                <Text color="textMuted" style={styles.storeTag}>
+                  {storeName}
                 </Text>
               ) : null}
             </View>
@@ -1208,63 +1463,126 @@ function parseQty(raw: string): { amount: number | null; unit: string | null } {
   return { amount: null, unit: t };
 }
 
-// ─── Long-press action sheet ────────────────────────────────────────────────
+// ─── Long-press detail sheet (note 3) ────────────────────────────────────────
 
-function RowMenu({
+function RowDetailSheet({
   name,
   extraId,
+  meta,
   isAlways,
+  onSetStore,
+  onSetField,
   onToggleAlways,
   onDelete,
   onClose,
 }: {
   name: string;
   extraId: string | null;
+  meta: ShopMeta;
   isAlways: boolean;
+  onSetStore: (store: StoreId | null) => void;
+  onSetField: (patch: ShopMeta) => void;
   onToggleAlways: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
   return (
-    <View style={styles.menu}>
-      <Text variant="bodyStrong" style={styles.menuTitle}>
-        {name}
-      </Text>
-      <Text color="textFaint" style={styles.menuHint}>
-        {isAlways
-          ? 'Pinned as “always have.” Auto-routes to the Already-have bucket every run.'
-          : 'Pin items you always have at home (salt, oil, tahini, parmesan…) so they stop landing on the buy list.'}
-      </Text>
-      <Pressable
-        style={styles.menuItem}
-        onPress={onToggleAlways}
-        accessibilityRole="button">
-        <Text variant="bodyStrong" color={isAlways ? 'accent' : 'text'}>
-          {isAlways ? 'Remove “always have” pin' : 'Always have'}
+    <ScrollView style={styles.detailScroll}>
+      <View style={styles.menu}>
+        <Text variant="bodyStrong" style={styles.menuTitle}>
+          {name}
         </Text>
-        <Text color="textFaint" style={styles.menuItemHint}>
-          {isAlways
-            ? 'Will surface as a regular buy item again.'
-            : 'Will surface as already-have on every shopping list.'}
-        </Text>
-      </Pressable>
-      <Pressable
-        style={styles.menuItem}
-        onPress={onDelete}
-        accessibilityRole="button">
-        <Text variant="bodyStrong" color="accent">
-          {extraId ? 'Delete from extras' : 'Delete from this run'}
-        </Text>
-        <Text color="textFaint" style={styles.menuItemHint}>
-          {extraId
-            ? 'Permanent — removes the row from your Extras store.'
-            : 'Hides the row for this shopping run only.'}
-        </Text>
-      </Pressable>
-      <Pressable style={styles.menuCancel} onPress={onClose}>
-        <Text color="textMuted">Cancel</Text>
-      </Pressable>
-    </View>
+
+        <SectionLabel color="textMuted">Store</SectionLabel>
+        <View style={styles.storeChips}>
+          <Pressable
+            onPress={() => onSetStore(null)}
+            style={[styles.storeChip, !meta.store && styles.storeChipOn]}
+            accessibilityRole="button">
+            <Text
+              variant="sectionLabel"
+              color={!meta.store ? 'bg' : 'textMuted'}>
+              Unassigned
+            </Text>
+          </Pressable>
+          {STORES.map((s) => {
+            const on = meta.store === s.id;
+            return (
+              <Pressable
+                key={s.id}
+                onPress={() => onSetStore(s.id)}
+                style={[styles.storeChip, on && styles.storeChipOn]}
+                accessibilityRole="button">
+                <Text variant="sectionLabel" color={on ? 'bg' : 'textMuted'}>
+                  {s.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
+          Quantity
+        </SectionLabel>
+        <TextInput
+          defaultValue={meta.qty ?? ''}
+          onEndEditing={(e) => onSetField({ qty: e.nativeEvent.text })}
+          placeholder="e.g. 2 bags"
+          placeholderTextColor={colors.textFaint}
+          style={styles.editInput}
+        />
+        <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
+          Brand
+        </SectionLabel>
+        <TextInput
+          defaultValue={meta.brand ?? ''}
+          onEndEditing={(e) => onSetField({ brand: e.nativeEvent.text })}
+          placeholder="optional"
+          placeholderTextColor={colors.textFaint}
+          style={styles.editInput}
+        />
+        <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
+          Note
+        </SectionLabel>
+        <TextInput
+          defaultValue={meta.note ?? ''}
+          onEndEditing={(e) => onSetField({ note: e.nativeEvent.text })}
+          placeholder="optional"
+          placeholderTextColor={colors.textFaint}
+          style={styles.editInput}
+        />
+
+        <Pressable
+          style={styles.menuItem}
+          onPress={onToggleAlways}
+          accessibilityRole="button">
+          <Text variant="bodyStrong" color={isAlways ? 'accent' : 'text'}>
+            {isAlways ? 'Remove “always have” pin' : 'Always have'}
+          </Text>
+          <Text color="textFaint" style={styles.menuItemHint}>
+            {isAlways
+              ? 'Will surface as a regular buy item again.'
+              : 'Never lands on any shopping list again (salt, oil, tahini…).'}
+          </Text>
+        </Pressable>
+        <Pressable
+          style={styles.menuItem}
+          onPress={onDelete}
+          accessibilityRole="button">
+          <Text variant="bodyStrong" color="accent">
+            {extraId ? 'Delete from extras' : 'Delete'}
+          </Text>
+          <Text color="textFaint" style={styles.menuItemHint}>
+            {extraId
+              ? 'Permanent — removes the row from your Extras store.'
+              : 'Removes it and keeps it off future plan → shopping lists.'}
+          </Text>
+        </Pressable>
+        <Pressable style={styles.menuCancel} onPress={onClose}>
+          <Text color="textMuted">Done</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -1305,6 +1623,91 @@ const styles = StyleSheet.create({
   summary: { gap: 10 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   section: { gap: 4 },
+
+  // Phase D controls: group toggle + clear-checked.
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  groupToggle: {
+    flexDirection: 'row',
+    gap: 4,
+    backgroundColor: colors.bg2,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 3,
+  },
+  groupBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  groupBtnOn: { backgroundColor: colors.accent },
+  storeTag: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    backgroundColor: colors.bg3,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  routeCard: { gap: 8 },
+  routeCaption: { fontSize: 12, fontStyle: 'italic', lineHeight: 17 },
+
+  // Cart-combine review sheet.
+  combineSheet: { gap: 12, maxHeight: 480 },
+  combineScroll: { maxHeight: 340 },
+  combineCard: {
+    gap: 4,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  combineSources: { fontSize: 12, lineHeight: 16 },
+  combineSuggest: { fontSize: 13, fontWeight: '600', paddingTop: 2 },
+  combineActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    paddingTop: 6,
+  },
+  combineBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+  },
+  combineBtnOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  combineQty: { flexGrow: 1, minWidth: 110, paddingVertical: 6 },
+
+  // Detail sheet: store chips + fields.
+  detailScroll: { maxHeight: 460 },
+  storeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 2 },
+  storeChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+  },
+  storeChipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  detailFieldLabel: { marginTop: 8 },
+  rightActions: { flexDirection: 'row' },
+  alwaysAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.ok,
+    paddingHorizontal: 18,
+  },
   editAddRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   editGroupLabel: { marginTop: 14 },
   editRow: {

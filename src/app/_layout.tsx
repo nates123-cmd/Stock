@@ -18,6 +18,7 @@ import { useCookStore } from '@/store/cooks';
 import { useAuthStore } from '@/store/auth';
 import { useHaveStore } from '@/store/have';
 import { useExtrasStore } from '@/store/extras';
+import { useShopMetaStore } from '@/store/shopMeta';
 // Side-effect import: cloud sync wires itself to auth-state changes the
 // moment this module loads. No-op when SUPABASE_* env vars are unset.
 import '@/lib/sync';
@@ -51,6 +52,7 @@ export default function RootLayout() {
   const hydrateAuth = useAuthStore((s) => s.hydrate);
   const hydrateHave = useHaveStore((s) => s.hydrate);
   const hydrateExtras = useExtrasStore((s) => s.hydrate);
+  const hydrateShopMeta = useShopMetaStore((s) => s.hydrate);
   useEffect(() => {
     // Hydrate the local-first stores: native = SQLite (+ seed first run),
     // web = IndexedDB (+ seed first run) — Stock is a real PWA, see
@@ -64,6 +66,7 @@ export default function RootLayout() {
     hydrateAuth();
     hydrateHave();
     hydrateExtras();
+    hydrateShopMeta();
   }, [
     hydrateRecipes,
     hydratePlan,
@@ -73,6 +76,7 @@ export default function RootLayout() {
     hydrateAuth,
     hydrateHave,
     hydrateExtras,
+    hydrateShopMeta,
   ]);
 
   return (
