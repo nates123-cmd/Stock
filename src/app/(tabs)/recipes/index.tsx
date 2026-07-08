@@ -101,8 +101,8 @@ export default function RecipesLibrary() {
   );
 
   const segments = [
-    { key: 'favorites', label: 'Favorites', count: favoriteCount },
     { key: 'totry', label: 'To Try', count: toTry.length },
+    { key: 'favorites', label: 'Favorites', count: favoriteCount },
     { key: 'all', label: 'All' },
   ];
 
