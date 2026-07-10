@@ -27,6 +27,7 @@ import { useHaveStore } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
 import { usePantryStore } from '@/store/pantry';
 import { useShopMetaStore } from '@/store/shopMeta';
+import { usePushedStore } from '@/store/pushed';
 import type { PantryLocation, PantryStatus } from '@/types';
 import { matchKey } from '@/lib/pantry';
 import { alwaysHaveKey, isAlwaysHave } from '@/lib/alwaysHave';
@@ -113,6 +114,15 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const removeExtra = useExtrasStore((s) => s.remove);
   const addExtra = useExtrasStore((s) => s.add);
   const updateExtra = useExtrasStore((s) => s.update);
+  const pushedItems = usePushedStore((s) => s.items);
+  const pushToPushed = usePushedStore((s) => s.push);
+  const restorePushed = usePushedStore((s) => s.restore);
+  const hydratePushed = usePushedStore((s) => s.hydrate);
+  const prunePushed = usePushedStore((s) => s.prune);
+  useEffect(() => {
+    void hydratePushed();
+    prunePushed();
+  }, [hydratePushed, prunePushed]);
   // Subscribe to have-state so rows re-render on tap (we use the Map directly
   // for derived booleans below, but the selector keeps us reactive).
   const haveByName = useHaveStore((s) => s.byName);
@@ -160,12 +170,21 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
   /** session-only dismissals — consolidated rows can be swiped off this run. */
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-  // Skip-cart set (matchKey-keyed): items the user checked off to say "we need
-  // it, but not from this cart" — e.g. we'll grab it at Stop One while we're
-  // only pushing to Instacart right now. They STAY visible on the list (dimmed)
-  // but drop out of the cart/copy/send routes. Session-local like `dismissed`.
-  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  // Apple Reminders-style multi-select. Checking rows builds a selection
+  // (matchKey-keyed); a push action bar pops up while ≥1 is selected. Session-
+  // local — reselect each visit.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Inline row editor (Reminders-style tap-to-edit): matchKey of the row being
+  // edited, plus the working name/qty. Session rename/qty overrides for recipe
+  // + restock rows live in `overrides` (extras write straight to their store).
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editQty, setEditQty] = useState('');
+  const [overrides, setOverrides] = useState<
+    Record<string, { name: string; qty: string }>
+  >({});
+  const [pushedOpen, setPushedOpen] = useState(false);
   // Reminders-style inline add row lives at the bottom of the flat list.
   const addInputRef = useRef<TextInput>(null);
   const [haveOpen, setHaveOpen] = useState(false);
@@ -317,17 +336,24 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     return isMarked(haveByName, name) || isAlwaysHave(name, alwaysHaveMap);
   };
 
-  /** Checked off to skip the cart (matchKey-normalized so "kosher salt" /
-   *  "salt" collapse). Skipped rows stay listed but leave the cart routes. */
-  const isSkipped = (name: string) => skipped.has(matchKey(name));
-  const toggleSkip = (name: string) =>
-    setSkipped((prev) => {
+  /** Multi-select (matchKey-normalized so "kosher salt" / "salt" collapse). */
+  const isSelected = (name: string) => selected.has(matchKey(name));
+  const toggleSelect = (name: string) =>
+    setSelected((prev) => {
       const next = new Set(prev);
       const k = matchKey(name);
       if (next.has(k)) next.delete(k);
       else next.add(k);
       return next;
     });
+  const clearSelection = () => setSelected(new Set());
+
+  /** Names the user pushed to a channel in the last ~2 days — dropped from the
+   *  active list, parked in the collapsed "Pushed" section. */
+  const pushedSet = useMemo(
+    () => new Set(pushedItems.map((e) => e.key)),
+    [pushedItems],
+  );
 
   /** Pantry restock rows: items you've flagged low/out in the pantry that no
    *  planned-recipe row or extra already covers. Surfaced as their own buy
@@ -391,25 +417,17 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems, extras, haveByName, alwaysHaveMap, pantryRestockLines, dismissed]);
 
-  /** Lines actually routed to a cart/copy/send this run — buy list minus the
-   *  rows the user checked off as "skip cart" (we'll get those elsewhere). The
-   *  skipped rows still render on the list (dimmed); they just don't leave via
-   *  Instacart or Reminders. Everything cart-facing reads from THIS list. */
-  const cartLines = useMemo(
-    () => buyLines.filter((l) => !skipped.has(matchKey(l.name))),
-    [buyLines, skipped],
-  );
-
-  const text = useMemo(() => instacartText(cartLines), [cartLines]);
-
-  /** The whole list, folded flat (minimalist view). Recipe items, your manual
-   *  adds, and low/out restock staples all live in one ordered list — no
-   *  category or store sections. Items you've marked "have" (swiped right) drop
-   *  out; skipped rows stay put, dimmed. Store tags still route the cart under
-   *  the hood via each row's shop-meta; they're just not shown as groups. */
+  /** The active list, folded flat (minimalist, Reminders-style). Recipe items,
+   *  manual adds, and low/out restock staples in one ordered list — no category
+   *  or store sections. Items marked "have" (swiped right) or pushed in the last
+   *  ~2 days drop out. `name`/`qty` reflect any inline-edit override; `baseName`
+   *  is the stable key the override + selection hang off. */
   type FlatRow = {
     key: string;
+    /** Display name (post inline-edit override). */
     name: string;
+    /** Original name — stable key for overrides/selection/push. */
+    baseName: string;
     qty: string;
     extraId: string | null;
     origin?: string | null;
@@ -418,35 +436,45 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   };
   const flatRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
+    const ov = (base: string, qty: string) => {
+      const o = overrides[matchKey(base)];
+      return { name: o?.name || base, qty: o?.qty ?? qty };
+    };
+    const gone = (base: string) => inHave(base) || pushedSet.has(matchKey(base));
     for (const i of visibleItems) {
-      if (inHave(i.name)) continue;
+      if (gone(i.name)) continue;
+      const e = ov(i.name, i.buy);
       rows.push({
         key: `r:${i.name}`,
-        name: i.name,
-        qty: i.buy,
+        name: e.name,
+        baseName: i.name,
+        qty: e.qty,
         extraId: null,
         pantryStatus: statusFor(i.name),
         kind: 'recipe',
       });
     }
-    for (const e of extras) {
-      if (inHave(e.canonicalName)) continue;
+    for (const ex of extras) {
+      if (gone(ex.canonicalName)) continue;
       rows.push({
-        key: `e:${e.id}`,
-        name: e.canonicalName,
-        qty: extraQty(e),
-        extraId: e.id,
-        origin: e.originLabel,
-        pantryStatus: statusFor(e.canonicalName),
+        key: `e:${ex.id}`,
+        name: ex.canonicalName,
+        baseName: ex.canonicalName,
+        qty: extraQty(ex),
+        extraId: ex.id,
+        origin: ex.originLabel,
+        pantryStatus: statusFor(ex.canonicalName),
         kind: 'extra',
       });
     }
     for (const p of pantryRestockLines) {
-      if (dismissed.has(`item:${p.name}`)) continue;
+      if (dismissed.has(`item:${p.name}`) || pushedSet.has(matchKey(p.name))) continue;
+      const e = ov(p.name, p.buy);
       rows.push({
         key: `p:${p.name}`,
-        name: p.name,
-        qty: p.buy,
+        name: e.name,
+        baseName: p.name,
+        qty: e.qty,
         extraId: null,
         pantryStatus: statusFor(p.name),
         kind: 'restock',
@@ -454,7 +482,36 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, pantryRestockLines, dismissed, haveByName, alwaysHaveMap, statusByKey]);
+  }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey]);
+
+  /** The current selection, resolved to rows (drives the pop-up push bar). */
+  const selectedRows = useMemo(
+    () => flatRows.filter((r) => selected.has(matchKey(r.baseName))),
+    [flatRows, selected],
+  );
+  const allSelected = flatRows.length > 0 && selectedRows.length === flatRows.length;
+
+  /** A push label per row: "Name, qty" (qty omitted when 'as needed'/blank). */
+  const rowLabel = (r: FlatRow) => {
+    const q = r.qty && r.qty !== 'as needed' ? r.qty : '';
+    const base = r.name.charAt(0).toUpperCase() + r.name.slice(1);
+    return q ? `${base}, ${q}` : base;
+  };
+  const text = useMemo(
+    () =>
+      instacartText(
+        selectedRows.map((r) => ({
+          name: r.name,
+          category: categorizeIngredient(r.name),
+          buy: r.qty,
+          math: '',
+          sources: [],
+          confidence: 'summed' as const,
+        })),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedRows],
+  );
 
   // Fulfillment routing (note 4). Store tag = channel: Wegmans → Instacart /
   // Beelink (external, not wired from the app — items just group under
@@ -466,21 +523,24 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const base = l.name.charAt(0).toUpperCase() + l.name.slice(1);
     return qty ? `${base}, ${qty}` : base;
   };
-  // Push the whole list to the Apple Reminders list "Shared Groceries" via the
-  // installed Shortcut. Whole-list destination now (the old per-store split is
-  // retired), so this sends every cart line, not just the non-Wegmans ones.
+  // Push the SELECTED rows to the Apple Reminders list "Shared Groceries" via
+  // the installed Shortcut, then park them in the Pushed section and clear the
+  // selection. iOS-only (the shortcuts:// scheme no-ops on desktop).
   const pushToReminders = async () => {
-    const url = remindersDeepLink(cartLines.map(displayLabel));
+    const rows = selectedRows;
+    const url = remindersDeepLink(rows.map(rowLabel));
     if (!url) {
-      setHint('Nothing to send to Reminders.');
+      setHint('Select some items first.');
       return;
     }
     try {
       if (Platform.OS === 'web') window.location.href = url;
       else await Linking.openURL(url);
       setHint(
-        `Sent ${cartLines.length} to the "${REMINDERS_SHORTCUT}" Shortcut → Reminders "Shared Groceries."`,
+        `Sent ${rows.length} to the "${REMINDERS_SHORTCUT}" Shortcut → Reminders "Shared Groceries."`,
       );
+      pushToPushed(rows.map((r) => r.baseName), 'reminders');
+      clearSelection();
     } catch {
       setHint(`Install the "${REMINDERS_SHORTCUT}" Shortcut first — see SHORTCUTS.md.`);
     }
@@ -679,73 +739,72 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
   };
 
-  const extraIdFor = (name: string): string | null =>
-    extras.find((e) => e.canonicalName === name)?.id ?? null;
-
-  /** Unified buy-row renderer (used by the by-store view). Resolves whether a
-   *  line is an extra so delete routes correctly (removeExtra vs suppress). */
-  const renderBuyRow = (line: ShoppingLine) => {
-    const ps = statusFor(line.name);
-    const extraId = extraIdFor(line.name);
-    const meta = metaFor(line.name);
-    return (
-      <ShoppingRow
-        key={`buy:${line.name}`}
-        name={line.name}
-        qty={line.buy}
-        math={line.math ?? null}
-        sources={line.sources}
-        expanded={expanded.has(line.name)}
-        storeName={meta.store ? storeLabel(meta.store) : null}
-        onTap={() => toggleExpand(line.name)}
-        onToggleHave={() => openBuy(line.name)}
-        onCheck={() => toggleSkip(line.name)}
-        checked={isSkipped(line.name)}
-        dim={isSkipped(line.name)}
-        onDelete={() => (extraId ? removeExtra(extraId) : deleteItem(line.name))}
-        onLongPress={() => setMenu({ name: line.name, extraId })}
-        marked={false}
-        always={false}
-        likely={isLikelyHave(haveByName, line.name)}
-        pantryStatus={ps}
-      />
-    );
-  };
-
-  // By-store buckets (note 3): Wegmans · Costco · Stop One · Unassigned.
-  const storeBuckets = [
-    ...STORES.map((s) => ({ id: s.id as StoreId | null, label: s.label })),
-    { id: null as StoreId | null, label: 'Unassigned' },
-  ]
-    .map((b) => ({
-      ...b,
-      lines: buyLines.filter((l) => (metaFor(l.name).store ?? null) === b.id),
-    }))
-    .filter((b) => b.lines.length > 0);
-
-  // Push the whole list to the Wegmans cart via the Instacart auto-fill agent:
-  // queues a job the Beelink poller claims and fills the cart with. Checkout
-  // stays manual (Pickup). Requires sign-in (RLS scopes the job to the user) —
-  // if we're not signed in, fall back to Copy → Instacart (paste manually) so
-  // the button still does something useful. Everything goes to Instacart now
-  // (empty local set = all dest:'IC'); the old per-store split is retired.
+  // Push the SELECTED rows to the Wegmans cart via the Instacart auto-fill agent
+  // (queues a job the Beelink poller claims and fills the cart with; checkout
+  // stays manual, Pickup). Requires sign-in — if not signed in, fall back to
+  // Copy → Instacart (paste manually). On success the rows move to Pushed and
+  // the selection clears.
   const pushToWegmans = async () => {
-    if (cartLines.length === 0) return;
+    const rows = selectedRows;
+    if (rows.length === 0) return;
+    const markPushed = () => {
+      pushToPushed(rows.map((r) => r.baseName), 'wegmans');
+      clearSelection();
+    };
     if (!INSTACART_AVAILABLE()) {
       setHint('Not signed in — copying the list and opening Instacart to paste.');
       await copyAndOpen();
+      markPushed();
       return;
     }
     try {
       setSending(true);
       setHint('Pushing to your Wegmans cart…');
-      await sendToInstacart(toJobItems(cartLines, new Set()));
+      await sendToInstacart(
+        toJobItems(
+          rows.map((r) => ({
+            name: r.name,
+            category: categorizeIngredient(r.name),
+            buy: r.qty,
+            math: '',
+            sources: [],
+            confidence: 'summed' as const,
+          })),
+        ),
+      );
       setHint('Pushed. The cart is filling — open Instacart in ~30s, review, pick Pickup.');
+      markPushed();
     } catch (e) {
       setHint(`Couldn't push: ${(e as Error).message}`);
     } finally {
       setSending(false);
     }
+  };
+
+  /** Select every row / clear (the "Select all" toggle). */
+  const toggleSelectAll = () =>
+    setSelected(allSelected ? new Set() : new Set(flatRows.map((r) => matchKey(r.baseName))));
+
+  /** Enter inline edit for a row (Reminders-style tap-to-edit). */
+  const startEdit = (row: FlatRow) => {
+    setEditKey(row.key);
+    setEditName(row.name);
+    setEditQty(row.qty === 'as needed' ? '' : row.qty);
+  };
+  const cancelEdit = () => setEditKey(null);
+  const commitEdit = (row: FlatRow) => {
+    const name = editName.trim() || row.name;
+    const qty = editQty.trim();
+    if (row.extraId) {
+      const { amount, unit } = parseQty(qty);
+      updateExtra(row.extraId, { canonicalName: name, amount, unit });
+    } else {
+      setOverrides((prev) => ({
+        ...prev,
+        [matchKey(row.baseName)]: { name, qty },
+      }));
+    }
+    setEditKey(null);
   };
 
   return (
@@ -871,37 +930,74 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ) : (
           <>
 
-        {flatRows.map((row) => (
-          <ShoppingRow
-            key={row.key}
-            name={row.name}
-            qty={row.qty}
-            math={null}
-            origin={row.origin}
-            onTap={() => {
-              // Body tap on a low restock row drops it for the run; 'out' is
-              // locked on. Everything else edits via the long-press menu.
-              if (row.kind === 'restock' && row.pantryStatus !== 'out')
-                dismissItem(row.name);
-            }}
-            onToggleHave={() => openBuy(row.name)}
-            onCheck={() => toggleSkip(row.name)}
-            checked={isSkipped(row.name)}
-            dim={isSkipped(row.name)}
-            onDelete={() =>
-              row.extraId
-                ? removeExtra(row.extraId)
-                : row.kind === 'restock'
-                  ? dismissItem(row.name)
-                  : deleteItem(row.name)
-            }
-            onLongPress={() => setMenu({ name: row.name, extraId: row.extraId })}
-            marked={false}
-            always={false}
-            likely={false}
-            pantryStatus={row.pantryStatus}
-          />
-        ))}
+        {flatRows.length > 0 ? (
+          <View style={styles.selectAllRow}>
+            <Pressable onPress={toggleSelectAll} hitSlop={6} accessibilityRole="button">
+              <Text variant="sectionLabel" color="accent">
+                {allSelected ? 'Deselect all' : 'Select all'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {flatRows.map((row) =>
+          editKey === row.key ? (
+            // Inline edit (tap-to-edit). Enter or the check commits; tapping
+            // another row abandons the in-progress edit.
+            <View key={row.key} style={styles.editRow}>
+              <TextInput
+                value={editName}
+                onChangeText={setEditName}
+                autoFocus
+                placeholder="Item name"
+                placeholderTextColor={colors.textFaint}
+                style={[styles.editInput, styles.editName]}
+                onSubmitEditing={() => commitEdit(row)}
+                returnKeyType="done"
+              />
+              <TextInput
+                value={editQty}
+                onChangeText={setEditQty}
+                placeholder="Qty"
+                placeholderTextColor={colors.textFaint}
+                style={[styles.editInput, styles.editQtyInput]}
+                onSubmitEditing={() => commitEdit(row)}
+                returnKeyType="done"
+              />
+              <Pressable
+                onPress={() => commitEdit(row)}
+                hitSlop={8}
+                style={styles.editDelete}
+                accessibilityLabel={`Save ${row.name}`}>
+                <Glyph name="done" size={18} color="ok" />
+              </Pressable>
+            </View>
+          ) : (
+            <ShoppingRow
+              key={row.key}
+              name={row.name}
+              qty={row.qty}
+              math={null}
+              origin={row.origin}
+              onTap={() => startEdit(row)}
+              onToggleHave={() => openBuy(row.baseName)}
+              onCheck={() => toggleSelect(row.baseName)}
+              checked={isSelected(row.baseName)}
+              onDelete={() =>
+                row.extraId
+                  ? removeExtra(row.extraId)
+                  : row.kind === 'restock'
+                    ? dismissItem(row.baseName)
+                    : deleteItem(row.baseName)
+              }
+              onLongPress={() => setMenu({ name: row.baseName, extraId: row.extraId })}
+              marked={false}
+              always={false}
+              likely={false}
+              pantryStatus={row.pantryStatus}
+            />
+          ),
+        )}
 
         {/* Reminders-style inline add: tap the blank row and type. Enter keeps
             the keyboard up so you can add several in a row. */}
@@ -923,6 +1019,45 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             style={styles.addInput}
           />
         </Pressable>
+
+        {/* Pushed: what went out to Wegmans/Reminders in the last ~2 days.
+            Collapsed by default; tap a row to pull it back onto the list. */}
+        {pushedItems.length > 0 ? (
+          <View style={styles.pushedSection}>
+            <Pressable
+              onPress={() => setPushedOpen((v) => !v)}
+              style={styles.pushedHeader}
+              accessibilityRole="button"
+              accessibilityLabel={pushedOpen ? 'Collapse pushed list' : 'Expand pushed list'}>
+              <Text variant="sectionLabel" color="textFaint">
+                Pushed · {pushedItems.length}
+              </Text>
+              <Glyph
+                name="expand"
+                size={13}
+                color="textFaint"
+                style={pushedOpen ? undefined : styles.pushedCaretClosed}
+              />
+            </Pressable>
+            {pushedOpen
+              ? pushedItems.map((e) => (
+                  <Pressable
+                    key={`pushed:${e.key}`}
+                    style={styles.pushedRow}
+                    onPress={() => restorePushed(e.key)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Move ${e.name} back to the list`}>
+                    <Text color="textFaint" style={styles.pushedName} numberOfLines={1}>
+                      {e.name}
+                    </Text>
+                    <Text color="textFaint" style={styles.pushedDest}>
+                      {e.dest === 'wegmans' ? 'Wegmans' : 'Reminders'}
+                    </Text>
+                  </Pressable>
+                ))
+              : null}
+          </View>
+        ) : null}
 
           </>
         )}
@@ -1058,22 +1193,29 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         </View>
       </Overlay>
 
-      <BottomActionBar>
-        <Button
-          label="Push to Reminders"
-          variant="secondary"
-          flex
-          disabled={cartLines.length === 0}
-          onPress={pushToReminders}
-        />
-        <Button
-          label={sending ? 'Pushing…' : 'Push to Wegmans'}
-          glyph="next"
-          flex
-          disabled={sending || cartLines.length === 0}
-          onPress={pushToWegmans}
-        />
-      </BottomActionBar>
+      {/* Push bar pops up only while ≥1 row is selected (Reminders-style). */}
+      {selectedRows.length > 0 ? (
+        <BottomActionBar
+          meta={
+            <Pressable onPress={clearSelection} hitSlop={6} accessibilityRole="button">
+              <Text color="textFaint">{selectedRows.length} selected · tap to deselect</Text>
+            </Pressable>
+          }>
+          <Button
+            label={`Push to Reminders · ${selectedRows.length}`}
+            variant="secondary"
+            flex
+            onPress={pushToReminders}
+          />
+          <Button
+            label={sending ? 'Pushing…' : `Push to Wegmans · ${selectedRows.length}`}
+            glyph="next"
+            flex
+            disabled={sending}
+            onPress={pushToWegmans}
+          />
+        </BottomActionBar>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1726,6 +1868,24 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   reminderBtn: { marginTop: 20 },
+  selectAllRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 6 },
+  pushedSection: { marginTop: 24 },
+  pushedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  pushedCaretClosed: { transform: [{ rotate: '-90deg' }] },
+  pushedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 9,
+    opacity: 0.7,
+  },
+  pushedName: { flex: 1, textDecorationLine: 'line-through' },
+  pushedDest: { fontSize: 12 },
   item: {
     flexDirection: 'row',
     alignItems: 'flex-start',
