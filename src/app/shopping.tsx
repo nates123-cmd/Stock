@@ -160,7 +160,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
   /** session-only dismissals — consolidated rows can be swiped off this run. */
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  // Skip-cart set (matchKey-keyed): items the user checked off to say "we need
+  // it, but not from this cart" — e.g. we'll grab it at Stop One while we're
+  // only pushing to Instacart right now. They STAY visible on the list (dimmed)
+  // but drop out of the cart/copy/send routes. Session-local like `dismissed`.
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Reminders-style inline add row lives at the bottom of the flat list.
+  const addInputRef = useRef<TextInput>(null);
   const [haveOpen, setHaveOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [revealText, setRevealText] = useState(false);
@@ -310,6 +317,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     return isMarked(haveByName, name) || isAlwaysHave(name, alwaysHaveMap);
   };
 
+  /** Checked off to skip the cart (matchKey-normalized so "kosher salt" /
+   *  "salt" collapse). Skipped rows stay listed but leave the cart routes. */
+  const isSkipped = (name: string) => skipped.has(matchKey(name));
+  const toggleSkip = (name: string) =>
+    setSkipped((prev) => {
+      const next = new Set(prev);
+      const k = matchKey(name);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+
   /** Pantry restock rows: items you've flagged low/out in the pantry that no
    *  planned-recipe row or extra already covers. Surfaced as their own buy
    *  lines so flagging a staple low/out always lands it on the shopping list,
@@ -372,7 +391,70 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems, extras, haveByName, alwaysHaveMap, pantryRestockLines, dismissed]);
 
-  const text = useMemo(() => instacartText(buyLines), [buyLines]);
+  /** Lines actually routed to a cart/copy/send this run — buy list minus the
+   *  rows the user checked off as "skip cart" (we'll get those elsewhere). The
+   *  skipped rows still render on the list (dimmed); they just don't leave via
+   *  Instacart or Reminders. Everything cart-facing reads from THIS list. */
+  const cartLines = useMemo(
+    () => buyLines.filter((l) => !skipped.has(matchKey(l.name))),
+    [buyLines, skipped],
+  );
+
+  const text = useMemo(() => instacartText(cartLines), [cartLines]);
+
+  /** The whole list, folded flat (minimalist view). Recipe items, your manual
+   *  adds, and low/out restock staples all live in one ordered list — no
+   *  category or store sections. Items you've marked "have" (swiped right) drop
+   *  out; skipped rows stay put, dimmed. Store tags still route the cart under
+   *  the hood via each row's shop-meta; they're just not shown as groups. */
+  type FlatRow = {
+    key: string;
+    name: string;
+    qty: string;
+    extraId: string | null;
+    origin?: string | null;
+    pantryStatus?: PantryStatus;
+    kind: 'recipe' | 'extra' | 'restock';
+  };
+  const flatRows = useMemo<FlatRow[]>(() => {
+    const rows: FlatRow[] = [];
+    for (const i of visibleItems) {
+      if (inHave(i.name)) continue;
+      rows.push({
+        key: `r:${i.name}`,
+        name: i.name,
+        qty: i.buy,
+        extraId: null,
+        pantryStatus: statusFor(i.name),
+        kind: 'recipe',
+      });
+    }
+    for (const e of extras) {
+      if (inHave(e.canonicalName)) continue;
+      rows.push({
+        key: `e:${e.id}`,
+        name: e.canonicalName,
+        qty: extraQty(e),
+        extraId: e.id,
+        origin: e.originLabel,
+        pantryStatus: statusFor(e.canonicalName),
+        kind: 'extra',
+      });
+    }
+    for (const p of pantryRestockLines) {
+      if (dismissed.has(`item:${p.name}`)) continue;
+      rows.push({
+        key: `p:${p.name}`,
+        name: p.name,
+        qty: p.buy,
+        extraId: null,
+        pantryStatus: statusFor(p.name),
+        kind: 'restock',
+      });
+    }
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems, extras, pantryRestockLines, dismissed, haveByName, alwaysHaveMap, statusByKey]);
 
   // Fulfillment routing (note 4). Store tag = channel: Wegmans → Instacart /
   // Beelink (external, not wired from the app — items just group under
@@ -384,18 +466,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const base = l.name.charAt(0).toUpperCase() + l.name.slice(1);
     return qty ? `${base}, ${qty}` : base;
   };
-  const wegmansCount = useMemo(
-    () => buyLines.filter((l) => metaFor(l.name).store === 'wegmans').length,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buyLines, shopMetaMap],
-  );
-  const remainingLines = useMemo(
-    () => buyLines.filter((l) => metaFor(l.name).store !== 'wegmans'),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buyLines, shopMetaMap],
-  );
+  // Push the whole list to the Apple Reminders list "Shared Groceries" via the
+  // installed Shortcut. Whole-list destination now (the old per-store split is
+  // retired), so this sends every cart line, not just the non-Wegmans ones.
   const pushToReminders = async () => {
-    const url = remindersDeepLink(remainingLines.map(displayLabel));
+    const url = remindersDeepLink(cartLines.map(displayLabel));
     if (!url) {
       setHint('Nothing to send to Reminders.');
       return;
@@ -404,7 +479,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       if (Platform.OS === 'web') window.location.href = url;
       else await Linking.openURL(url);
       setHint(
-        `Sent ${remainingLines.length} to the "${REMINDERS_SHORTCUT}" Shortcut → Reminders "Shared Groceries."`,
+        `Sent ${cartLines.length} to the "${REMINDERS_SHORTCUT}" Shortcut → Reminders "Shared Groceries."`,
       );
     } catch {
       setHint(`Install the "${REMINDERS_SHORTCUT}" Shortcut first — see SHORTCUTS.md.`);
@@ -494,13 +569,6 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  gone across future plan → shopping regen (note 7a). */
   const deleteItem = (name: string) => {
     suppress(name);
-    dismissItem(name);
-  };
-
-  /** Mark a name always-have from the swipe action — never returns to any
-   *  shopping list (note 7). Writes the ONE always-have source (#1). */
-  const alwaysHaveIt = (name: string) => {
-    setAlways(name, true);
     dismissItem(name);
   };
 
@@ -631,8 +699,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         storeName={meta.store ? storeLabel(meta.store) : null}
         onTap={() => toggleExpand(line.name)}
         onToggleHave={() => openBuy(line.name)}
+        onCheck={() => toggleSkip(line.name)}
+        checked={isSkipped(line.name)}
+        dim={isSkipped(line.name)}
         onDelete={() => (extraId ? removeExtra(extraId) : deleteItem(line.name))}
-        onAlwaysHave={() => alwaysHaveIt(line.name)}
         onLongPress={() => setMenu({ name: line.name, extraId })}
         marked={false}
         always={false}
@@ -653,27 +723,26 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }))
     .filter((b) => b.lines.length > 0);
 
-  // Send the Wegmans-tagged buy lines to the Instacart auto-fill agent: queues
-  // a job the Beelink poller claims and fills the Wegmans cart with. Checkout
-  // stays manual (Pickup). Requires sign-in (RLS scopes the job to the user).
-  //
-  // Store-tag routing (Phase D): non-Wegmans lines go into the `local` set so
-  // toJobItems marks them dest:'LO' — sendToInstacart drops those; they're the
-  // ones the "Add remaining to Reminders" route handles. Wegmans-tagged lines
-  // become dest:'IC' and are the only ones sent to the cart.
-  const sendCart = async () => {
+  // Push the whole list to the Wegmans cart via the Instacart auto-fill agent:
+  // queues a job the Beelink poller claims and fills the cart with. Checkout
+  // stays manual (Pickup). Requires sign-in (RLS scopes the job to the user) —
+  // if we're not signed in, fall back to Copy → Instacart (paste manually) so
+  // the button still does something useful. Everything goes to Instacart now
+  // (empty local set = all dest:'IC'); the old per-store split is retired.
+  const pushToWegmans = async () => {
+    if (cartLines.length === 0) return;
     if (!INSTACART_AVAILABLE()) {
-      setHint('Sign in to send your list to Instacart.');
+      setHint('Not signed in — copying the list and opening Instacart to paste.');
+      await copyAndOpen();
       return;
     }
     try {
       setSending(true);
-      setHint('Sending to your Wegmans cart…');
-      const localSet = new Set(remainingLines.map((l) => l.name));
-      await sendToInstacart(toJobItems(buyLines, localSet));
-      setHint('Sent. The cart is filling — open Instacart in ~30s, review, pick Pickup.');
+      setHint('Pushing to your Wegmans cart…');
+      await sendToInstacart(toJobItems(cartLines, new Set()));
+      setHint('Pushed. The cart is filling — open Instacart in ~30s, review, pick Pickup.');
     } catch (e) {
-      setHint(`Couldn't send: ${(e as Error).message}`);
+      setHint(`Couldn't push: ${(e as Error).message}`);
     } finally {
       setSending(false);
     }
@@ -700,11 +769,6 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
-        <Card style={styles.summary}>
-          <SummaryRow label="To buy" value={`${buyCount}`} tone="accent" />
-          <SummaryRow label="Already have" value={`${haveCount}`} tone="ok" />
-        </Card>
-
         {editing ? (
           <View style={styles.section}>
             <SectionLabel color="textMuted">Add an item</SectionLabel>
@@ -806,309 +870,60 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           </View>
         ) : (
           <>
-        {showOnboard && (visibleItems.length > 0 || extras.length > 0) ? (
-          <Pressable onPress={dismissOnboard} style={styles.onboard}>
-            <Text color="textMuted" style={styles.onboardText}>
-              <Text variant="bodyStrong" color="text">
-                Tap a row to drop it
-              </Text>{' '}
-              — “already have.” Swipe left to delete from this run, swipe right
-              to mark have.{' '}
-              <Text color="textFaint">(tap here to dismiss)</Text>
-            </Text>
-          </Pressable>
-        ) : null}
 
-        {visibleItems.length > 0 || extras.length > 0 ? (
-          <View style={styles.controlsRow}>
-            <View style={styles.groupToggle}>
-              <Pressable
-                onPress={() => setGroupByStore(false)}
-                style={[styles.groupBtn, !groupByStore && styles.groupBtnOn]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: !groupByStore }}>
-                <Text
-                  variant="sectionLabel"
-                  color={!groupByStore ? 'bg' : 'textMuted'}>
-                  By category
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setGroupByStore(true)}
-                style={[styles.groupBtn, groupByStore && styles.groupBtnOn]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: groupByStore }}>
-                <Text
-                  variant="sectionLabel"
-                  color={groupByStore ? 'bg' : 'textMuted'}>
-                  By store
-                </Text>
-              </Pressable>
-            </View>
-            {checkedNames.length > 0 ? (
-              <Pressable onPress={clearChecked} hitSlop={6} accessibilityRole="button">
-                <Text variant="sectionLabel" color="accent">
-                  Clear checked · {checkedNames.length}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
+        {flatRows.map((row) => (
+          <ShoppingRow
+            key={row.key}
+            name={row.name}
+            qty={row.qty}
+            math={null}
+            origin={row.origin}
+            onTap={() => {
+              // Body tap on a low restock row drops it for the run; 'out' is
+              // locked on. Everything else edits via the long-press menu.
+              if (row.kind === 'restock' && row.pantryStatus !== 'out')
+                dismissItem(row.name);
+            }}
+            onToggleHave={() => openBuy(row.name)}
+            onCheck={() => toggleSkip(row.name)}
+            checked={isSkipped(row.name)}
+            dim={isSkipped(row.name)}
+            onDelete={() =>
+              row.extraId
+                ? removeExtra(row.extraId)
+                : row.kind === 'restock'
+                  ? dismissItem(row.name)
+                  : deleteItem(row.name)
+            }
+            onLongPress={() => setMenu({ name: row.name, extraId: row.extraId })}
+            marked={false}
+            always={false}
+            likely={false}
+            pantryStatus={row.pantryStatus}
+          />
+        ))}
 
-        <View style={wide ? styles.twoCol : undefined}>
-          <View style={wide ? styles.colLeft : undefined}>
-        {visibleItems.length === 0 && extras.length === 0 ? (
-          <Text color="textMuted" style={styles.empty}>
-            Nothing planned for this week yet. Pin recipes on the Plan tab.
-          </Text>
-        ) : groupByStore ? (
-          storeBuckets.map((bucket) => (
-            <View key={bucket.label} style={styles.section}>
-              <SectionLabel color={bucket.id ? 'text' : 'textMuted'}>
-                {bucket.label} · {bucket.lines.length}
-              </SectionLabel>
-              {bucket.lines.map((line) => renderBuyRow(line))}
-            </View>
-          ))
-        ) : (
-          CATEGORY_ORDER.filter((c) =>
-            visibleItems.some((i) => i.category === c && !inHave(i.name)),
-          ).map((cat) => (
-            <View key={cat} style={styles.section}>
-              <SectionLabel color="textMuted">{CAT_LABEL[cat]}</SectionLabel>
-              {visibleItems
-                .filter((i) => i.category === cat && !inHave(i.name))
-                .map((item) => {
-                  const ps = statusFor(item.name);
-                  const meta = metaFor(item.name);
-                  return (
-                    <ShoppingRow
-                      key={item.name}
-                      name={item.name}
-                      qty={item.buy}
-                      math={item.math ?? null}
-                      sources={item.sources}
-                      expanded={expanded.has(item.name)}
-                      storeName={meta.store ? storeLabel(meta.store) : null}
-                      onTap={() => toggleExpand(item.name)}
-                      onToggleHave={() => openBuy(item.name)}
-                      onDelete={() => deleteItem(item.name)}
-                      onAlwaysHave={() => alwaysHaveIt(item.name)}
-                      onLongPress={() => setMenu({ name: item.name, extraId: null })}
-                      marked={false}
-                      always={false}
-                      likely={isLikelyHave(haveByName, item.name)}
-                      pantryStatus={ps}
-                    />
-                  );
-                })}
-            </View>
-          ))
-        )}
+        {/* Reminders-style inline add: tap the blank row and type. Enter keeps
+            the keyboard up so you can add several in a row. */}
+        <Pressable
+          style={styles.addRow}
+          onPress={() => addInputRef.current?.focus()}
+          accessibilityRole="button"
+          accessibilityLabel="Add an item">
+          <View style={styles.addBullet} />
+          <TextInput
+            ref={addInputRef}
+            value={addName}
+            onChangeText={setAddName}
+            onSubmitEditing={submitAdd}
+            blurOnSubmit={false}
+            returnKeyType="done"
+            placeholder="Add an item"
+            placeholderTextColor={colors.textFaint}
+            style={styles.addInput}
+          />
+        </Pressable>
 
-        {!groupByStore && extras.some((e) => !inHave(e.canonicalName)) ? (
-          <View style={styles.section}>
-            <SectionLabel color="textMuted">Extras</SectionLabel>
-            <Text color="textFaint" style={styles.extrasCaption}>
-              Items you added outside the week’s recipes (from Pipeline ideas, etc.).
-            </Text>
-            {extras
-              .filter((e) => !inHave(e.canonicalName))
-              .slice()
-              .sort(
-                (a, b) =>
-                  CATEGORY_ORDER.indexOf(categorizeIngredient(a.canonicalName)) -
-                    CATEGORY_ORDER.indexOf(categorizeIngredient(b.canonicalName)) ||
-                  a.canonicalName.localeCompare(b.canonicalName),
-              )
-              .map((ex) => {
-                const ps = statusFor(ex.canonicalName);
-                const meta = metaFor(ex.canonicalName);
-                return (
-                  <ShoppingRow
-                    key={ex.id}
-                    name={ex.canonicalName}
-                    qty={extraQty(ex)}
-                    math={null}
-                    origin={ex.originLabel}
-                    storeName={meta.store ? storeLabel(meta.store) : null}
-                    onTap={() => {
-                      /* extras are flat — nothing to expand */
-                    }}
-                    onToggleHave={() => openBuy(ex.canonicalName)}
-                    onDelete={() => removeExtra(ex.id)}
-                    onAlwaysHave={() => alwaysHaveIt(ex.canonicalName)}
-                    onLongPress={() =>
-                      setMenu({ name: ex.canonicalName, extraId: ex.id })
-                    }
-                    marked={false}
-                    always={false}
-                    likely={isLikelyHave(haveByName, ex.canonicalName)}
-                    pantryStatus={ps}
-                  />
-                );
-              })}
-          </View>
-        ) : null}
-
-        {!groupByStore && pantryRestockLines.some((p) => !dismissed.has(`item:${p.name}`)) ? (
-          <View style={styles.section}>
-            <SectionLabel color="accent">Running low · restock</SectionLabel>
-            <Text color="textFaint" style={styles.extrasCaption}>
-              Staples you flagged low or out in the pantry. Tap a row to drop it
-              if you’ve got enough.
-            </Text>
-            {pantryRestockLines
-              .filter((p) => !dismissed.has(`item:${p.name}`))
-              .map((p) => {
-                const ps = statusFor(p.name);
-                return (
-                  <ShoppingRow
-                    key={`pantry:${p.name}`}
-                    name={p.name}
-                    qty={p.buy}
-                    math={null}
-                    onTap={() => {
-                      // 'out' is locked on; 'low' drops for this run on tap.
-                      if (ps !== 'out') dismissItem(p.name);
-                    }}
-                    // Check off = bought it → into the pantry (restock-merge
-                    // flips it back to 'fine', so it leaves this restock list).
-                    onToggleHave={() => openBuy(p.name)}
-                    onDelete={() => dismissItem(p.name)}
-                    onLongPress={() => setMenu({ name: p.name, extraId: null })}
-                    marked={false}
-                    always={false}
-                    likely={false}
-                    pantryStatus={ps}
-                  />
-                );
-              })}
-          </View>
-        ) : null}
-          </View>
-          <View style={wide ? styles.colRight : undefined}>
-
-        {haveCount > 0 ? (
-          <View style={styles.section}>
-            <Pressable
-              onPress={() => setHaveOpen((v) => !v)}
-              style={styles.haveHeader}
-              accessibilityRole="button"
-              accessibilityLabel={
-                haveOpen
-                  ? 'Collapse already-have list'
-                  : 'Expand already-have list'
-              }>
-              <SectionLabel color="ok">
-                Already have · {haveCount}
-              </SectionLabel>
-              <Glyph
-                name="expand"
-                size={14}
-                color="ok"
-                style={haveOpen ? undefined : styles.haveCaretClosed}
-              />
-            </Pressable>
-            {haveOpen ? (
-              <>
-                {visibleItems
-                  .filter((i) => inHave(i.name))
-                  .map((item) => {
-                    const isAlways =
-                      alwaysHaveMap[item.name.toLowerCase().trim()] === true;
-                    return (
-                      <ShoppingRow
-                        key={`have:${item.name}`}
-                        name={item.name}
-                        qty={item.buy}
-                        math={null}
-                        onTap={() => toggleHave(item.name)}
-                        onToggleHave={() => toggleHave(item.name)}
-                        onDelete={() => dismissItem(item.name)}
-                        onLongPress={() =>
-                          setMenu({ name: item.name, extraId: null })
-                        }
-                        marked
-                        always={isAlways}
-                        likely={false}
-                      />
-                    );
-                  })}
-                {extras
-                  .filter((e) => inHave(e.canonicalName))
-                  .map((ex) => {
-                    const isAlways =
-                      alwaysHaveMap[ex.canonicalName.toLowerCase().trim()] === true;
-                    return (
-                      <ShoppingRow
-                        key={`have:${ex.id}`}
-                        name={ex.canonicalName}
-                        qty={extraQty(ex)}
-                        math={null}
-                        origin={ex.originLabel}
-                        onTap={() => toggleHave(ex.canonicalName)}
-                        onToggleHave={() => toggleHave(ex.canonicalName)}
-                        onDelete={() => removeExtra(ex.id)}
-                        onLongPress={() =>
-                          setMenu({ name: ex.canonicalName, extraId: ex.id })
-                        }
-                        marked
-                        always={isAlways}
-                        likely={false}
-                      />
-                    );
-                  })}
-                {ghostAlways.map((name) => (
-                  <ShoppingRow
-                    key={`ghost:${name}`}
-                    name={name}
-                    qty="—"
-                    math={null}
-                    onTap={() => setMenu({ name, extraId: null })}
-                    onToggleHave={() => {
-                      // Ghost row toggle = unpin always-have. (Session-mark
-                      // would be meaningless here — no buy row exists.)
-                      setAlways(name, false);
-                    }}
-                    onDelete={() => setAlways(name, false)}
-                    onLongPress={() => setMenu({ name, extraId: null })}
-                    marked
-                    always
-                    likely={false}
-                  />
-                ))}
-              </>
-            ) : null}
-          </View>
-        ) : null}
-
-        <Card tone="bg2" style={styles.pantryCard}>
-          <SectionLabel color="ok">Pantry subtraction (§10)</SectionLabel>
-          <Text color="textMuted">
-            The Pantry pillar replaces this with tracked stock + expiry —
-            “Already have” is its lightweight precursor.
-          </Text>
-        </Card>
-          </View>
-        </View>
-
-        {buyLines.length > 0 ? (
-          <Card tone="bg2" style={styles.routeCard}>
-            <SectionLabel color="textMuted">Fulfillment</SectionLabel>
-            <Text color="textFaint" style={styles.routeCaption}>
-              Wegmans-tagged items go via Instacart. Everything else (Stop One +
-              unassigned) goes to the Apple Reminders list “Shared Groceries.”
-            </Text>
-            <Button
-              label={`Add remaining to Reminders · ${remainingLines.length}`}
-              glyph="next"
-              variant="secondary"
-              disabled={remainingLines.length === 0}
-              onPress={pushToReminders}
-            />
-          </Card>
-        ) : null}
           </>
         )}
 
@@ -1243,45 +1058,21 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         </View>
       </Overlay>
 
-      <BottomActionBar
-        meta={
-          wegmansCount > 0 ? (
-            <Text color="textFaint">
-              {wegmansCount} tagged Wegmans — order via Instacart
-            </Text>
-          ) : undefined
-        }>
-        {editing ? (
-          <Button
-            label="Confirm"
-            glyph="done"
-            flex
-            onPress={() => setEditing(false)}
-          />
-        ) : (
-          <>
-            <Button
-              label="Edit list"
-              variant="secondary"
-              flex
-              onPress={() => setEditing(true)}
-            />
-            <Button
-              label={copied ? 'Copied — Instacart opening' : 'Copy → Instacart'}
-              variant="secondary"
-              flex
-              disabled={buyLines.length === 0}
-              onPress={copyAndOpen}
-            />
-            <Button
-              label={sending ? 'Sending…' : 'Send to cart'}
-              glyph="next"
-              flex
-              disabled={sending || wegmansCount === 0}
-              onPress={sendCart}
-            />
-          </>
-        )}
+      <BottomActionBar>
+        <Button
+          label="Push to Reminders"
+          variant="secondary"
+          flex
+          disabled={cartLines.length === 0}
+          onPress={pushToReminders}
+        />
+        <Button
+          label={sending ? 'Pushing…' : 'Push to Wegmans'}
+          glyph="next"
+          flex
+          disabled={sending || cartLines.length === 0}
+          onPress={pushToWegmans}
+        />
       </BottomActionBar>
     </SafeAreaView>
   );
@@ -1305,11 +1096,15 @@ type RowProps = {
   pantryStatus?: PantryStatus;
   /** Store tag label (note 3) — shown as a chip when set. */
   storeName?: string | null;
+  /** Checkbox is filled (skip-cart on a buy row). Independent of `marked`. */
+  checked?: boolean;
+  /** Render the row dimmed — used for skip-cart rows that stay on the list. */
+  dim?: boolean;
   onTap: () => void;
   onToggleHave: () => void;
+  /** Checkbox tap. Falls back to onToggleHave when not supplied (Have rows). */
+  onCheck?: () => void;
   onDelete: () => void;
-  /** Swipe-left "Always have it" — never returns to any list (note 7). */
-  onAlwaysHave?: () => void;
   onLongPress?: () => void;
 };
 
@@ -1325,23 +1120,27 @@ function ShoppingRow({
   likely,
   pantryStatus,
   storeName,
+  checked,
+  dim,
   onTap,
   onToggleHave,
+  onCheck,
   onDelete,
-  onAlwaysHave,
   onLongPress,
 }: RowProps) {
-  // Swipe semantics — asymmetric by direction (spec §5):
-  // - Swipe right → commits Have toggle on open (reversible binary toggle).
-  // - Swipe left → reveals a tappable Delete button; requires a second tap
-  //   to commit because delete is destructive (consolidated rows lose group
-  //   context, Extras rows go for good).
+  // Gesture model (Nate's spec):
+  // - Checkbox tap → skip-cart toggle (stay on the list, out of the cart).
+  // - Swipe right  → "you have it" — commit-on-open, snap closed.
+  // - Swipe left   → reveals a tappable Delete button; requires a second tap
+  //   because delete is destructive (consolidated rows lose group context,
+  //   Extras rows go for good).
+  // - Long-press   → the options sheet (store, qty, brand, note, Always, Delete).
   const swipeRef = useRef<SwipeableMethods | null>(null);
   // onSwipeableOpen reports the drag direction: a rightward drag reveals the
   // left actions (Have), a leftward drag reveals the right actions (Delete).
   const handleOpen = (dir: 'left' | 'right') => {
     if (dir === 'right') {
-      // Swipe right → Have toggle — commit-on-open, snap closed.
+      // Swipe right → "you have it" — commit-on-open, snap closed.
       swipeRef.current?.close();
       onToggleHave();
     }
@@ -1350,10 +1149,6 @@ function ShoppingRow({
   const handleDeletePress = () => {
     swipeRef.current?.close();
     onDelete();
-  };
-  const handleAlwaysPress = () => {
-    swipeRef.current?.close();
-    onAlwaysHave?.();
   };
   return (
     <ReanimatedSwipeable
@@ -1379,17 +1174,6 @@ function ShoppingRow({
       )}
       renderRightActions={() => (
         <View style={styles.rightActions}>
-          {onAlwaysHave ? (
-            <GHPressable
-              onPress={handleAlwaysPress}
-              style={styles.alwaysAction}
-              accessibilityRole="button"
-              accessibilityLabel={`Always have ${name} — never show it again`}>
-              <Text color="bg" variant="bodyStrong" style={styles.deleteLabel}>
-                Always
-              </Text>
-            </GHPressable>
-          ) : null}
           <GHPressable
             onPress={handleDeletePress}
             style={styles.deleteAction}
@@ -1409,23 +1193,26 @@ function ShoppingRow({
           delayLongPress={350}>
           <GHPressable
             hitSlop={10}
-            onPress={onToggleHave}
-            // Polarity: filled = "shopping for it" (the default), empty =
-            // "already have it" (the user dropped it). The list IS the buy
-            // list, so the rest state is checked.
-            style={[styles.check, !marked && styles.checkOn]}
+            onPress={onCheck ?? onToggleHave}
+            // Polarity: empty = going to the cart (the default). Filled = the
+            // user checked it off to SKIP the cart — it stays on the list
+            // (dimmed) but won't be pushed to Instacart/Reminders. On Have-bucket
+            // rows there's no onCheck, so a tap moves the row back to the list.
+            style={[styles.check, checked && styles.checkOn]}
             accessibilityRole="checkbox"
-            accessibilityState={{ checked: !marked }}
+            accessibilityState={{ checked: !!checked }}
             accessibilityLabel={
               marked
                 ? `Move ${name} back to the shopping list`
-                : `Drop ${name} — already have it`
+                : checked
+                  ? `Add ${name} back to the cart`
+                  : `Skip ${name} — keep it on the list but not in the cart`
             }>
-            {!marked ? <Glyph name="done" size={12} color="bg" /> : null}
+            {checked ? <Glyph name="done" size={12} color="bg" /> : null}
           </GHPressable>
           <View style={styles.flex}>
             <View style={styles.nameRow}>
-              <Text color={marked ? 'textFaint' : 'text'}>
+              <Text color={marked || dim ? 'textFaint' : 'text'}>
                 {name}
               </Text>
               {pantryStatus === 'out' ? (
@@ -1918,6 +1705,27 @@ const styles = StyleSheet.create({
   editQtyInput: { flex: 1 },
   editDelete: { padding: 6 },
   rowSurface: { backgroundColor: colors.bg },
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 11,
+  },
+  addBullet: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    marginTop: 1,
+  },
+  addInput: {
+    flex: 1,
+    fontSize: 16,
+    color: colors.text,
+    paddingVertical: 0,
+  },
+  reminderBtn: { marginTop: 20 },
   item: {
     flexDirection: 'row',
     alignItems: 'flex-start',
