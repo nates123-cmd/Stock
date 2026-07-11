@@ -19,6 +19,7 @@ import {
   Button,
   BottomActionBar,
   Overlay,
+  SegmentedControl,
 } from '@/components';
 import { colors, fonts, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
@@ -185,6 +186,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     Record<string, { name: string; qty: string }>
   >({});
   const [pushedOpen, setPushedOpen] = useState(false);
+  // Active vs Staples view. Active = the dominant "get these now" list. Staples
+  // = pinned always-have items (Costco bulk, pantry stock) tucked out of Active;
+  // they auto-surface to Active when flagged low/out.
+  const [listView, setListView] = useState<'active' | 'staples'>('active');
   // Reminders-style inline add row lives at the bottom of the flat list.
   const addInputRef = useRef<TextInput>(null);
   const [haveOpen, setHaveOpen] = useState(false);
@@ -484,12 +489,42 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey]);
 
+  /** Staples view: the pinned always-have items (Costco bulk, pantry stock),
+   *  the ones kept OUT of Active. Resolved to display rows so tap-edit / select
+   *  / push all work the same as the active list. Pushed rows drop out here too. */
+  const stapleRows = useMemo<FlatRow[]>(() => {
+    const rows: FlatRow[] = [];
+    for (const key of Object.keys(alwaysHaveMap)) {
+      if (!alwaysHaveMap[key]) continue;
+      if (pushedSet.has(key)) continue;
+      const ex = extras.find((e) => matchKey(e.canonicalName) === key);
+      const it = visibleItems.find((i) => matchKey(i.name) === key);
+      const base = ex?.canonicalName ?? it?.name ?? key;
+      const o = overrides[matchKey(base)];
+      rows.push({
+        key: `s:${key}`,
+        name: o?.name || base.charAt(0).toUpperCase() + base.slice(1),
+        baseName: base,
+        qty: o?.qty ?? (ex ? extraQty(ex) : it?.buy ?? ''),
+        extraId: ex?.id ?? null,
+        pantryStatus: statusFor(base),
+        kind: ex ? 'extra' : 'recipe',
+      });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alwaysHaveMap, extras, visibleItems, overrides, pushedSet, statusByKey]);
+
+  /** Rows for the current view; selection + push read from these. */
+  const currentRows = listView === 'active' ? flatRows : stapleRows;
+
   /** The current selection, resolved to rows (drives the pop-up push bar). */
   const selectedRows = useMemo(
-    () => flatRows.filter((r) => selected.has(matchKey(r.baseName))),
-    [flatRows, selected],
+    () => currentRows.filter((r) => selected.has(matchKey(r.baseName))),
+    [currentRows, selected],
   );
-  const allSelected = flatRows.length > 0 && selectedRows.length === flatRows.length;
+  const allSelected =
+    currentRows.length > 0 && selectedRows.length === currentRows.length;
 
   /** A push label per row: "Name, qty" (qty omitted when 'as needed'/blank). */
   const rowLabel = (r: FlatRow) => {
@@ -665,8 +700,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     addExtra([
       { canonicalName: name, amount, unit, originLabel: 'added by you', originId: null },
     ]);
+    // On the Staples view, a new item is pinned as a staple so it lands there
+    // (out of Active) — e.g. "Costco paper towels" you won't buy for weeks.
+    if (listView === 'staples') setAlways(name, true);
     setAddName('');
     setAddQty('');
+  };
+
+  /** Switch Active/Staples — clear the selection so it can't leak across views. */
+  const switchView = (v: 'active' | 'staples') => {
+    setListView(v);
+    setSelected(new Set());
+    setEditKey(null);
   };
 
   // Shortcut Instacart path (spec §11 cross-app integrations — Developer
@@ -781,9 +826,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
   };
 
-  /** Select every row / clear (the "Select all" toggle). */
+  /** Select every row in the current view / clear (the "Select all" toggle). */
   const toggleSelectAll = () =>
-    setSelected(allSelected ? new Set() : new Set(flatRows.map((r) => matchKey(r.baseName))));
+    setSelected(allSelected ? new Set() : new Set(currentRows.map((r) => matchKey(r.baseName))));
 
   /** Enter inline edit for a row (Reminders-style tap-to-edit). */
   const startEdit = (row: FlatRow) => {
@@ -930,7 +975,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ) : (
           <>
 
-        {flatRows.length > 0 ? (
+        <View style={styles.viewSegment}>
+          <SegmentedControl
+            segments={[
+              { key: 'active', label: 'Active', count: flatRows.length },
+              { key: 'staples', label: 'Staples', count: stapleRows.length },
+            ]}
+            value={listView}
+            onChange={(k) => switchView(k as 'active' | 'staples')}
+          />
+        </View>
+
+        {currentRows.length > 0 ? (
           <View style={styles.selectAllRow}>
             <Pressable onPress={toggleSelectAll} hitSlop={6} accessibilityRole="button">
               <Text variant="sectionLabel" color="accent">
@@ -940,7 +996,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           </View>
         ) : null}
 
-        {flatRows.map((row) =>
+        {currentRows.map((row) =>
           editKey === row.key ? (
             // Inline edit (tap-to-edit). Enter or the check commits; tapping
             // another row abandons the in-progress edit.
@@ -984,11 +1040,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
               onCheck={() => toggleSelect(row.baseName)}
               checked={isSelected(row.baseName)}
               onDelete={() =>
-                row.extraId
-                  ? removeExtra(row.extraId)
-                  : row.kind === 'restock'
-                    ? dismissItem(row.baseName)
-                    : deleteItem(row.baseName)
+                listView === 'staples'
+                  ? setAlways(row.baseName, false) // unpin → returns to Active
+                  : row.extraId
+                    ? removeExtra(row.extraId)
+                    : row.kind === 'restock'
+                      ? dismissItem(row.baseName)
+                      : deleteItem(row.baseName)
               }
               onLongPress={() => setMenu({ name: row.baseName, extraId: row.extraId })}
               marked={false}
@@ -1005,7 +1063,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           style={styles.addRow}
           onPress={() => addInputRef.current?.focus()}
           accessibilityRole="button"
-          accessibilityLabel="Add an item">
+          accessibilityLabel={listView === 'staples' ? 'Add a staple' : 'Add an item'}>
           <View style={styles.addBullet} />
           <TextInput
             ref={addInputRef}
@@ -1014,7 +1072,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             onSubmitEditing={submitAdd}
             blurOnSubmit={false}
             returnKeyType="done"
-            placeholder="Add an item"
+            placeholder={listView === 'staples' ? 'Add a staple' : 'Add an item'}
             placeholderTextColor={colors.textFaint}
             style={styles.addInput}
           />
@@ -1022,7 +1080,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
         {/* Pushed: what went out to Wegmans/Reminders in the last ~2 days.
             Collapsed by default; tap a row to pull it back onto the list. */}
-        {pushedItems.length > 0 ? (
+        {listView === 'active' && pushedItems.length > 0 ? (
           <View style={styles.pushedSection}>
             <Pressable
               onPress={() => setPushedOpen((v) => !v)}
@@ -1328,18 +1386,14 @@ function ShoppingRow({
         </View>
       )}>
       <View style={styles.rowSurface}>
-        <GHPressable
-          style={styles.item}
-          onPress={onTap}
-          onLongPress={onLongPress}
-          delayLongPress={350}>
+        <View style={styles.item}>
+          {/* Checkbox and body are SIBLINGS, not nested — tapping the box
+              selects; tapping the row body edits. (Nested, both fired.) */}
           <GHPressable
             hitSlop={10}
             onPress={onCheck ?? onToggleHave}
-            // Polarity: empty = going to the cart (the default). Filled = the
-            // user checked it off to SKIP the cart — it stays on the list
-            // (dimmed) but won't be pushed to Instacart/Reminders. On Have-bucket
-            // rows there's no onCheck, so a tap moves the row back to the list.
+            // Empty = unselected. Filled = selected (part of the push). On
+            // Have-bucket rows there's no onCheck, so a tap moves the row back.
             style={[styles.check, checked && styles.checkOn]}
             accessibilityRole="checkbox"
             accessibilityState={{ checked: !!checked }}
@@ -1347,11 +1401,17 @@ function ShoppingRow({
               marked
                 ? `Move ${name} back to the shopping list`
                 : checked
-                  ? `Add ${name} back to the cart`
-                  : `Skip ${name} — keep it on the list but not in the cart`
+                  ? `Deselect ${name}`
+                  : `Select ${name}`
             }>
             {checked ? <Glyph name="done" size={12} color="bg" /> : null}
           </GHPressable>
+          <GHPressable
+            style={styles.rowBody}
+            onPress={onTap}
+            onLongPress={onLongPress}
+            delayLongPress={350}
+            accessibilityLabel={`Edit ${name}`}>
           <View style={styles.flex}>
             <View style={styles.nameRow}>
               <Text color={marked || dim ? 'textFaint' : 'text'}>
@@ -1414,7 +1474,8 @@ function ShoppingRow({
           <Numeric color={marked ? 'textFaint' : 'text'} style={styles.qty}>
             {qty}
           </Numeric>
-        </GHPressable>
+          </GHPressable>
+        </View>
       </View>
     </ReanimatedSwipeable>
   );
@@ -1868,6 +1929,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   reminderBtn: { marginTop: 20 },
+  viewSegment: { paddingBottom: 12 },
   selectAllRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 6 },
   pushedSection: { marginTop: 24 },
   pushedHeader: {
@@ -1894,6 +1956,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
+  },
+  rowBody: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
   },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   origin: { fontSize: 11, fontStyle: 'italic', paddingTop: 2 },
