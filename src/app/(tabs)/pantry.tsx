@@ -93,6 +93,7 @@ export default function PantryScreen() {
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
   const cycleStatus = usePantryStore((s) => s.cycleStatus);
   const setStatus = usePantryStore((s) => s.setStatus);
+  const setCategory = usePantryStore((s) => s.setCategory);
   const removeItem = usePantryStore((s) => s.remove);
   const applyPaste = usePantryStore((s) => s.applyPaste);
   const addExtras = useExtrasStore((s) => s.add);
@@ -205,7 +206,8 @@ export default function PantryScreen() {
     const rest = items.filter((i) => !inLowOrOut.has(i.id));
     const groups = new Map<PantryCategory, typeof rest>();
     for (const it of rest) {
-      const cat = categorizePantryItem(it.canonicalName);
+      // A manual reassignment always beats the keyword guess.
+      const cat = it.category ?? categorizePantryItem(it.canonicalName);
       const g = groups.get(cat);
       if (g) g.push(it);
       else groups.set(cat, [it]);
@@ -354,6 +356,36 @@ export default function PantryScreen() {
                   </Pressable>
                 );
               })}
+            </View>
+
+            {/* Manual reassignment. The keyword guess will never be right for
+                everything (it once filed chamomile tea under Meat & fish), so
+                every item can be moved by hand and the choice sticks. */}
+            <View style={styles.noteWrap}>
+              <SectionLabel color="textMuted">Category</SectionLabel>
+              <View style={styles.catChips}>
+                {PANTRY_CATEGORY_ORDER.map((c) => {
+                  const active =
+                    (menu.category ?? categorizePantryItem(menu.canonicalName)) === c;
+                  return (
+                    <Pressable
+                      key={c}
+                      onPress={async () => {
+                        await setCategory(menu.id, c);
+                        closeMenu();
+                      }}
+                      style={[styles.catChip, active && styles.catChipOn]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}>
+                      <Text
+                        variant="sectionLabel"
+                        color={active ? 'bg' : 'textMuted'}>
+                        {PANTRY_CATEGORY_LABEL[c]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
 
             <View style={styles.noteWrap}>
@@ -713,6 +745,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     borderColor: colors.accent,
   },
+  catChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 6 },
+  catChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: colors.bg3,
+  },
+  catChipOn: { backgroundColor: colors.accent },
   noteWrap: { gap: 6, paddingTop: 6 },
   noteInput: {
     borderWidth: 1,

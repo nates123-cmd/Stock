@@ -435,8 +435,33 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *
    *  Low/out still auto-surfaces NON-staple pantry items onto Active — that's
    *  the ordinary restock path. */
+  /** Staples you keep in the PANTRY. The always-have pin and pantry `isStaple`
+   *  were two disconnected stores: pinning created a pantry item (one direction),
+   *  but a pantry staple you already owned still landed on the buy list — which
+   *  is why salt and black pepper showed up in Active and then got combined.
+   *  Read BOTH stores, so "staple" means the same thing everywhere. */
+  const pantryStapleKeys = useMemo(
+    () =>
+      new Set(
+        pantryItems.filter((p) => p.isStaple).map((p) => matchKey(p.canonicalName)),
+      ),
+    [pantryItems],
+  );
+  const isPantryStaple = (name: string) => {
+    const k = matchKey(name);
+    if (pantryStapleKeys.has(k)) return true;
+    const b = baseIngredient(name);
+    for (const key of pantryStapleKeys) {
+      if (key.startsWith(k) || k.startsWith(key)) return true;
+      if (baseIngredient(key) === b) return true;
+    }
+    return false;
+  };
+
   const inHave = (name: string) => {
-    if (isAlwaysHave(name, alwaysHaveMap)) return true; // staples live in Staples, full stop
+    // A staple never appears on Active — whether it's pinned always-have on the
+    // list, or simply a staple sitting in your pantry.
+    if (isAlwaysHave(name, alwaysHaveMap) || isPantryStaple(name)) return true;
     const ps = statusFor(name);
     if (ps === 'out' || ps === 'low') return false; // non-staple restock → Active
     return isMarked(haveByName, name);
@@ -725,11 +750,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const rows: FlatRow[] = [];
     // An item lives in exactly ONE view.
     const onActive = new Set(activeRows.map((r) => matchKey(r.baseName)));
-    for (const key of Object.keys(alwaysHaveMap)) {
-      if (!alwaysHaveMap[key] || wasPushed(key) || onActive.has(key)) continue;
+    // Both sources of "staple": pinned always-have on the list, and staples
+    // sitting in the pantry. Deduped by matchKey so one thing = one row.
+    const stapleKeys = new Set<string>([
+      ...Object.keys(alwaysHaveMap).filter((k) => alwaysHaveMap[k]),
+      ...pantryStapleKeys,
+    ]);
+    for (const key of stapleKeys) {
+      if (wasPushed(key) || onActive.has(key)) continue;
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
-      const base = ex?.canonicalName ?? it?.name ?? key;
+      const pan = pantryItems.find((p) => matchKey(p.canonicalName) === key);
+      const base = ex?.canonicalName ?? it?.name ?? pan?.canonicalName ?? key;
       const o = overrides[matchKey(base)];
       rows.push({
         key: `s:${key}`,
@@ -1988,6 +2020,27 @@ function simplestRow<T extends { name: string; baseName: string }>(rows: T[]): T
  * none); otherwise keeps the distinct parts side by side rather than inventing a
  * conversion — "1 lb + 2 cups" is honest, a made-up total isn't.
  */
+/** Unit aliases, so "1 teaspoon + 1 tsp" sums to "2 tsp" instead of sitting
+ *  side by side looking broken. Same unit spelled two ways is still one unit. */
+const UNIT_ALIAS: Record<string, string> = {
+  teaspoon: 'tsp', teaspoons: 'tsp', tsps: 'tsp',
+  tablespoon: 'tbsp', tablespoons: 'tbsp', tbsps: 'tbsp', tbs: 'tbsp',
+  cups: 'cup',
+  gram: 'g', grams: 'g',
+  kilogram: 'kg', kilograms: 'kg',
+  ounce: 'oz', ounces: 'oz',
+  pound: 'lb', pounds: 'lb', lbs: 'lb',
+  milliliter: 'ml', milliliters: 'ml',
+  liter: 'l', liters: 'l',
+  cloves: 'clove',
+  bunches: 'bunch',
+  cans: 'can',
+};
+const normUnit = (u: string): string => {
+  const k = u.trim().toLowerCase();
+  return UNIT_ALIAS[k] ?? k;
+};
+
 function sumQtyStrings(qtys: string[]): string {
   const real = qtys.map((q) => q.trim()).filter((q) => q && q !== 'as needed');
   if (real.length === 0) return qtys.some((q) => q === 'as needed') ? 'as needed' : '';
@@ -1999,7 +2052,7 @@ function sumQtyStrings(qtys: string[]): string {
       freeform.push(q);
       continue;
     }
-    const u = (unit ?? '').trim().toLowerCase();
+    const u = normUnit(unit ?? '');
     buckets.set(u, (buckets.get(u) ?? 0) + amount);
   }
   const parts = [...buckets.entries()].map(([u, a]) => {

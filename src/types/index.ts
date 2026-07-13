@@ -1,3 +1,4 @@
+import type { PantryCategory } from '@/lib/pantryCategories';
 /**
  * Core domain types — transcribed from spec §4 "Data model".
  *
@@ -274,6 +275,12 @@ export type PantryItem = {
   statusNote?: string;
   /** when status last changed; used for stale 'out' aging */
   statusUpdatedAt?: Date;
+  /**
+   * Manual shelf-category override. Absent = use the keyword guess
+   * (categorizePantryItem). No keyword list is ever right 100% of the time, so
+   * every item can be reassigned by hand and the choice sticks.
+   */
+  category?: PantryCategory;
 };
 
 /**

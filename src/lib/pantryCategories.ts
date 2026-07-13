@@ -82,7 +82,9 @@ const RULES: [PantryCategory, string[]][] = [
   [
     'spices',
     [
-      'salt', 'pepper', 'peppercorn', 'cumin', 'coriander', 'paprika', 'turmeric',
+      // NOT a bare 'pepper' — that would steal "bell pepper" from Produce.
+      'salt', 'black pepper', 'white pepper', 'peppercorn', 'cumin', 'coriander',
+      'paprika', 'turmeric',
       'cinnamon', 'nutmeg', 'clove', 'cardamom', 'oregano', 'thyme', 'rosemary',
       'basil leaves', 'bay leaf', 'bay leaves', 'chili powder', 'chile flakes',
       'chili flakes', 'chile flakes', 'red pepper flakes', 'curry powder',
@@ -139,6 +141,10 @@ const RULES: [PantryCategory, string[]][] = [
     ],
   ],
   [
+    'frozen',
+    ['frozen', 'ice cream', 'popsicle', 'frozen peas', 'puff pastry', 'phyllo'],
+  ],
+  [
     'dairy',
     [
       'milk', 'cream', 'half and half', 'butter', 'cheese', 'cheddar', 'parmesan',
@@ -153,10 +159,6 @@ const RULES: [PantryCategory, string[]][] = [
       'steak', 'ground', 'salmon', 'shrimp', 'fish', 'cod', 'halibut', 'scallop',
       'prosciutto', 'pancetta', 'chorizo', 'tofu', 'tempeh', 'seitan',
     ],
-  ],
-  [
-    'frozen',
-    ['frozen', 'ice cream', 'popsicle', 'frozen peas', 'puff pastry', 'phyllo'],
   ],
   [
     'produce',
@@ -187,16 +189,30 @@ const RULES: [PantryCategory, string[]][] = [
   ],
 ];
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
- * Best-guess shelf category from an ingredient name. Substring match on a
- * normalized name, first rule wins. Unknown → 'other' (never guesses wildly —
- * a wrong confident bucket is worse than an honest "Other").
+ * Does `name` contain `phrase` as WHOLE WORD(S)?
+ *
+ * Plain substring matching was a menace: "chamomile tea" matched `ham` and
+ * landed in Meat & fish. Same class of bug for coconut→nut, eggplant→egg,
+ * watermelon→water, barley→bar. Anchor on word boundaries, and allow a trailing
+ * plural so "tomato" still catches "tomatoes" and "olive" catches "olives".
+ */
+function hasPhrase(name: string, phrase: string): boolean {
+  return new RegExp(`(^|\\W)${escapeRe(phrase)}(e?s)?(\\W|$)`).test(name);
+}
+
+/**
+ * Best-guess shelf category from an ingredient name. First rule wins, so RULES
+ * is ordered most-specific first. Unknown → 'other' — an honest "Other" beats a
+ * confidently wrong bucket, and every item can be reassigned by hand anyway.
  */
 export function categorizePantryItem(name: string): PantryCategory {
   const n = name.toLowerCase().trim();
   for (const [cat, words] of RULES) {
     for (const w of words) {
-      if (n.includes(w)) return cat;
+      if (hasPhrase(n, w)) return cat;
     }
   }
   return 'other';

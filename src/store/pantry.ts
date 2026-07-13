@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 import type { PantryItem, PantryLocation, PantryStatus, ShoppingCategory } from '@/types';
+import type { PantryCategory } from '@/lib/pantryCategories';
 import { migrate, pantryRepo } from '@/lib/db';
 import { webPersist } from '@/lib/db/webStore';
 import { uid } from '@/lib/id';
@@ -56,6 +57,8 @@ type PantryState = {
   applyPaste: (rows: PasteInput[], at?: Date) => Promise<PasteResult>;
   toggleStaple: (id: string) => Promise<void>;
   setLocation: (id: string, location: PantryLocation) => Promise<void>;
+  /** Manually reassign an item's shelf category (overrides the keyword guess). */
+  setCategory: (id: string, category: PantryCategory) => Promise<void>;
   /** spec §10 running-low signal — sets status (+ optional note), stamps statusUpdatedAt. */
   setStatus: (id: string, status: PantryStatus, note?: string) => Promise<void>;
   /** Cycle fine → low → out → fine on tap. */
@@ -199,6 +202,18 @@ export const usePantryStore = create<PantryState>((set, get) => ({
       items: s.items.map((p) => {
         if (p.id !== id) return p;
         updated = { ...p, location };
+        return updated;
+      }),
+    }));
+    if (updated) await persist(updated);
+  },
+
+  setCategory: async (id, category) => {
+    let updated: PantryItem | undefined;
+    set((s) => ({
+      items: s.items.map((p) => {
+        if (p.id !== id) return p;
+        updated = { ...p, category };
         return updated;
       }),
     }));
