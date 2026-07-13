@@ -53,7 +53,13 @@ import {
   type ShoppingSource,
 } from '@/lib/shopping';
 import { formatAmount } from '@/lib/format';
-import { sendToInstacart, toJobItems, INSTACART_AVAILABLE } from '@/lib/instacart';
+import {
+  sendToInstacart,
+  toJobItems,
+  jobStatus,
+  INSTACART_AVAILABLE,
+  type JobStatus,
+} from '@/lib/instacart';
 import type { Recipe, ShoppingCategory } from '@/types';
 
 const CAT_LABEL: Record<ShoppingCategory, string> = {
@@ -205,10 +211,59 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const [addName, setAddName] = useState('');
   const [addQty, setAddQty] = useState('');
   /** {name, isExtraId?} for the long-press detail sheet. Null = closed. */
-  const [menu, setMenu] = useState<{
-    name: string;
-    extraId: string | null;
+  /** The row the long-press sheet is open on. Holds the whole row (not just a
+   *  name) so the sheet can edit the item itself, not only its metadata. */
+  const [menu, setMenu] = useState<FlatRow | null>(null);
+
+  /** The Instacart fill we're waiting on. The Beelink agent claims the queued
+   *  job and drives a real browser, so it takes a minute or two — poll it and
+   *  tell the user what actually landed in the cart instead of a blind "sent!". */
+  const [job, setJob] = useState<{ id: string; status: JobStatus } | null>(null);
+  const [jobResult, setJobResult] = useState<{
+    ok: boolean;
+    added: { name: string; qty: number }[];
+    unresolved: string[];
+    error?: string;
   } | null>(null);
+  useEffect(() => {
+    if (!job || job.status === 'done' || job.status === 'error') return;
+    let cancelled = false;
+    const poll = async () => {
+      const s = await jobStatus(job.id);
+      if (cancelled || !s) return;
+      if (s.status === 'done' || s.status === 'error') {
+        const r = (s.result ?? {}) as {
+          added?: { name: string; qty: number }[];
+          unresolved?: unknown[];
+        };
+        setJobResult(
+          s.status === 'done'
+            ? {
+                ok: true,
+                added: r.added ?? [],
+                unresolved: (r.unresolved ?? []).map((u) => String(u)),
+              }
+            : {
+                ok: false,
+                added: [],
+                unresolved: [],
+                error: s.error ?? 'The cart agent errored.',
+              },
+        );
+        setHint(null);
+        setJob({ id: job.id, status: s.status });
+      } else if (s.status !== job.status) {
+        setJob({ id: job.id, status: s.status });
+      }
+    };
+    const iv = setInterval(poll, 4000);
+    void poll();
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [job?.id, job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filling = job?.status === 'queued' || job?.status === 'running';
   /** Buy-confirm sheet (the buy loop). Checking a row off opens this to place
    *  the item into the pantry (location + qty) before it leaves the list. */
   const [buying, setBuying] = useState<{ name: string; qty: string } | null>(null);
@@ -559,13 +614,6 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alwaysHaveMap, extras, visibleItems, overrides, pushedSet, statusByKey, activeRows]);
 
-  /** How many staples are actually flagged for restock (low/out) — surfaced on
-   *  the Staples segment so you can see there's something to buy without
-   *  switching views. */
-  const staplesToBuy = useMemo(
-    () => stapleRows.filter((r) => r.pantryStatus === 'low' || r.pantryStatus === 'out').length,
-    [stapleRows],
-  );
 
   /** Rows for whichever view you're on; selection + push read from these. */
   const currentRows = listView === 'active' ? activeRows : stapleRows;
@@ -605,12 +653,6 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // Beelink (external, not wired from the app — items just group under
   // Wegmans); everything NOT tagged Wegmans (Stop One + Costco + unassigned)
   // → the Apple Reminders list "Shared Groceries" via the installed Shortcut.
-  const displayLabel = (l: ShoppingLine): string => {
-    const m = metaFor(l.name);
-    const qty = m.qty || (l.buy && l.buy !== 'as needed' ? l.buy : '');
-    const base = l.name.charAt(0).toUpperCase() + l.name.slice(1);
-    return qty ? `${base}, ${qty}` : base;
-  };
   // Push the SELECTED rows to the Apple Reminders list "Shared Groceries" via
   // the installed Shortcut, then park them in the Pushed section and clear the
   // selection. iOS-only (the shortcuts:// scheme no-ops on desktop).
@@ -873,8 +915,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     try {
       setSending(true);
+      setJobResult(null);
       setHint('Pushing to your Wegmans cart…');
-      await sendToInstacart(
+      const id = await sendToInstacart(
         toJobItems(
           rows.map((r) => ({
             name: r.name,
@@ -886,7 +929,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           })),
         ),
       );
-      setHint('Pushed. The cart is filling — open Instacart in ~30s, review, pick Pickup.');
+      // Don't claim success yet — the Beelink agent hasn't touched the cart.
+      // Watch the job and report what actually landed (see the poll effect).
+      setJob({ id, status: 'queued' });
+      setHint('Filling your Wegmans cart… this takes a minute.');
       markPushed();
     } catch (e) {
       setHint(`Couldn't push: ${(e as Error).message}`);
@@ -906,9 +952,12 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     setEditQty(row.qty === 'as needed' ? '' : row.qty);
   };
   const cancelEdit = () => setEditKey(null);
-  const commitEdit = (row: FlatRow) => {
-    const name = editName.trim() || row.name;
-    const qty = editQty.trim();
+  /** The ONE way an item's name/qty gets written. Shared by the single-tap quick
+   *  edit and the long-press sheet, so they can't drift apart. Extras write
+   *  through to their store; recipe/restock rows keep a session override. */
+  const saveRowEdit = (row: FlatRow, rawName: string, rawQty: string) => {
+    const name = rawName.trim() || row.name;
+    const qty = rawQty.trim();
     if (row.extraId) {
       const { amount, unit } = parseQty(qty);
       updateExtra(row.extraId, { canonicalName: name, amount, unit });
@@ -918,6 +967,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         [matchKey(row.baseName)]: { name, qty },
       }));
     }
+  };
+  const commitEdit = (row: FlatRow) => {
+    saveRowEdit(row, editName, editQty);
     setEditKey(null);
   };
 
@@ -976,7 +1028,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                 ? dismissItem(row.baseName)
                 : deleteItem(row.baseName)
         }
-        onLongPress={() => setMenu({ name: row.baseName, extraId: row.extraId })}
+        onLongPress={() => setMenu(row)}
         marked={false}
         always={false}
         likely={false}
@@ -1110,11 +1162,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         <View style={styles.viewSegment}>
           <SegmentedControl
             segments={[
-              // Both counts mean the same thing: how much there is to BUY.
-              // Active = items to get now. Staples = staples that have run
-              // low/out (the ones you have plenty of aren't shopping).
+              // Each count is simply how many rows are in that list — a Staples
+              // count of 1 while 5 staples sit there reads as a bug. The
+              // low/out ones are surfaced by sorting them to the top instead.
               { key: 'active', label: 'Active', count: activeRows.length },
-              { key: 'staples', label: 'Staples', count: staplesToBuy },
+              { key: 'staples', label: 'Staples', count: stapleRows.length },
             ]}
             value={listView}
             onChange={(k) => switchView(k as 'active' | 'staples')}
@@ -1221,24 +1273,29 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         {menu ? (
           <RowDetailSheet
             name={menu.name}
+            qty={menu.qty === 'as needed' ? '' : menu.qty}
             extraId={menu.extraId}
-            meta={metaFor(menu.name)}
-            isAlways={isAlwaysHave(menu.name, alwaysHaveMap)}
-            // Picking a store is a discrete action — and picking Costco DEFERS
-            // the row into the collapsed Costco pile, so it vanishes from the
-            // active list. Close the sheet so you see that happen.
-            onSetStore={(store) => {
-              setShopMeta(menu.name, { store });
+            meta={metaFor(menu.baseName)}
+            isAlways={isAlwaysHave(menu.baseName, alwaysHaveMap)}
+            // Edit the item itself, through the same path as the single-tap
+            // quick edit — the two can't drift apart.
+            onSaveEdit={(name, qty) => {
+              saveRowEdit(menu, name, qty);
               setMenu(null);
             }}
-            onSetField={(patch) => setShopMeta(menu.name, patch)}
+            // Picking a store is a discrete action, so close the sheet on it.
+            onSetStore={(store) => {
+              setShopMeta(menu.baseName, { store });
+              setMenu(null);
+            }}
+            onSetField={(patch) => setShopMeta(menu.baseName, patch)}
             onToggleAlways={() => {
-              pinStaple(menu.name, !isAlwaysHave(menu.name, alwaysHaveMap));
+              pinStaple(menu.baseName, !isAlwaysHave(menu.baseName, alwaysHaveMap));
               setMenu(null);
             }}
             onDelete={() => {
               if (menu.extraId) removeExtra(menu.extraId);
-              else deleteItem(menu.name);
+              else deleteItem(menu.baseName);
               setMenu(null);
             }}
             onClose={() => setMenu(null)}
@@ -1256,6 +1313,75 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             onSkip={skipBuy}
             onClose={() => setBuying(null)}
           />
+        ) : null}
+      </Overlay>
+
+      {/* Instacart result — fires once the Beelink agent has actually filled the
+          cart, so this is a real report, not an optimistic "sent!". Shows the
+          product it matched each item to, plus anything it couldn't find. */}
+      <Overlay visible={jobResult !== null} onClose={() => setJobResult(null)}>
+        {jobResult ? (
+          <View style={styles.combineSheet}>
+            <Heading variant="recipeTitle">
+              {jobResult.ok ? 'Cart filled' : "Cart didn't fill"}
+            </Heading>
+            {jobResult.ok ? (
+              <Text color="textMuted">
+                {jobResult.added.length} item
+                {jobResult.added.length === 1 ? '' : 's'} added to your Wegmans
+                cart.
+                {jobResult.unresolved.length > 0
+                  ? ` ${jobResult.unresolved.length} couldn’t be matched.`
+                  : ''}
+              </Text>
+            ) : (
+              <Text color="accent">{jobResult.error}</Text>
+            )}
+
+            <ScrollView style={styles.combineScroll}>
+              {jobResult.added.map((a, i) => (
+                <View key={`${a.name}-${i}`} style={styles.jobRow}>
+                  <Glyph name="done" size={13} color="ok" />
+                  <Text color="textMuted" style={styles.flex} numberOfLines={2}>
+                    {a.name}
+                    {a.qty > 1 ? ` ×${a.qty}` : ''}
+                  </Text>
+                </View>
+              ))}
+              {jobResult.unresolved.map((u, i) => (
+                <View key={`u-${u}-${i}`} style={styles.jobRow}>
+                  <Glyph name="close" size={13} color="warn" />
+                  <Text color="textFaint" style={styles.flex} numberOfLines={2}>
+                    {u} — not found
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            <Button
+              label="Open Instacart"
+              glyph="next"
+              flex
+              onPress={() => {
+                setJobResult(null);
+                // Just open it — the cart is already filled, nothing to paste.
+                if (Platform.OS === 'web') {
+                  if (isIOSWeb) window.location.href = INSTACART_APP;
+                  else window.open(INSTACART_WEB, '_blank', 'noopener');
+                } else {
+                  void Linking.openURL(INSTACART_APP).catch(() =>
+                    Linking.openURL(INSTACART_WEB),
+                  );
+                }
+              }}
+            />
+            <Pressable
+              style={styles.menuCancel}
+              onPress={() => setJobResult(null)}
+              accessibilityRole="button">
+              <Text color="textMuted">Done</Text>
+            </Pressable>
+          </View>
         ) : null}
       </Overlay>
 
@@ -1358,10 +1484,16 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             onPress={pushToReminders}
           />
           <Button
-            label={sending ? 'Pushing…' : `Push to Wegmans · ${selectedRows.length}`}
+            label={
+              filling
+                ? 'Filling cart…'
+                : sending
+                  ? 'Pushing…'
+                  : `Push to Wegmans · ${selectedRows.length}`
+            }
             glyph="next"
             flex
-            disabled={sending}
+            disabled={sending || filling}
             onPress={pushToWegmans}
           />
         </BottomActionBar>
@@ -1642,8 +1774,10 @@ function parseQty(raw: string): { amount: number | null; unit: string | null } {
 function RowDetailSheet({
   name,
   extraId,
+  qty,
   meta,
   isAlways,
+  onSaveEdit,
   onSetStore,
   onSetField,
   onToggleAlways,
@@ -1651,23 +1785,62 @@ function RowDetailSheet({
   onClose,
 }: {
   name: string;
+  qty: string;
   extraId: string | null;
   meta: ShopMeta;
   isAlways: boolean;
+  onSaveEdit: (name: string, qty: string) => void;
   onSetStore: (store: StoreId | null) => void;
   onSetField: (patch: ShopMeta) => void;
   onToggleAlways: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
+  // Local draft so typing doesn't rewrite the list under you; committed by Save.
+  const [draftName, setDraftName] = useState(name);
+  const [draftQty, setDraftQty] = useState(qty);
+  const dirty = draftName.trim() !== name || draftQty.trim() !== qty;
+
   return (
     <ScrollView style={styles.detailScroll}>
       <View style={styles.menu}>
-        <Text variant="bodyStrong" style={styles.menuTitle}>
-          {name}
-        </Text>
+        {/* Edit the item itself here, not just its metadata — same as the
+            single-tap quick edit, for people who long-press first. */}
+        <SectionLabel color="textMuted">Item</SectionLabel>
+        <View style={styles.detailEditRow}>
+          <TextInput
+            value={draftName}
+            onChangeText={setDraftName}
+            placeholder="Item name"
+            placeholderTextColor={colors.textFaint}
+            style={[styles.editInput, styles.flex]}
+            onSubmitEditing={() => onSaveEdit(draftName, draftQty)}
+            returnKeyType="done"
+            accessibilityLabel="Item name"
+          />
+          <TextInput
+            value={draftQty}
+            onChangeText={setDraftQty}
+            placeholder="Qty"
+            placeholderTextColor={colors.textFaint}
+            style={[styles.editInput, styles.editQtyInput]}
+            onSubmitEditing={() => onSaveEdit(draftName, draftQty)}
+            returnKeyType="done"
+            accessibilityLabel="Quantity"
+          />
+        </View>
+        {dirty ? (
+          <Button
+            label="Save"
+            glyph="done"
+            variant="secondary"
+            onPress={() => onSaveEdit(draftName, draftQty)}
+          />
+        ) : null}
 
-        <SectionLabel color="textMuted">Store</SectionLabel>
+        <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
+          Store
+        </SectionLabel>
         <View style={styles.storeChips}>
           <Pressable
             onPress={() => onSetStore(null)}
@@ -1695,16 +1868,6 @@ function RowDetailSheet({
           })}
         </View>
 
-        <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
-          Quantity
-        </SectionLabel>
-        <TextInput
-          defaultValue={meta.qty ?? ''}
-          onEndEditing={(e) => onSetField({ qty: e.nativeEvent.text })}
-          placeholder="e.g. 2 bags"
-          placeholderTextColor={colors.textFaint}
-          style={styles.editInput}
-        />
         <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
           Brand
         </SectionLabel>
@@ -2028,6 +2191,15 @@ const styles = StyleSheet.create({
   },
   reminderBtn: { marginTop: 20 },
   viewSegment: { paddingBottom: 12 },
+  detailEditRow: { flexDirection: 'row', gap: 8 },
+  jobRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 7,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
   selectMeta: {
     flexDirection: 'row',
     alignItems: 'center',
