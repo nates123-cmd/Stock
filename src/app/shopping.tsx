@@ -185,6 +185,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     Record<string, { name: string; qty: string }>
   >({});
   const [pushedOpen, setPushedOpen] = useState(false);
+  // Costco = the deferred pile ("need it, but not soon"). Collapsed by default.
+  const [costcoOpen, setCostcoOpen] = useState(false);
   // Reminders-style inline add row lives at the bottom of the flat list.
   const addInputRef = useRef<TextInput>(null);
   const [haveOpen, setHaveOpen] = useState(false);
@@ -434,7 +436,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     pantryStatus?: PantryStatus;
     kind: 'recipe' | 'extra' | 'restock';
   };
-  const flatRows = useMemo<FlatRow[]>(() => {
+  const allRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
     const ov = (base: string, qty: string) => {
       const o = overrides[matchKey(base)];
@@ -493,12 +495,35 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey]);
 
+  /** Deferred pile. Tagging an item Costco (long-press → store) is how you say
+   *  "we need this, but not soon — next Costco run." Those rows leave the active
+   *  list and park in a collapsed Costco section, so a thing you won't buy for
+   *  weeks stops cluttering the 90% list. The store tag persists (shop-meta), so
+   *  it survives for as long as it needs to. */
+  const isDeferred = (base: string) => metaFor(base).store === 'costco';
+  const activeRows = useMemo(
+    () => allRows.filter((r) => !isDeferred(r.baseName)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allRows, shopMetaMap],
+  );
+  const costcoRows = useMemo(
+    () => allRows.filter((r) => isDeferred(r.baseName)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allRows, shopMetaMap],
+  );
+
   /** The current selection, resolved to rows (drives the pop-up push bar). */
   const selectedRows = useMemo(
-    () => flatRows.filter((r) => selected.has(matchKey(r.baseName))),
-    [flatRows, selected],
+    // Spans Active AND the Costco pile, so an expanded Costco row can be
+    // selected and pushed (that's the whole point of the Costco run).
+    () => [...activeRows, ...costcoRows].filter((r) => selected.has(matchKey(r.baseName))),
+    [activeRows, costcoRows, selected],
   );
-  const allSelected = flatRows.length > 0 && selectedRows.length === flatRows.length;
+  /** Select-all covers the ACTIVE list only — it must not sweep in the deferred
+   *  Costco pile you deliberately hid. */
+  const allSelected =
+    activeRows.length > 0 &&
+    activeRows.every((r) => selected.has(matchKey(r.baseName)));
 
   /** A push label per row: "Name, qty" (qty omitted when 'as needed'/blank). */
   const rowLabel = (r: FlatRow) => {
@@ -792,7 +817,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
   /** Select every row / clear (the "Select all" toggle). */
   const toggleSelectAll = () =>
-    setSelected(allSelected ? new Set() : new Set(flatRows.map((r) => matchKey(r.baseName))));
+    setSelected(allSelected ? new Set() : new Set(activeRows.map((r) => matchKey(r.baseName))));
 
   /** Enter inline edit for a row (Reminders-style tap-to-edit). */
   const startEdit = (row: FlatRow) => {
@@ -815,6 +840,67 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     setEditKey(null);
   };
+
+  /** One list row — shared by the Active list and the collapsed Costco pile, so
+   *  a deferred row keeps the full behaviour (select, tap-to-edit, swipe,
+   *  long-press options). Renders the inline editor when it's the row you tapped. */
+  const renderRow = (row: FlatRow) =>
+    editKey === row.key ? (
+      // Inline edit (tap-to-edit). Enter or the check commits; tapping another
+      // row abandons the in-progress edit.
+      <View key={row.key} style={styles.editRow}>
+        <TextInput
+          value={editName}
+          onChangeText={setEditName}
+          autoFocus
+          placeholder="Item name"
+          placeholderTextColor={colors.textFaint}
+          style={[styles.editInput, styles.editName]}
+          onSubmitEditing={() => commitEdit(row)}
+          returnKeyType="done"
+        />
+        <TextInput
+          value={editQty}
+          onChangeText={setEditQty}
+          placeholder="Qty"
+          placeholderTextColor={colors.textFaint}
+          style={[styles.editInput, styles.editQtyInput]}
+          onSubmitEditing={() => commitEdit(row)}
+          returnKeyType="done"
+        />
+        <Pressable
+          onPress={() => commitEdit(row)}
+          hitSlop={8}
+          style={styles.editDelete}
+          accessibilityLabel={`Save ${row.name}`}>
+          <Glyph name="done" size={18} color="ok" />
+        </Pressable>
+      </View>
+    ) : (
+      <ShoppingRow
+        key={row.key}
+        name={row.name}
+        qty={row.qty}
+        math={null}
+        origin={row.origin}
+        onTap={() => startEdit(row)}
+        onToggleHave={() => openBuy(row.baseName)}
+        onCheck={() => toggleSelect(row.baseName)}
+        checked={isSelected(row.baseName)}
+        onDelete={() =>
+          row.extraId
+            ? removeExtra(row.extraId)
+            : row.kind === 'restock'
+              ? dismissItem(row.baseName)
+              : deleteItem(row.baseName)
+        }
+        onLongPress={() => setMenu({ name: row.baseName, extraId: row.extraId })}
+        marked={false}
+        always={false}
+        likely={false}
+        pantryStatus={row.pantryStatus}
+      />
+    );
 
   return (
     <SafeAreaView style={styles.root} edges={embedded ? [] : ['top']}>
@@ -939,7 +1025,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ) : (
           <>
 
-        {flatRows.length > 0 ? (
+        {activeRows.length > 0 ? (
           <View style={styles.selectAllRow}>
             <Pressable onPress={toggleSelectAll} hitSlop={6} accessibilityRole="button">
               <Text variant="sectionLabel" color="accent">
@@ -949,64 +1035,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           </View>
         ) : null}
 
-        {flatRows.map((row) =>
-          editKey === row.key ? (
-            // Inline edit (tap-to-edit). Enter or the check commits; tapping
-            // another row abandons the in-progress edit.
-            <View key={row.key} style={styles.editRow}>
-              <TextInput
-                value={editName}
-                onChangeText={setEditName}
-                autoFocus
-                placeholder="Item name"
-                placeholderTextColor={colors.textFaint}
-                style={[styles.editInput, styles.editName]}
-                onSubmitEditing={() => commitEdit(row)}
-                returnKeyType="done"
-              />
-              <TextInput
-                value={editQty}
-                onChangeText={setEditQty}
-                placeholder="Qty"
-                placeholderTextColor={colors.textFaint}
-                style={[styles.editInput, styles.editQtyInput]}
-                onSubmitEditing={() => commitEdit(row)}
-                returnKeyType="done"
-              />
-              <Pressable
-                onPress={() => commitEdit(row)}
-                hitSlop={8}
-                style={styles.editDelete}
-                accessibilityLabel={`Save ${row.name}`}>
-                <Glyph name="done" size={18} color="ok" />
-              </Pressable>
-            </View>
-          ) : (
-            <ShoppingRow
-              key={row.key}
-              name={row.name}
-              qty={row.qty}
-              math={null}
-              origin={row.origin}
-              onTap={() => startEdit(row)}
-              onToggleHave={() => openBuy(row.baseName)}
-              onCheck={() => toggleSelect(row.baseName)}
-              checked={isSelected(row.baseName)}
-              onDelete={() =>
-                row.extraId
-                  ? removeExtra(row.extraId)
-                  : row.kind === 'restock'
-                    ? dismissItem(row.baseName)
-                    : deleteItem(row.baseName)
-              }
-              onLongPress={() => setMenu({ name: row.baseName, extraId: row.extraId })}
-              marked={false}
-              always={false}
-              likely={false}
-              pantryStatus={row.pantryStatus}
-            />
-          ),
-        )}
+        {activeRows.map(renderRow)}
 
         {/* Reminders-style inline add: tap the blank row and type. Enter keeps
             the keyboard up so you can add several in a row. */}
@@ -1028,6 +1057,31 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             style={styles.addInput}
           />
         </Pressable>
+
+        {/* Costco: the deferred pile. "We need pine nuts — but not soon."
+            Long-press → store → Costco parks it here, out of the active list,
+            until the next Costco run. Rows keep full behaviour, so you can
+            expand, select them and push. */}
+        {costcoRows.length > 0 ? (
+          <View style={styles.pushedSection}>
+            <Pressable
+              onPress={() => setCostcoOpen((v) => !v)}
+              style={styles.pushedHeader}
+              accessibilityRole="button"
+              accessibilityLabel={costcoOpen ? 'Collapse Costco list' : 'Expand Costco list'}>
+              <Text variant="sectionLabel" color="textMuted">
+                Costco · {costcoRows.length}
+              </Text>
+              <Glyph
+                name="expand"
+                size={13}
+                color="textMuted"
+                style={costcoOpen ? undefined : styles.pushedCaretClosed}
+              />
+            </Pressable>
+            {costcoOpen ? costcoRows.map(renderRow) : null}
+          </View>
+        ) : null}
 
         {/* Pushed: what went out to Wegmans/Reminders in the last ~2 days.
             Collapsed by default; tap a row to pull it back onto the list. */}
@@ -1099,7 +1153,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             extraId={menu.extraId}
             meta={metaFor(menu.name)}
             isAlways={isAlwaysHave(menu.name, alwaysHaveMap)}
-            onSetStore={(store) => setShopMeta(menu.name, { store })}
+            // Picking a store is a discrete action — and picking Costco DEFERS
+            // the row into the collapsed Costco pile, so it vanishes from the
+            // active list. Close the sheet so you see that happen.
+            onSetStore={(store) => {
+              setShopMeta(menu.name, { store });
+              setMenu(null);
+            }}
             onSetField={(patch) => setShopMeta(menu.name, patch)}
             onToggleAlways={() => {
               setAlways(menu.name, !isAlwaysHave(menu.name, alwaysHaveMap));
