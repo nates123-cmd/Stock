@@ -292,25 +292,37 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const combineGroups = useMemo(() => reviewGroups(items), [items]);
   const [combineReviewed, setCombineReviewed] = useState(false);
   const [combineOpen, setCombineOpen] = useState(false);
-  /** per-group decision, persisted for the session: absent/'combine' = merged. */
-  const [combineDecisions, setCombineDecisions] = useState<
-    Record<string, 'combine' | 'separate'>
-  >({});
+  /** Groups you've already decided this run — they leave the sheet. Lines arrive
+   *  ALREADY merged, so "Combine" used to be a no-op that just re-selected the
+   *  default and looked broken. Now BOTH buttons are real actions: they resolve
+   *  the group on the spot and it disappears from the sheet. */
+  const [combineResolved, setCombineResolved] = useState<Set<string>>(new Set());
+  const pendingGroups = useMemo(
+    () => combineGroups.filter((g) => !combineResolved.has(g.name)),
+    [combineGroups, combineResolved],
+  );
   useEffect(() => {
-    if (!refining && !combineReviewed && combineGroups.length > 0) setCombineOpen(true);
-  }, [refining, combineReviewed, combineGroups.length]);
-  const decideCombine = (name: string, choice: 'combine' | 'separate') =>
-    setCombineDecisions((prev) => ({ ...prev, [name]: choice }));
-  const applyCombineReview = () => {
-    const separate = Object.entries(combineDecisions)
-      .filter(([, c]) => c === 'separate')
-      .map(([n]) => n);
-    if (separate.length > 0) {
-      const set = new Set(separate);
+    if (!refining && !combineReviewed && pendingGroups.length > 0) setCombineOpen(true);
+  }, [refining, combineReviewed, pendingGroups.length]);
+  /** Nothing left to decide → close it out. */
+  useEffect(() => {
+    if (combineOpen && pendingGroups.length === 0) {
+      setCombineReviewed(true);
+      setCombineOpen(false);
+    }
+  }, [combineOpen, pendingGroups.length]);
+  const resolveGroup = (name: string, choice: 'combine' | 'separate') => {
+    // 'combine' = keep the merged line as-is (that's how it already arrives).
+    // 'separate' = split it back into one line per recipe, right now.
+    if (choice === 'separate') {
       setItems((prev) =>
-        prev.flatMap((line) => (set.has(line.name) ? splitMerged(line) : [line])),
+        prev.flatMap((line) => (line.name === name ? splitMerged(line) : [line])),
       );
     }
+    setCombineResolved((prev) => new Set(prev).add(name));
+  };
+  /** "Done" bails out: anything undecided keeps the merged default. */
+  const applyCombineReview = () => {
     setCombineReviewed(true);
     setCombineOpen(false);
   };
@@ -1255,69 +1267,63 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             them separate.
           </Text>
           <ScrollView style={styles.combineScroll}>
-            {combineGroups.map((g) => {
-              const choice = combineDecisions[g.name] ?? 'combine';
-              return (
-                <View key={g.name} style={styles.combineCard}>
-                  <Text variant="bodyStrong" numberOfLines={1}>
-                    {g.name}
-                  </Text>
-                  <Text color="textFaint" style={styles.combineSources} numberOfLines={3}>
-                    {g.perSource.join(' · ')}
-                  </Text>
-                  <Text color={g.convertible ? 'ok' : 'warn'} style={styles.combineSuggest}>
-                    {choice === 'separate'
-                      ? 'Keeping separate'
-                      : `→ Combine to ${g.suggestion}`}
-                    {!g.convertible && choice !== 'separate' ? ' (mixed units)' : ''}
-                  </Text>
-                  <View style={styles.combineActions}>
-                    <Pressable
-                      onPress={() => decideCombine(g.name, 'combine')}
-                      style={[
-                        styles.combineBtn,
-                        choice === 'combine' && styles.combineBtnOn,
-                      ]}
-                      accessibilityRole="button">
-                      <Text
-                        variant="sectionLabel"
-                        color={choice === 'combine' ? 'bg' : 'textMuted'}>
-                        Combine
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => decideCombine(g.name, 'separate')}
-                      style={[
-                        styles.combineBtn,
-                        choice === 'separate' && styles.combineBtnOn,
-                      ]}
-                      accessibilityRole="button">
-                      <Text
-                        variant="sectionLabel"
-                        color={choice === 'separate' ? 'bg' : 'textMuted'}>
-                        Keep separate
-                      </Text>
-                    </Pressable>
-                    <TextInput
-                      defaultValue={g.suggestion}
-                      onEndEditing={(e) => {
-                        const t = e.nativeEvent.text.trim();
-                        if (t) {
-                          editItemQty(g.name, t);
-                          decideCombine(g.name, 'combine');
-                        }
-                      }}
-                      placeholder="Edit qty"
-                      placeholderTextColor={colors.textFaint}
-                      style={[styles.editInput, styles.combineQty]}
-                      accessibilityLabel={`Edit combined quantity for ${g.name}`}
-                    />
-                  </View>
+            {pendingGroups.map((g) => (
+              <View key={g.name} style={styles.combineCard}>
+                <Text variant="bodyStrong" numberOfLines={1}>
+                  {g.name}
+                </Text>
+                <Text color="textFaint" style={styles.combineSources} numberOfLines={3}>
+                  {g.perSource.join(' · ')}
+                </Text>
+                <Text color={g.convertible ? 'ok' : 'warn'} style={styles.combineSuggest}>
+                  → Combine to {g.suggestion}
+                  {g.convertible ? '' : ' (mixed units)'}
+                </Text>
+                <View style={styles.combineActions}>
+                  {/* Both are actions, not a toggle: tapping either settles this
+                      group and drops it off the sheet. Edit the qty first if you
+                      want a different merged amount. */}
+                  <Pressable
+                    onPress={() => resolveGroup(g.name, 'combine')}
+                    style={[styles.combineBtn, styles.combineBtnOn]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Combine ${g.name} to ${g.suggestion}`}>
+                    <Text variant="sectionLabel" color="bg">
+                      Combine
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => resolveGroup(g.name, 'separate')}
+                    style={styles.combineBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Keep ${g.name} separate`}>
+                    <Text variant="sectionLabel" color="textMuted">
+                      Keep separate
+                    </Text>
+                  </Pressable>
+                  <TextInput
+                    defaultValue={g.suggestion}
+                    // Qty edit only — don't resolve here, or the card would
+                    // vanish out from under you mid-edit.
+                    onEndEditing={(e) => {
+                      const t = e.nativeEvent.text.trim();
+                      if (t) editItemQty(g.name, t);
+                    }}
+                    placeholder="Edit qty"
+                    placeholderTextColor={colors.textFaint}
+                    style={[styles.editInput, styles.combineQty]}
+                    accessibilityLabel={`Edit combined quantity for ${g.name}`}
+                  />
                 </View>
-              );
-            })}
+              </View>
+            ))}
           </ScrollView>
-          <Button label="Done" glyph="done" flex onPress={applyCombineReview} />
+          <Button
+            label={`Combine all${pendingGroups.length > 1 ? ` · ${pendingGroups.length}` : ''}`}
+            glyph="done"
+            flex
+            onPress={applyCombineReview}
+          />
         </View>
       </Overlay>
 
