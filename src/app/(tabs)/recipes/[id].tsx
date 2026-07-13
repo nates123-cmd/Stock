@@ -17,12 +17,14 @@ import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
 import { usePlanStore } from '@/store/plan';
+import { useCookStore } from '@/store/cooks';
 import { dayTag, isSameDay } from '@/lib/week';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { convertToGrams } from '@/lib/parsing';
 import { uid } from '@/lib/id';
 import type { Ingredient, MealType, Recipe, Step, Unit } from '@/types';
 import { formatMinutes, formatAmount } from '@/lib/format';
+import { shortDate } from '@/lib/pantry';
 import type { Nutrition, RecipeSource } from '@/types';
 
 const SOURCE_NAME: Record<RecipeSource['type'], string> = {
@@ -98,6 +100,32 @@ export default function RecipeDetail() {
   // `editing` toggles, which crashes the screen to a blank page.
   const { width: viewportWidth } = useWindowDimensions();
   const wide = viewportWidth >= 768;
+
+  /**
+   * The note from the last time this was cooked ("too much salt"). Same rule as
+   * the layout hook above: MUST live above the early returns, or the hook count
+   * changes when `editing` toggles and the screen blanks.
+   *
+   * Only cooks that actually carry a note count — a cook you logged without
+   * saying anything has nothing to tell you.
+   */
+  const cooks = useCookStore((s) => s.cooks);
+  const lastCookNote = useMemo(() => {
+    const withNotes = cooks
+      .filter((c) => c.recipeId === id && (c.note ?? '').trim())
+      .sort((a, b) => {
+        const at = (b.finishedAt ?? b.startedAt) as Date;
+        const bt = (a.finishedAt ?? a.startedAt) as Date;
+        return new Date(at).getTime() - new Date(bt).getTime();
+      });
+    const latest = withNotes[0];
+    if (!latest) return null;
+    return {
+      note: (latest.note ?? '').trim(),
+      at: new Date(latest.finishedAt ?? latest.startedAt),
+      olderCount: withNotes.length - 1,
+    };
+  }, [cooks, id]);
 
   // Always land on the Recipes library — the back button is literally
   // labeled "Recipes", and following history dropped users back into Plan
@@ -350,6 +378,24 @@ export default function RecipeDetail() {
                 </Text>
               </Pressable>
             </View>
+          </Card>
+        ) : null}
+
+        {/* What you said last time you cooked this — the single most useful thing
+            to see before cooking it again ("too much salt"). Sits ABOVE nutrition
+            on purpose: it's your own hard-won note, not a stat. */}
+        {lastCookNote ? (
+          <Card tone="bg2" style={styles.lastNote}>
+            <SectionLabel color="textMuted">
+              Last cook · {shortDate(lastCookNote.at)}
+            </SectionLabel>
+            <Text variant="bodyStrong">{lastCookNote.note}</Text>
+            {lastCookNote.olderCount > 0 ? (
+              <Text color="textFaint">
+                {lastCookNote.olderCount} earlier note
+                {lastCookNote.olderCount === 1 ? '' : 's'}
+              </Text>
+            ) : null}
           </Card>
         ) : null}
 
@@ -1067,6 +1113,7 @@ const styles = StyleSheet.create({
   back: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   content: { padding: layout.screenPadding, paddingBottom: 48, gap: 4 },
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  lastNote: { gap: 4 },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   title: { fontSize: 26, lineHeight: 32, paddingTop: 6 },
   metaRow: {
