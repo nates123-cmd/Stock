@@ -19,6 +19,7 @@ import {
   Button,
   BottomActionBar,
   Overlay,
+  SegmentedControl,
 } from '@/components';
 import { colors, fonts, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
@@ -185,8 +186,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     Record<string, { name: string; qty: string }>
   >({});
   const [pushedOpen, setPushedOpen] = useState(false);
-  // Costco = the deferred pile ("need it, but not soon"). Collapsed by default.
-  const [costcoOpen, setCostcoOpen] = useState(false);
+  // Active is the default view. Staples = the tucked-away pile ("we need it,
+  // but not soon") you toggle to when you want it.
+  const [listView, setListView] = useState<'active' | 'staples'>('active');
   // Reminders-style inline add row lives at the bottom of the flat list.
   const addInputRef = useRef<TextInput>(null);
   const [haveOpen, setHaveOpen] = useState(false);
@@ -495,35 +497,48 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey]);
 
-  /** Deferred pile. Tagging an item Costco (long-press → store) is how you say
-   *  "we need this, but not soon — next Costco run." Those rows leave the active
-   *  list and park in a collapsed Costco section, so a thing you won't buy for
-   *  weeks stops cluttering the 90% list. The store tag persists (shop-meta), so
-   *  it survives for as long as it needs to. */
-  const isDeferred = (base: string) => metaFor(base).store === 'costco';
-  const activeRows = useMemo(
-    () => allRows.filter((r) => !isDeferred(r.baseName)),
+  /** Active = the dominant "get this now" list. `allRows` already excludes
+   *  staples (the always-have pin hides them via inHave) EXCEPT when they're
+   *  flagged low/out, which auto-surfaces them here. */
+  const activeRows = allRows;
+
+  /** Staples = the tucked-away pile you toggle to. "We need pine nuts — but not
+   *  soon." Pinning an item a staple (long-press) parks it here, out of Active,
+   *  for as long as it needs; the pin persists (always-have, IndexedDB). It
+   *  comes back to Active on its own when flagged low/out. */
+  const stapleRows = useMemo<FlatRow[]>(() => {
+    const rows: FlatRow[] = [];
+    for (const key of Object.keys(alwaysHaveMap)) {
+      if (!alwaysHaveMap[key] || pushedSet.has(key)) continue;
+      const ex = extras.find((e) => matchKey(e.canonicalName) === key);
+      const it = visibleItems.find((i) => matchKey(i.name) === key);
+      const base = ex?.canonicalName ?? it?.name ?? key;
+      const o = overrides[matchKey(base)];
+      rows.push({
+        key: `s:${key}`,
+        name: o?.name || base.charAt(0).toUpperCase() + base.slice(1),
+        baseName: base,
+        qty: o?.qty ?? (ex ? extraQty(ex) : (it?.buy ?? '')),
+        extraId: ex?.id ?? null,
+        pantryStatus: statusFor(base),
+        kind: ex ? 'extra' : 'recipe',
+      });
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allRows, shopMetaMap],
-  );
-  const costcoRows = useMemo(
-    () => allRows.filter((r) => isDeferred(r.baseName)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allRows, shopMetaMap],
-  );
+  }, [alwaysHaveMap, extras, visibleItems, overrides, pushedSet, statusByKey]);
+
+  /** Rows for whichever view you're on; selection + push read from these. */
+  const currentRows = listView === 'active' ? activeRows : stapleRows;
 
   /** The current selection, resolved to rows (drives the pop-up push bar). */
   const selectedRows = useMemo(
-    // Spans Active AND the Costco pile, so an expanded Costco row can be
-    // selected and pushed (that's the whole point of the Costco run).
-    () => [...activeRows, ...costcoRows].filter((r) => selected.has(matchKey(r.baseName))),
-    [activeRows, costcoRows, selected],
+    () => currentRows.filter((r) => selected.has(matchKey(r.baseName))),
+    [currentRows, selected],
   );
-  /** Select-all covers the ACTIVE list only — it must not sweep in the deferred
-   *  Costco pile you deliberately hid. */
   const allSelected =
-    activeRows.length > 0 &&
-    activeRows.every((r) => selected.has(matchKey(r.baseName)));
+    currentRows.length > 0 &&
+    currentRows.every((r) => selected.has(matchKey(r.baseName)));
 
   /** A push label per row: "Name, qty" (qty omitted when 'as needed'/blank). */
   const rowLabel = (r: FlatRow) => {
@@ -699,8 +714,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     addExtra([
       { canonicalName: name, amount, unit, originLabel: 'added by you', originId: null },
     ]);
+    // Adding while on Staples pins it a staple, so it lands there instead of
+    // Active — "note the pine nuts, don't put them in my face."
+    if (listView === 'staples') setAlways(name, true);
     setAddName('');
     setAddQty('');
+  };
+
+  /** Switch Active/Staples — clear the selection so it can't leak across views. */
+  const switchView = (v: 'active' | 'staples') => {
+    setListView(v);
+    setSelected(new Set());
+    setEditKey(null);
   };
 
   // Shortcut Instacart path (spec §11 cross-app integrations — Developer
@@ -815,9 +840,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
   };
 
-  /** Select every row / clear (the "Select all" toggle). */
+  /** Select every row in the current view / clear (the "Select all" toggle). */
   const toggleSelectAll = () =>
-    setSelected(allSelected ? new Set() : new Set(activeRows.map((r) => matchKey(r.baseName))));
+    setSelected(allSelected ? new Set() : new Set(currentRows.map((r) => matchKey(r.baseName))));
 
   /** Enter inline edit for a row (Reminders-style tap-to-edit). */
   const startEdit = (row: FlatRow) => {
@@ -888,11 +913,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         onCheck={() => toggleSelect(row.baseName)}
         checked={isSelected(row.baseName)}
         onDelete={() =>
-          row.extraId
-            ? removeExtra(row.extraId)
-            : row.kind === 'restock'
-              ? dismissItem(row.baseName)
-              : deleteItem(row.baseName)
+          listView === 'staples'
+            ? setAlways(row.baseName, false) // unpin → back to the active list
+            : row.extraId
+              ? removeExtra(row.extraId)
+              : row.kind === 'restock'
+                ? dismissItem(row.baseName)
+                : deleteItem(row.baseName)
         }
         onLongPress={() => setMenu({ name: row.baseName, extraId: row.extraId })}
         marked={false}
@@ -1025,7 +1052,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ) : (
           <>
 
-        {activeRows.length > 0 ? (
+        <View style={styles.viewSegment}>
+          <SegmentedControl
+            segments={[
+              { key: 'active', label: 'Active', count: activeRows.length },
+              { key: 'staples', label: 'Staples', count: stapleRows.length },
+            ]}
+            value={listView}
+            onChange={(k) => switchView(k as 'active' | 'staples')}
+          />
+        </View>
+
+        {currentRows.length > 0 ? (
           <View style={styles.selectAllRow}>
             <Pressable onPress={toggleSelectAll} hitSlop={6} accessibilityRole="button">
               <Text variant="sectionLabel" color="accent">
@@ -1035,7 +1073,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           </View>
         ) : null}
 
-        {activeRows.map(renderRow)}
+        {currentRows.map(renderRow)}
 
         {/* Reminders-style inline add: tap the blank row and type. Enter keeps
             the keyboard up so you can add several in a row. */}
@@ -1043,7 +1081,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           style={styles.addRow}
           onPress={() => addInputRef.current?.focus()}
           accessibilityRole="button"
-          accessibilityLabel="Add an item">
+          accessibilityLabel={listView === 'staples' ? 'Add a staple' : 'Add an item'}>
           <View style={styles.addBullet} />
           <TextInput
             ref={addInputRef}
@@ -1052,40 +1090,15 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             onSubmitEditing={submitAdd}
             blurOnSubmit={false}
             returnKeyType="done"
-            placeholder="Add an item"
+            placeholder={listView === 'staples' ? 'Add a staple' : 'Add an item'}
             placeholderTextColor={colors.textFaint}
             style={styles.addInput}
           />
         </Pressable>
 
-        {/* Costco: the deferred pile. "We need pine nuts — but not soon."
-            Long-press → store → Costco parks it here, out of the active list,
-            until the next Costco run. Rows keep full behaviour, so you can
-            expand, select them and push. */}
-        {costcoRows.length > 0 ? (
-          <View style={styles.pushedSection}>
-            <Pressable
-              onPress={() => setCostcoOpen((v) => !v)}
-              style={styles.pushedHeader}
-              accessibilityRole="button"
-              accessibilityLabel={costcoOpen ? 'Collapse Costco list' : 'Expand Costco list'}>
-              <Text variant="sectionLabel" color="textMuted">
-                Costco · {costcoRows.length}
-              </Text>
-              <Glyph
-                name="expand"
-                size={13}
-                color="textMuted"
-                style={costcoOpen ? undefined : styles.pushedCaretClosed}
-              />
-            </Pressable>
-            {costcoOpen ? costcoRows.map(renderRow) : null}
-          </View>
-        ) : null}
-
         {/* Pushed: what went out to Wegmans/Reminders in the last ~2 days.
             Collapsed by default; tap a row to pull it back onto the list. */}
-        {pushedItems.length > 0 ? (
+        {listView === 'active' && pushedItems.length > 0 ? (
           <View style={styles.pushedSection}>
             <Pressable
               onPress={() => setPushedOpen((v) => !v)}
@@ -1650,12 +1663,12 @@ function RowDetailSheet({
           onPress={onToggleAlways}
           accessibilityRole="button">
           <Text variant="bodyStrong" color={isAlways ? 'accent' : 'text'}>
-            {isAlways ? 'Remove “always have” pin' : 'Always have'}
+            {isAlways ? 'Move back to Active' : 'Move to Staples'}
           </Text>
           <Text color="textFaint" style={styles.menuItemHint}>
             {isAlways
-              ? 'Will surface as a regular buy item again.'
-              : 'Never lands on any shopping list again (salt, oil, tahini…).'}
+              ? 'Back on the active list as a regular buy item.'
+              : 'Off the active list — parked in Staples until you want it, or until it runs low.'}
           </Text>
         </Pressable>
         <Pressable
