@@ -2,14 +2,15 @@ import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { Glyph, GlobalCapture } from '@/components';
+import { Glyph } from '@/components';
 import { colors, fonts, type GlyphName } from '@/design';
 
 /**
  * Three-tab bottom nav (redesign) — Recipes · Plan (index) · Cook. Pipeline,
  * Bench and Pantry stay as routes but are hidden from the bar (href:null),
- * reached from the new segmented headers and the Cook launcher. A single
- * global capture FAB floats over every tab, mounted outside <Tabs>.
+ * reached from the new segmented headers and the Cook launcher. The global
+ * capture FAB is gone — the shopping list's inline "Add an item" row is the
+ * capture surface now.
  * Active state in --accent, 10px uppercase labels, glyph icons (no emoji,
  * no icon fonts — spec §2).
  */
@@ -75,8 +76,6 @@ export default function TabLayout() {
         <Tabs.Screen name="bench" options={{ href: null }} />
         <Tabs.Screen name="pantry" options={{ href: null }} />
       </Tabs>
-
-      <GlobalCapture />
     </>
   );
 }

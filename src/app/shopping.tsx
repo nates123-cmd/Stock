@@ -1340,12 +1340,15 @@ function ShoppingRow({
         <View style={styles.item}>
           {/* Checkbox and body are SIBLINGS, not nested — tapping the box
               selects; tapping the row body edits. (Nested, both fired.) */}
-          <GHPressable
-            hitSlop={10}
+          {/* Plain RN Pressable, NOT the gesture-handler one: nested inside the
+              swipeable's pan gesture, a 20x20 gesture-handler target loses the
+              tap to the pan on the slightest pointer drift, so presses never
+              fired. A real press/click handler sidesteps the gesture system.
+              Wrapped in a padded hit area so the box is easy to hit. */}
+          <Pressable
+            hitSlop={12}
             onPress={onCheck ?? onToggleHave}
-            // Empty = unselected. Filled = selected (part of the push). On
-            // Have-bucket rows there's no onCheck, so a tap moves the row back.
-            style={[styles.check, checked && styles.checkOn]}
+            style={styles.checkHit}
             accessibilityRole="checkbox"
             accessibilityState={{ checked: !!checked }}
             accessibilityLabel={
@@ -1355,8 +1358,11 @@ function ShoppingRow({
                   ? `Deselect ${name}`
                   : `Select ${name}`
             }>
-            {checked ? <Glyph name="done" size={12} color="bg" /> : null}
-          </GHPressable>
+            {/* Empty = unselected. Filled = selected (part of the push). */}
+            <View style={[styles.check, checked && styles.checkOn]}>
+              {checked ? <Glyph name="done" size={12} color="bg" /> : null}
+            </View>
+          </Pressable>
           <GHPressable
             style={styles.rowBody}
             onPress={onTap}
@@ -1914,6 +1920,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
+  // Padded tap target around the 20x20 box so it's comfortably hittable.
+  checkHit: { paddingRight: 4, paddingVertical: 2 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   origin: { fontSize: 11, fontStyle: 'italic', paddingTop: 2 },
   check: {
