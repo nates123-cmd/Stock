@@ -750,14 +750,25 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const rows: FlatRow[] = [];
     // An item lives in exactly ONE view.
     const onActive = new Set(activeRows.map((r) => matchKey(r.baseName)));
-    // Both sources of "staple": pinned always-have on the list, and staples
-    // sitting in the pantry. Deduped by matchKey so one thing = one row.
-    const stapleKeys = new Set<string>([
-      ...Object.keys(alwaysHaveMap).filter((k) => alwaysHaveMap[k]),
-      ...pantryStapleKeys,
-    ]);
+
+    // Staples is a SHOPPING list, not a mirror of the pantry. Two sources, and
+    // they earn their place differently:
+    //
+    //  - PINNED (always-have, parked from the list): always shown. That's the
+    //    "we need pine nuts, but not soon" pile — the whole point of the view.
+    //  - PANTRY staple (salt, black pepper…): shown ONLY when it's low/out.
+    //    Something you have plenty of isn't shopping, it's just in your pantry,
+    //    and listing it here buried the pile in things Nate already has.
+    const pinnedKeys = new Set(
+      Object.keys(alwaysHaveMap).filter((k) => alwaysHaveMap[k]),
+    );
+    const stapleKeys = new Set<string>([...pinnedKeys, ...pantryStapleKeys]);
     for (const key of stapleKeys) {
       if (wasPushed(key) || onActive.has(key)) continue;
+      if (!pinnedKeys.has(key)) {
+        const st = statusFor(key);
+        if (st !== 'low' && st !== 'out') continue; // have plenty → pantry's job
+      }
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
       const pan = pantryItems.find((p) => matchKey(p.canonicalName) === key);
