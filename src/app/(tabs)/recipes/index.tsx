@@ -14,6 +14,7 @@ import {
   Pill,
   CookPlanCard,
   Fab,
+  Button,
 } from '@/components';
 import { colors } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -128,8 +129,21 @@ export default function RecipesLibrary() {
     <View style={styles.root}>
       <Screen>
         <View style={styles.header}>
-          <Heading variant="screenTitle">Recipes</Heading>
-          <Text color="textMuted">{recipes.length} saved</Text>
+          <View>
+            <Heading variant="screenTitle">Recipes</Heading>
+            <Text color="textMuted">{recipes.length} saved</Text>
+          </View>
+          {/* The global capture FAB is gone, so this is the entry point now.
+              Follows the segment you're on: the To-try bin takes ideas, the
+              recipe segments take a full recipe. */}
+          <Button
+            label={segment === 'totry' ? 'Add to try' : 'Add recipe'}
+            glyph="add"
+            variant="secondary"
+            onPress={() =>
+              router.push(segment === 'totry' ? '/idea-capture' : '/capture')
+            }
+          />
         </View>
 
         <View style={styles.segments}>
@@ -283,10 +297,9 @@ export default function RecipesLibrary() {
         )}
       </Screen>
 
-      {/* Phase A moved capture to a single global FAB (GlobalCapture, over every
-          tab), so no per-screen capture button in normal mode. But that FAB has
-          no cook-plan option — so when the Cook plans filter is active, surface
-          main's Fab as the one entry point to build a whole-meal production. */}
+      {/* Capture lives in the header "Add recipe" / "Add to try" button now (the
+          global FAB is gone). Cook plans are their own thing — building a
+          whole-meal production keeps its own Fab while that filter is active. */}
       {plansMode ? (
         <Fab onPress={() => router.push('/cook-plan-capture')} />
       ) : null}
@@ -307,8 +320,10 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   header: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    // 'center', not 'baseline' — the Add button sits next to a two-line title.
+    alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
     paddingTop: 8,
     paddingBottom: 14,
   },
