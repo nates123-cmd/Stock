@@ -30,6 +30,12 @@ export type ShopMeta = {
   qty?: string;
   brand?: string;
   note?: string;
+  /** ISO timestamp of an explicit "Move to Staples". An explicit defer beats a
+   *  low/out flag that was already standing when you deferred — otherwise you
+   *  could never park something that's currently low ("we need pine nuts, but
+   *  not soon"). A low/out flag raised AFTER this timestamp still re-surfaces
+   *  the item onto Active. */
+  deferredAt?: string;
 };
 
 /** The Apple Shortcut name Nate installs once (see SHORTCUTS.md). */

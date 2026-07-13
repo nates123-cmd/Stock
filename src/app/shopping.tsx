@@ -158,6 +158,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return m;
   }, [pantryItems]);
+  /** When each low/out flag was raised — so we can tell a FRESH flag from one
+   *  that was already standing when the user deferred the item to Staples. */
+  const statusAtByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of pantryItems) {
+      const s = p.status ?? 'fine';
+      if (s === 'fine') continue;
+      const at = p.statusUpdatedAt ? new Date(p.statusUpdatedAt).getTime() : 0;
+      m.set(matchKey(p.canonicalName), at);
+    }
+    return m;
+  }, [pantryItems]);
   const statusFor = (name: string): PantryStatus | undefined => {
     const k = matchKey(name);
     if (statusByKey.has(k)) return statusByKey.get(k);
@@ -334,10 +346,50 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  an always-have, because "always have" stops being true the moment you
    *  flag it (spec §5 × §10). 'out' also locks the have toggle; 'low' stays
    *  togglable so you can drop it if you've got enough. */
+  /** When was this name flagged low/out (0 if not flagged)? Mirrors statusFor's
+   *  loose matching so the two always agree about the same pantry row. */
+  const statusAtFor = (name: string): number => {
+    const k = matchKey(name);
+    const direct = statusAtByKey.get(k);
+    if (direct !== undefined) return direct;
+    for (const [pk, at] of statusAtByKey) {
+      if (pk.startsWith(k) || k.startsWith(pk)) return at;
+    }
+    return 0;
+  };
+
+  /** Is this name off the Active list?
+   *
+   *  A staple pin (= "Move to Staples") hides it. The wrinkle is low/out: we
+   *  auto-surface a staple onto Active when it runs low — but that rule used to
+   *  beat the pin outright, so you could NEVER park something that was already
+   *  low (pine nuts: flagged low, so "Move to Staples" appeared to do nothing).
+   *
+   *  So an EXPLICIT defer wins over a low/out flag that was already standing
+   *  when you deferred. A flag raised AFTER the defer is fresh news and still
+   *  pulls the item back onto Active. */
   const inHave = (name: string) => {
+    const pinned = isAlwaysHave(name, alwaysHaveMap);
     const ps = statusFor(name);
-    if (ps === 'out' || ps === 'low') return false;
-    return isMarked(haveByName, name) || isAlwaysHave(name, alwaysHaveMap);
+    if (ps === 'out' || ps === 'low') {
+      if (!pinned) return false;
+      const deferredAt = metaFor(name).deferredAt;
+      // Pinned but never explicitly deferred → the auto-surface rule applies.
+      if (!deferredAt) return false;
+      // Flagged again since you deferred it → surface it.
+      if (statusAtFor(name) > new Date(deferredAt).getTime()) return false;
+      // Stale flag + explicit defer → stay parked in Staples.
+      return true;
+    }
+    return isMarked(haveByName, name) || pinned;
+  };
+
+  /** The ONE way to move an item to Staples / back to Active. Stamps the defer
+   *  time on the way in (so a standing low/out flag can't drag it straight back
+   *  out) and clears it on the way back. Every pin path goes through here. */
+  const pinStaple = (name: string, on: boolean) => {
+    setAlways(name, on);
+    setShopMeta(name, { deferredAt: on ? new Date().toISOString() : undefined });
   };
 
   /** Multi-select (matchKey-normalized so "kosher salt" / "salt" collapse). */
@@ -476,7 +528,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       });
     }
     for (const p of pantryRestockLines) {
-      if (dismissed.has(`item:${p.name}`) || pushedSet.has(matchKey(p.name))) continue;
+      // `gone` (not just dismissed/pushed): a low/out staple you explicitly
+      // deferred must not sneak back in through the restock door.
+      if (dismissed.has(`item:${p.name}`) || gone(p.name)) continue;
       const e = ov(p.name, p.buy);
       rows.push({
         key: `p:${p.name}`,
@@ -490,7 +544,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey]);
+  }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey, statusAtByKey, shopMetaMap]);
 
   /** Active = the dominant "get this now" list. `allRows` already excludes
    *  staples (the always-have pin hides them via inHave) EXCEPT when they're
@@ -717,7 +771,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // "note the pine nuts, don't put them in my face." Adding on Active is the
     // opposite intent ("I want this now"), so it UN-pins a name that's currently
     // a staple; otherwise the new row would be hidden by its own pin.
-    setAlways(name, listView === 'staples');
+    pinStaple(name, listView === 'staples');
     setAddName('');
     setAddQty('');
   };
@@ -728,7 +782,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  they stay gone across regen. */
   const deleteSelected = () => {
     for (const row of selectedRows) {
-      if (listView === 'staples') setAlways(row.baseName, false);
+      if (listView === 'staples') pinStaple(row.baseName, false);
       else if (row.extraId) removeExtra(row.extraId);
       else if (row.kind === 'restock') dismissItem(row.baseName);
       else deleteItem(row.baseName);
@@ -929,7 +983,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         checked={isSelected(row.baseName)}
         onDelete={() =>
           listView === 'staples'
-            ? setAlways(row.baseName, false) // unpin → back to the active list
+            ? pinStaple(row.baseName, false) // unpin → back to the active list
             : row.extraId
               ? removeExtra(row.extraId)
               : row.kind === 'restock'
@@ -1190,7 +1244,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             }}
             onSetField={(patch) => setShopMeta(menu.name, patch)}
             onToggleAlways={() => {
-              setAlways(menu.name, !isAlwaysHave(menu.name, alwaysHaveMap));
+              pinStaple(menu.name, !isAlwaysHave(menu.name, alwaysHaveMap));
               setMenu(null);
             }}
             onDelete={() => {
