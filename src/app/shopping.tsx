@@ -296,7 +296,30 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  the item into the pantry (location + qty) before it leaves the list. */
   const [buying, setBuying] = useState<{ name: string; qty: string } | null>(null);
   /** Shop view grouping: by shelf category (default) or by store tag (note 3). */
-  const [groupByStore, setGroupByStore] = useState(false);
+  /** Sort-by-store: OFF by default (the flat list is the default view), and
+   *  persisted so it stays on if you leave it on. Most useful on Staples, where
+   *  you work the pile store by store. */
+  const STORE_SORT_KEY = 'stock:shopping-group-by-store';
+  const [groupByStore, setGroupByStore] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage?.getItem(STORE_SORT_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleGroupByStore = () =>
+    setGroupByStore((v) => {
+      const next = !v;
+      try {
+        window.localStorage?.setItem(STORE_SORT_KEY, next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  /** Bulk store assignment for the checked rows. */
+  const [storeSheet, setStoreSheet] = useState(false);
 
   // First-run polarity hint (spec §5). Dismissed automatically the first time
   // the user toggles any row — the action teaches itself once performed.
@@ -660,6 +683,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     return null;
   }, [activeRows, combineMap]);
 
+  /** Tag every checked row with a store in one go — tagging a staples list one
+   *  long-press at a time is miserable, and sort-by-store is useless untagged. */
+  const assignStoreToSelected = (store: StoreId | null) => {
+    for (const row of selectedRows) setShopMeta(row.baseName, { store });
+    setStoreSheet(false);
+    clearSelection();
+  };
+
   /** Merge the checked rows into one. Shortest/simplest name wins. */
   const combineSelected = () => {
     if (selectedRows.length < 2) return;
@@ -723,6 +754,27 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
   /** Rows for whichever view you're on; selection + push read from these. */
   const currentRows = listView === 'active' ? activeRows : stapleRows;
+
+  /** Rows bucketed by store tag — only when sort-by-store is on. */
+  const storeGroups = useMemo(() => {
+    if (!groupByStore) return null;
+    const buckets: { id: StoreId | null; label: string; rows: FlatRow[] }[] = [
+      ...STORES.map((s) => ({
+        id: s.id as StoreId | null,
+        label: s.label,
+        rows: [] as FlatRow[],
+      })),
+      { id: null as StoreId | null, label: 'Unassigned', rows: [] as FlatRow[] },
+    ];
+    for (const r of currentRows) {
+      const st = metaFor(r.baseName).store ?? null;
+      const b = buckets.find((x) => x.id === st) ?? buckets[buckets.length - 1]!;
+      b.rows.push(r);
+    }
+    return buckets.filter((b) => b.rows.length > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupByStore, currentRows, shopMetaMap]);
+
 
   /** The current selection, resolved to rows (drives the pop-up push bar). */
   const selectedRows = useMemo(
@@ -1285,6 +1337,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
         {currentRows.length > 0 ? (
           <View style={styles.selectAllRow}>
+            {/* Sort-by-store is opt-in; the flat list stays the default. */}
+            <Pressable
+              onPress={toggleGroupByStore}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityState={{ selected: groupByStore }}>
+              <Text
+                variant="sectionLabel"
+                color={groupByStore ? 'accent' : 'textFaint'}>
+                {groupByStore ? 'By store' : 'Sort by store'}
+              </Text>
+            </Pressable>
             <Pressable onPress={toggleSelectAll} hitSlop={6} accessibilityRole="button">
               <Text variant="sectionLabel" color="accent">
                 {allSelected ? 'Deselect all' : 'Select all'}
@@ -1293,7 +1357,16 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           </View>
         ) : null}
 
-        {currentRows.map(renderRow)}
+        {storeGroups
+          ? storeGroups.map((g) => (
+              <View key={g.label} style={styles.section}>
+                <SectionLabel color={g.id ? 'text' : 'textMuted'}>
+                  {g.label} · {g.rows.length}
+                </SectionLabel>
+                {g.rows.map(renderRow)}
+              </View>
+            ))
+          : currentRows.map(renderRow)}
 
         {/* Reminders-style inline add: tap the blank row and type. Enter keeps
             the keyboard up so you can add several in a row. */}
@@ -1504,6 +1577,43 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ) : null}
       </Overlay>
 
+      {/* Bulk store assignment for the checked rows. */}
+      <Overlay visible={storeSheet} onClose={() => setStoreSheet(false)}>
+        <View style={styles.menu}>
+          <Text variant="bodyStrong" style={styles.menuTitle}>
+            Assign a store to {selectedRows.length} item
+            {selectedRows.length === 1 ? '' : 's'}
+          </Text>
+          <View style={styles.storeChips}>
+            <Pressable
+              onPress={() => assignStoreToSelected(null)}
+              style={styles.storeChip}
+              accessibilityRole="button">
+              <Text variant="sectionLabel" color="textMuted">
+                Unassigned
+              </Text>
+            </Pressable>
+            {STORES.map((s) => (
+              <Pressable
+                key={s.id}
+                onPress={() => assignStoreToSelected(s.id)}
+                style={styles.storeChip}
+                accessibilityRole="button">
+                <Text variant="sectionLabel" color="textMuted">
+                  {s.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable
+            style={styles.menuCancel}
+            onPress={() => setStoreSheet(false)}
+            accessibilityRole="button">
+            <Text color="textMuted">Cancel</Text>
+          </Pressable>
+        </View>
+      </Overlay>
+
       {/* Suggestion bar — non-blocking, one at a time, only when you're not
           mid-selection. Replaces the "Combine duplicates?" modal. */}
       {suggestion && selectedRows.length === 0 ? (
@@ -1531,6 +1641,17 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             <View style={styles.selectMeta}>
               <Pressable onPress={clearSelection} hitSlop={6} accessibilityRole="button">
                 <Text color="textFaint">{selectedRows.length} selected</Text>
+              </Pressable>
+              {/* Bulk store tag — sort-by-store is useless if tagging is a
+                  long-press at a time. */}
+              <Pressable
+                onPress={() => setStoreSheet(true)}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={`Assign a store to ${selectedRows.length} items`}>
+                <Text variant="sectionLabel" color="textMuted">
+                  Store
+                </Text>
               </Pressable>
               {/* Manual combine: check two look-alikes, fold them into one. */}
               {selectedRows.length >= 2 && listView === 'active' ? (
@@ -2356,7 +2477,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
-  selectAllRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 6 },
+  selectAllRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 6,
+  },
   pushedSection: { marginTop: 24 },
   pushedHeader: {
     flexDirection: 'row',

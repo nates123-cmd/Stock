@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AppState, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { AppState, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import ReanimatedSwipeable, {
@@ -31,6 +31,7 @@ import { useShopMetaStore } from '@/store/shopMeta';
 import { isAlwaysHave, alwaysHaveKey } from '@/lib/alwaysHave';
 import type { Dish, Meal, MealType, Recipe } from '@/types';
 import { dateKey, dayLabel, isSameDay } from '@/lib/week';
+import { formatMinutes } from '@/lib/format';
 
 type PlanView = 'horizontal' | 'vertical';
 const VIEW_KEY = 'stock:plan-view';
@@ -146,6 +147,8 @@ export default function PlanScreen() {
     return m;
   }, [planMeals]);
 
+  const recipeFor = (dish: Dish): Recipe | undefined =>
+    dish.recipeId ? recipeById.get(dish.recipeId) : undefined;
   const dishLabel = (dish: Dish): string => {
     if (dish.recipeId) return recipeById.get(dish.recipeId)?.title ?? dish.title;
     return dish.title || (dish.pipelineId ? 'experimental idea' : 'dish');
@@ -209,6 +212,7 @@ export default function PlanScreen() {
       today={isSameDay(day, new Date(todayMs))}
       meals={mealsByDay.get(dateKey(day)) ?? []}
       dishLabel={dishLabel}
+      recipeFor={recipeFor}
       onAdd={() => openPicker(day)}
       onDelete={(mealId, dishId) => removeDish(mealId, dishId)}
       onOpenDish={(meal, dish) => setManage({ meal, dish })}
@@ -460,6 +464,7 @@ function DayMeals({
   today,
   meals,
   dishLabel,
+  recipeFor,
   onAdd,
   onDelete,
   onOpenDish,
@@ -468,6 +473,7 @@ function DayMeals({
   today: boolean;
   meals: Meal[];
   dishLabel: (d: Dish) => string;
+  recipeFor: (d: Dish) => Recipe | undefined;
   onAdd: () => void;
   onDelete: (mealId: string, dishId: string) => void;
   onOpenDish: (meal: Meal, dish: Dish) => void;
@@ -503,6 +509,7 @@ function DayMeals({
                   <DishRow
                     meal={meal}
                     label={dishLabel(dish)}
+                    recipe={recipeFor(dish)}
                     experimental={!!dish.pipelineId}
                     onPress={() => onOpenDish(meal, dish)}
                   />
@@ -524,11 +531,14 @@ function DayMeals({
 function DishRow({
   meal,
   label,
+  recipe,
   experimental,
   onPress,
 }: {
   meal: Meal;
   label: string;
+  /** The dish's recipe, when it has one — drives the thumbnail + meta line. */
+  recipe?: Recipe;
   experimental: boolean;
   onPress: () => void;
 }) {
@@ -541,15 +551,43 @@ function DishRow({
       : experimental
         ? styles.dishExp
         : styles.dishPlanned;
+  // Preview line: what it actually takes to make this. Only shown when the dish
+  // is a real recipe — an experimental idea has nothing to preview.
+  const time = recipe ? formatMinutes(recipe.yield.totalMinutes) : '';
+  const meta = recipe
+    ? [`serves ${recipe.yield.serves}`, time ? `~${time}` : '']
+        .filter(Boolean)
+        .join(' · ')
+    : '';
   return (
     <GHPressable onPress={onPress} style={[styles.dish, stateStyle]}>
-      <Text
-        color={cooked ? 'ok' : skipped ? 'textFaint' : 'text'}
-        numberOfLines={1}
-        style={[styles.dishTitle, skipped && styles.strike]}>
-        {cooked ? '✓ ' : ''}
-        {label}
-      </Text>
+      {/* Thumbnail when the recipe has one; a quiet placeholder when it doesn't,
+          so rows don't jump around between recipes with and without photos. */}
+      {recipe ? (
+        recipe.imageUrl ? (
+          <Image
+            source={{ uri: recipe.imageUrl }}
+            style={styles.dishThumb}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.dishThumb, styles.dishThumbEmpty]} />
+        )
+      ) : null}
+      <View style={styles.dishBody}>
+        <Text
+          color={cooked ? 'ok' : skipped ? 'textFaint' : 'text'}
+          numberOfLines={2}
+          style={[styles.dishTitle, skipped && styles.strike]}>
+          {cooked ? '✓ ' : ''}
+          {label}
+        </Text>
+        {meta ? (
+          <Text color="textFaint" numberOfLines={1}>
+            {meta}
+          </Text>
+        ) : null}
+      </View>
       {experimental ? (
         <Text variant="sectionLabel" color="warn">
           exp
@@ -797,6 +835,14 @@ const styles = StyleSheet.create({
   },
   // minWidth: 0 lets the title shrink on narrow phones (RN/web flex children
   // default to min-content sizing).
+  dishThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+    backgroundColor: colors.bg2,
+  },
+  dishThumbEmpty: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
+  dishBody: { flex: 1, gap: 1 },
   dishTitle: { flex: 1, minWidth: 0 },
   strike: { textDecorationLine: 'line-through' },
   addDish: {
