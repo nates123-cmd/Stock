@@ -226,8 +226,12 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   } | null>(null);
   const [jobResult, setJobResult] = useState<{
     ok: boolean;
+    /** False when the agent couldn't read the cart back — it knows nothing. */
+    verified?: boolean;
     addedCount: number;
     added: { name: string; qty: number }[];
+    /** In the cart, but Instacart says it isn't available in your area. */
+    unavailable?: string[];
     /** Our names for what the agent couldn't get. These STAY on the list. */
     missing: string[];
     error?: string;
@@ -257,30 +261,75 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         return;
       }
 
+      type AgentItem = { name?: string; core?: string; qty?: number };
       const r = (s.result ?? {}) as {
-        added?: { name: string; qty: number }[];
+        verified?: boolean;
+        added?: AgentItem[];
+        unavailable?: AgentItem[];
+        failed?: AgentItem[];
+        unverified?: AgentItem[];
         unresolved?: unknown[];
       };
-      const added = r.added ?? [];
-      // The agent reports what it couldn't match. Resolve those back to OUR row
-      // names, and only mark the REST as pushed — anything it couldn't get has
-      // to stay on the list, or you'd silently never buy it.
-      const missKeys = new Set((r.unresolved ?? []).map((u) => matchKey(String(u))));
-      const gotRows = job.rows.filter((row) => !missKeys.has(matchKey(row.baseName)));
-      const missRows = job.rows.filter((row) => missKeys.has(matchKey(row.baseName)));
+
+      // TRUST ONLY WHAT THE AGENT CONFIRMED.
+      //
+      // The agent used to report every item it *tried* to add as added — even
+      // ones Instacart accepted and then flagged "not available in your area".
+      // Stock took that at face value and dropped them off the list, so they
+      // never got bought. It now names every outcome, and ONLY `added` (in the
+      // cart AND available) is safe to clear.
+      //
+      // `verified: false` means it couldn't read the cart back — so it knows
+      // nothing, and nothing leaves the list.
+      const verified = r.verified !== false;
+      const added = verified ? (r.added ?? []) : [];
+
+      // Everything the agent could not deliver, by OUR name for it. Each of
+      // these stays on the shopping list.
+      const kept: AgentItem[][] = [
+        r.unavailable ?? [],
+        r.failed ?? [],
+        r.unverified ?? [],
+      ];
+      const keptKeys = new Set(
+        kept
+          .flat()
+          .map((i) => matchKey(String(i.core ?? i.name ?? '')))
+          .filter(Boolean),
+      );
+      for (const u of r.unresolved ?? []) keptKeys.add(matchKey(String(u)));
+
+      // Match the agent's confirmed items back to our rows; a row only clears if
+      // it isn't in the kept set AND the agent actually confirmed something.
+      const addedKeys = new Set(
+        added.map((a) => matchKey(String(a.core ?? a.name ?? ''))).filter(Boolean),
+      );
+      const gotRows = job.rows.filter((row) => {
+        const k = matchKey(row.baseName);
+        if (keptKeys.has(k)) return false;
+        // If the agent gave us names we can match, require a match. If it gave
+        // us nothing usable, clear nothing — silence isn't success.
+        return addedKeys.size > 0 ? addedKeys.has(k) : false;
+      });
+      const missRows = job.rows.filter((row) => !gotRows.includes(row));
+
       if (gotRows.length > 0) {
         pushToPushed(
           gotRows.map((row) => row.baseName),
           'wegmans',
         );
       }
+
+      const unavailNames = (r.unavailable ?? [])
+        .map((i) => String(i.core ?? i.name ?? ''))
+        .filter(Boolean);
       setJobResult({
         ok: true,
+        verified,
         addedCount: added.length,
-        added,
-        missing: missRows.length > 0
-          ? missRows.map((row) => row.name)
-          : (r.unresolved ?? []).map((u) => String(u)),
+        added: added.map((a) => ({ name: String(a.name ?? a.core ?? ''), qty: a.qty ?? 1 })),
+        unavailable: unavailNames,
+        missing: missRows.map((row) => row.name),
       });
       setHint(null);
       setJob({ ...job, status: s.status });
@@ -1648,17 +1697,22 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             <Heading variant="recipeTitle">
               {jobResult.ok ? 'Cart filled' : "Cart didn't fill"}
             </Heading>
-            {jobResult.ok ? (
+            {!jobResult.ok ? (
+              <Text color="accent">{jobResult.error} Nothing left your list.</Text>
+            ) : jobResult.verified === false ? (
+              // The agent couldn't read the cart back, so it doesn't actually
+              // know what landed. Say so instead of inventing a number.
+              <Text color="warn">
+                Couldn’t confirm what made it into the cart, so nothing was
+                cleared. Check Instacart, then clear anything you did get.
+              </Text>
+            ) : (
               <Text color="textMuted">
                 {jobResult.addedCount} item
                 {jobResult.addedCount === 1 ? '' : 's'} added
                 {jobResult.missing.length > 0
                   ? `; ${jobResult.missing.join(', ')} not available — kept on your list.`
                   : '.'}
-              </Text>
-            ) : (
-              <Text color="accent">
-                {jobResult.error} Nothing left your list.
               </Text>
             )}
 
@@ -1672,14 +1726,26 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                   </Text>
                 </View>
               ))}
-              {jobResult.missing.map((u, i) => (
-                <View key={`u-${u}-${i}`} style={styles.jobRow}>
-                  <Glyph name="close" size={13} color="warn" />
-                  <Text color="textFaint" style={styles.flex} numberOfLines={2}>
-                    {u} — not available, still on your list
-                  </Text>
-                </View>
-              ))}
+              {jobResult.missing.map((u, i) => {
+                // Distinguish "Instacart put it in the cart then said it isn't
+                // available in your area" from "couldn't find it at all" — they
+                // mean different things to you.
+                const unavail = (jobResult.unavailable ?? []).some(
+                  (n) => matchKey(n) === matchKey(u),
+                );
+                return (
+                  <View key={`u-${u}-${i}`} style={styles.jobRow}>
+                    <Glyph name="close" size={13} color="warn" />
+                    <Text color="textFaint" style={styles.flex} numberOfLines={2}>
+                      {u} —{' '}
+                      {unavail
+                        ? 'not available in your area'
+                        : 'couldn’t be added'}
+                      , still on your list
+                    </Text>
+                  </View>
+                );
+              })}
             </ScrollView>
 
             <Button
