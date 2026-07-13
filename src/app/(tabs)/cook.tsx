@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -8,8 +8,7 @@ import {
   SectionLabel,
   Card,
   Button,
-  RecipeCard,
-  BenchSheet,
+  BenchPanel,
   type BenchTab,
 } from '@/components';
 import { colors } from '@/design';
@@ -26,16 +25,20 @@ type RelevantMeal = { meal: Meal; dishes: CookableDish[] };
  * today's (preferring a dinner-typed meal), else the next upcoming meal that
  * carries a cookable dish (Phase B model: Day→Meals→Dishes). Shows that meal's
  * dish(es): cook a single dish, or Combine 2+ into one back-scheduled timeline
- * (src/app/cook/meal/[id]). Bench (scale/convert/sub) folds in here as a sheet.
+ * (src/app/cook/meal/[id]).
+ *
+ * The screen is exactly two sections: TONIGHT, then BENCH inline below it
+ * (scale/convert/sub, rendered directly — no sheet). The old "Cook something
+ * now" recipe grid is gone; browsing recipes is the Recipes tab's job.
  */
 export default function CookScreen() {
   const router = useRouter();
   const planMeals = usePlanStore((s) => s.meals);
   const recipes = useRecipeStore((s) => s.recipes);
-  const [benchOpen, setBenchOpen] = useState(false);
 
-  // Bench deep-links (recipe-detail "To grams" / long-press → Sub) land here
-  // and auto-open the folded-in Bench sheet, pre-loaded from the params.
+  // Bench deep-links (recipe-detail "To grams" / long-press → Sub) land here.
+  // Bench is inline now, so there's nothing to open — the params just seed the
+  // panel, and benchKey remounts it when a fresh deep-link arrives.
   const benchParams = useLocalSearchParams<{
     bench?: string;
     tab?: BenchTab;
@@ -45,12 +48,6 @@ export default function CookScreen() {
     unit?: string;
   }>();
   const benchKey = `${benchParams.bench ?? ''}:${benchParams.tab ?? ''}:${benchParams.sub ?? ''}:${benchParams.text ?? ''}`;
-  useEffect(() => {
-    if (benchParams.bench || benchParams.sub || benchParams.text || benchParams.tab) {
-      setBenchOpen(true);
-    }
-    // Re-fires when a fresh deep-link hands over new params.
-  }, [benchKey, benchParams.bench, benchParams.sub, benchParams.text, benchParams.tab]);
 
   const recipeById = useMemo(() => {
     const m = new Map<string, Recipe>();
@@ -86,11 +83,6 @@ export default function CookScreen() {
   }, [planMeals, recipeById]);
 
   const isToday = relevant ? isSameDay(relevant.meal.date, new Date()) : false;
-
-  const cookable = useMemo(
-    () => recipes.filter((r) => r.status !== 'archived'),
-    [recipes],
-  );
 
   const launch = (id: string) =>
     router.push({ pathname: '/cook/[id]', params: { id } } as never);
@@ -158,43 +150,24 @@ export default function CookScreen() {
       ) : (
         <Card style={styles.mealCard}>
           <Text color="textMuted">Nothing planned to cook.</Text>
-          <Text color="textFaint">Pick something below, or plan a meal.</Text>
+          <Text color="textFaint">Plan a meal, or pick a recipe from Recipes.</Text>
         </Card>
       )}
 
-      <SectionLabel style={styles.label}>Cook something now</SectionLabel>
-      <View style={styles.list}>
-        {cookable.map((r) => (
-          <RecipeCard key={r.id} recipe={r} onPress={() => launch(r.id)} />
-        ))}
-        {cookable.length === 0 ? (
-          <Text color="textFaint">No recipes yet.</Text>
-        ) : null}
-      </View>
-
-      <View style={styles.benchRow}>
-        <SectionLabel style={styles.label}>Bench</SectionLabel>
-        <Text color="textFaint" style={styles.benchHint}>
-          Scale, convert and substitute — folded in here, no longer its own tab.
-        </Text>
-        <Button
-          label="Open Bench"
-          glyph="bench"
-          variant="secondary"
-          onPress={() => setBenchOpen(true)}
-        />
-      </View>
-
-      <BenchSheet
-        visible={benchOpen}
-        onClose={() => setBenchOpen(false)}
-        initial={{
-          initialTab: benchParams.tab,
-          initialText: benchParams.text ?? '',
-          initialSub: benchParams.sub ?? '',
-          initialAmount: benchParams.amount ?? '',
-          initialUnit: benchParams.unit ?? 'cup',
-        }}
+      {/* Bench sits right under Tonight, inline — no sheet to open. Cook is two
+          things now: what you're cooking, and the tools to cook it. The recipe
+          grid ("Cook something now") lives on the Recipes tab; it doesn't belong
+          here. */}
+      <SectionLabel style={styles.label}>Bench</SectionLabel>
+      {/* Keyed on the deep-link params so arriving from a recipe's "To grams" /
+          "Sub" re-seeds the panel instead of showing a stale one. */}
+      <BenchPanel
+        key={benchKey}
+        initialTab={benchParams.tab}
+        initialText={benchParams.text ?? ''}
+        initialSub={benchParams.sub ?? ''}
+        initialAmount={benchParams.amount ?? ''}
+        initialUnit={benchParams.unit ?? ''}
       />
     </Screen>
   );

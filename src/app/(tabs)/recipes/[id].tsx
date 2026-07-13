@@ -39,6 +39,7 @@ export default function RecipeDetail() {
   const recipe = useRecipeStore((s) => s.recipes.find((r) => r.id === id));
   const allRecipes = useRecipeStore((s) => s.recipes);
   const save = useRecipeStore((s) => s.save);
+  const toggleFavorite = useRecipeStore((s) => s.toggleFavorite);
   // Autocomplete source for the tag editor — every tag used anywhere in the
   // library, deduped case-insensitively (spec §6 tag editor).
   const allTagsAcrossLibrary = useMemo(() => {
@@ -266,9 +267,25 @@ export default function RecipeDetail() {
             resizeMode="cover"
           />
         ) : null}
-        <Heading variant="screenTitle" style={styles.title}>
-          {recipe.title}
-        </Heading>
+        <View style={styles.titleRow}>
+          <Heading variant="screenTitle" style={styles.title}>
+            {recipe.title}
+          </Heading>
+          <Pressable
+            onPress={() => void toggleFavorite(recipe.id)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityState={{ selected: !!recipe.isFavorite }}
+            accessibilityLabel={
+              recipe.isFavorite ? 'Remove from favorites' : 'Add to favorites'
+            }>
+            <Glyph
+              name={recipe.isFavorite ? 'fav' : 'favOff'}
+              size={22}
+              color={recipe.isFavorite ? 'accent' : 'textFaint'}
+            />
+          </Pressable>
+        </View>
 
         <View style={styles.metaRow}>
           <Pressable
@@ -1050,6 +1067,7 @@ const styles = StyleSheet.create({
   back: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   content: { padding: layout.screenPadding, paddingBottom: 48, gap: 4 },
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   title: { fontSize: 26, lineHeight: 32, paddingTop: 6 },
   metaRow: {
     flexDirection: 'row',

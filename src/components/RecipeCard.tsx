@@ -9,7 +9,18 @@ import { modCount } from '@/lib/recipe';
 import { formatMinutes } from '@/lib/format';
 
 /** Library / list recipe card (spec §6 "Recipe cards"). */
-export function RecipeCard({ recipe, onPress }: { recipe: Recipe; onPress?: () => void }) {
+export function RecipeCard({
+  recipe,
+  onPress,
+  favorite,
+  onToggleFavorite,
+}: {
+  recipe: Recipe;
+  onPress?: () => void;
+  /** Current favourite state. Omit to hide the star entirely. */
+  favorite?: boolean;
+  onToggleFavorite?: () => void;
+}) {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
   return (
@@ -26,7 +37,28 @@ export function RecipeCard({ recipe, onPress }: { recipe: Recipe; onPress?: () =
           <Text variant="recipeTitle" style={styles.title}>
             {recipe.title}
           </Text>
-          <Glyph name="next" size={16} color="textFaint" />
+          {onToggleFavorite ? (
+            // Its own press target so favouriting doesn't open the recipe.
+            <Pressable
+              onPress={onToggleFavorite}
+              hitSlop={10}
+              style={styles.fav}
+              accessibilityRole="button"
+              accessibilityState={{ selected: !!favorite }}
+              accessibilityLabel={
+                favorite
+                  ? `Remove ${recipe.title} from favorites`
+                  : `Add ${recipe.title} to favorites`
+              }>
+              <Glyph
+                name={favorite ? 'fav' : 'favOff'}
+                size={18}
+                color={favorite ? 'accent' : 'textFaint'}
+              />
+            </Pressable>
+          ) : (
+            <Glyph name="next" size={16} color="textFaint" />
+          )}
         </View>
 
         <View style={styles.metaRow}>
@@ -82,6 +114,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   title: { flex: 1 },
+  fav: { paddingLeft: 4, paddingTop: 1 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   statRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   tagRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 },

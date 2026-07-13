@@ -14,7 +14,7 @@ import {
   Pill,
   CookPlanCard,
   Fab,
-  Button,
+  Overlay,
 } from '@/components';
 import { colors } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -39,6 +39,9 @@ type Segment = 'favorites' | 'totry' | 'all';
 export default function RecipesLibrary() {
   const router = useRouter();
   const recipes = useRecipeStore((s) => s.recipes);
+  const toggleFavorite = useRecipeStore((s) => s.toggleFavorite);
+  /** The + sheet: recipe or idea (or a cook plan, in plans mode). */
+  const [addOpen, setAddOpen] = useState(false);
   const cookPlans = useCookPlanStore((s) => s.plans);
   const pantry = usePantryStore((s) => s.items);
   const ideas = usePipelineStore((s) => s.ideas);
@@ -86,12 +89,18 @@ export default function RecipesLibrary() {
     });
   }, [recipes, query, filter, activeTags, pantry]);
 
-  const byRecent = (a: Recipe, b: Recipe) =>
-    b.modifiedAt.getTime() - a.modifiedAt.getTime();
+  // Newest-ADDED first (createdAt, not modifiedAt — editing an old recipe
+  // shouldn't shove it to the top of the feed).
+  const byNewest = (a: Recipe, b: Recipe) =>
+    b.createdAt.getTime() - a.createdAt.getTime();
   // Favorites segment reuses the same search/filter path, then pins to flagged.
-  const shown = segment === 'favorites' ? filtered.filter((r) => r.isFavorite) : filtered;
-  const recentlyCooked = shown.filter((r) => r.cookCount > 0).sort(byRecent);
-  const library = shown.filter((r) => r.cookCount === 0).sort(byRecent);
+  const shown = useMemo(
+    () =>
+      (segment === 'favorites' ? filtered.filter((r) => r.isFavorite) : filtered)
+        .slice()
+        .sort(byNewest),
+    [filtered, segment],
+  );
 
   // To-Try bin = the Pipeline ideas, still-active (unpromoted), newest first.
   const toTry = useMemo(() => {
@@ -133,17 +142,6 @@ export default function RecipesLibrary() {
             <Heading variant="screenTitle">Recipes</Heading>
             <Text color="textMuted">{recipes.length} saved</Text>
           </View>
-          {/* The global capture FAB is gone, so this is the entry point now.
-              Follows the segment you're on: the To-try bin takes ideas, the
-              recipe segments take a full recipe. */}
-          <Button
-            label={segment === 'totry' ? 'Add to try' : 'Add recipe'}
-            glyph="add"
-            variant="secondary"
-            onPress={() =>
-              router.push(segment === 'totry' ? '/idea-capture' : '/capture')
-            }
-          />
         </View>
 
         <View style={styles.segments}>
@@ -249,34 +247,24 @@ export default function RecipesLibrary() {
               )
             ) : (
               <>
-                {recentlyCooked.length > 0 ? (
-                  <Section label="Recently cooked">
-                    {recentlyCooked.map((r) => (
+                {/* One flat feed, newest-added first. The old Recently-cooked /
+                    Library split is gone — "recently added on top" only reads as
+                    one continuous list. */}
+                {shown.length > 0 ? (
+                  <View style={styles.sectionBody}>
+                    {shown.map((r) => (
                       <View key={r.id} style={styles.cardCell}>
                         <RecipeCard
                           recipe={r}
                           onPress={() =>
                             router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
                           }
+                          favorite={r.isFavorite}
+                          onToggleFavorite={() => toggleFavorite(r.id)}
                         />
                       </View>
                     ))}
-                  </Section>
-                ) : null}
-
-                {library.length > 0 ? (
-                  <Section label="Library">
-                    {library.map((r) => (
-                      <View key={r.id} style={styles.cardCell}>
-                        <RecipeCard
-                          recipe={r}
-                          onPress={() =>
-                            router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
-                          }
-                        />
-                      </View>
-                    ))}
-                  </Section>
+                  </View>
                 ) : null}
 
                 {shown.length === 0 ? (
@@ -297,12 +285,60 @@ export default function RecipesLibrary() {
         )}
       </Screen>
 
-      {/* Capture lives in the header "Add recipe" / "Add to try" button now (the
-          global FAB is gone). Cook plans are their own thing — building a
-          whole-meal production keeps its own Fab while that filter is active. */}
-      {plansMode ? (
-        <Fab onPress={() => router.push('/cook-plan-capture')} />
-      ) : null}
+      {/* The ONE capture entry point, and only on this tab — the old global FAB
+          over every tab is gone for good. It asks what you're adding rather than
+          guessing from the segment. */}
+      <Fab onPress={() => setAddOpen(true)} />
+
+      <Overlay visible={addOpen} onClose={() => setAddOpen(false)}>
+        <View style={styles.addSheet}>
+          <Heading variant="recipeTitle">Add</Heading>
+          <Pressable
+            style={styles.addChoice}
+            accessibilityRole="button"
+            onPress={() => {
+              setAddOpen(false);
+              router.push('/capture');
+            }}>
+            <Text variant="bodyStrong">Recipe</Text>
+            <Text color="textFaint">
+              A full recipe — paste a link or text, or write it out.
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.addChoice}
+            accessibilityRole="button"
+            onPress={() => {
+              setAddOpen(false);
+              router.push('/idea-capture');
+            }}>
+            <Text variant="bodyStrong">Idea</Text>
+            <Text color="textFaint">
+              Something to try — a dish, an ingredient, a link. Lands in To Try.
+            </Text>
+          </Pressable>
+          {/* Cook plans are a third thing: a whole-meal production. Only offered
+              while that filter is on, so it can't have its own competing FAB. */}
+          {plansMode ? (
+            <Pressable
+              style={styles.addChoice}
+              accessibilityRole="button"
+              onPress={() => {
+                setAddOpen(false);
+                router.push('/cook-plan-capture');
+              }}>
+              <Text variant="bodyStrong">Cook plan</Text>
+              <Text color="textFaint">A whole-meal production.</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={styles.addCancel}
+            onPress={() => setAddOpen(false)}
+            accessibilityRole="button">
+            <Text color="textMuted">Cancel</Text>
+          </Pressable>
+        </View>
+      </Overlay>
     </View>
   );
 }
@@ -359,4 +395,12 @@ const styles = StyleSheet.create({
     default: {},
   }),
   empty: { paddingTop: 60, alignItems: 'center', gap: 6 },
+  addSheet: { gap: 4, paddingBottom: 8 },
+  addChoice: {
+    paddingVertical: 14,
+    gap: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  addCancel: { paddingVertical: 14, alignItems: 'center' },
 });

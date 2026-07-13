@@ -27,6 +27,8 @@ export const glyph = {
   pageRight: '›',
   timer: '⏱', // Timer prefix in step text
   close: '✕', // Dismiss / close overlay
+  fav: '★', // Favorite, on. U+2605 is text-presentation — monochrome, on-family.
+  favOff: '☆', // Favorite, off (hollow). Not an emoji star (that renders colorful).
 } as const;
 
 export type GlyphName = keyof typeof glyph;
