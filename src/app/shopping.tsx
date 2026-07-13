@@ -158,18 +158,6 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return m;
   }, [pantryItems]);
-  /** When each low/out flag was raised — so we can tell a FRESH flag from one
-   *  that was already standing when the user deferred the item to Staples. */
-  const statusAtByKey = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const p of pantryItems) {
-      const s = p.status ?? 'fine';
-      if (s === 'fine') continue;
-      const at = p.statusUpdatedAt ? new Date(p.statusUpdatedAt).getTime() : 0;
-      m.set(matchKey(p.canonicalName), at);
-    }
-    return m;
-  }, [pantryItems]);
   const statusFor = (name: string): PantryStatus | undefined => {
     const k = matchKey(name);
     if (statusByKey.has(k)) return statusByKey.get(k);
@@ -346,51 +334,24 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  an always-have, because "always have" stops being true the moment you
    *  flag it (spec §5 × §10). 'out' also locks the have toggle; 'low' stays
    *  togglable so you can drop it if you've got enough. */
-  /** When was this name flagged low/out (0 if not flagged)? Mirrors statusFor's
-   *  loose matching so the two always agree about the same pantry row. */
-  const statusAtFor = (name: string): number => {
-    const k = matchKey(name);
-    const direct = statusAtByKey.get(k);
-    if (direct !== undefined) return direct;
-    for (const [pk, at] of statusAtByKey) {
-      if (pk.startsWith(k) || k.startsWith(pk)) return at;
-    }
-    return 0;
-  };
-
   /** Is this name off the Active list?
    *
-   *  A staple pin (= "Move to Staples") hides it. The wrinkle is low/out: we
-   *  auto-surface a staple onto Active when it runs low — but that rule used to
-   *  beat the pin outright, so you could NEVER park something that was already
-   *  low (pine nuts: flagged low, so "Move to Staples" appeared to do nothing).
+   *  A staple NEVER appears on Active — not even when it runs low. Running low
+   *  is what makes a staple worth buying, so it surfaces inside the STAPLES
+   *  list (flagged low/out, sorted to the top), which is the staples shopping
+   *  list. Active stays the "get this now" list and is never invaded.
    *
-   *  So an EXPLICIT defer wins over a low/out flag that was already standing
-   *  when you deferred. A flag raised AFTER the defer is fresh news and still
-   *  pulls the item back onto Active. */
+   *  Low/out still auto-surfaces NON-staple pantry items onto Active — that's
+   *  the ordinary restock path. */
   const inHave = (name: string) => {
-    const pinned = isAlwaysHave(name, alwaysHaveMap);
+    if (isAlwaysHave(name, alwaysHaveMap)) return true; // staples live in Staples, full stop
     const ps = statusFor(name);
-    if (ps === 'out' || ps === 'low') {
-      if (!pinned) return false;
-      const deferredAt = metaFor(name).deferredAt;
-      // Pinned but never explicitly deferred → the auto-surface rule applies.
-      if (!deferredAt) return false;
-      // Flagged again since you deferred it → surface it.
-      if (statusAtFor(name) > new Date(deferredAt).getTime()) return false;
-      // Stale flag + explicit defer → stay parked in Staples.
-      return true;
-    }
-    return isMarked(haveByName, name) || pinned;
+    if (ps === 'out' || ps === 'low') return false; // non-staple restock → Active
+    return isMarked(haveByName, name);
   };
 
-  /** The ONE way to move an item to Staples / back to Active. Stamps the defer
-   *  time on the way in (so a standing low/out flag can't drag it straight back
-   *  out) and clears it on the way back. Every pin path goes through here. */
-  const pinStaple = (name: string, on: boolean) => {
-    setAlways(name, on);
-    setShopMeta(name, { deferredAt: on ? new Date().toISOString() : undefined });
-  };
+  /** The ONE way to move an item to Staples / back to Active. */
+  const pinStaple = (name: string, on: boolean) => setAlways(name, on);
 
   /** Multi-select (matchKey-normalized so "kosher salt" / "salt" collapse). */
   const isSelected = (name: string) => selected.has(matchKey(name));
@@ -528,8 +489,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       });
     }
     for (const p of pantryRestockLines) {
-      // `gone` (not just dismissed/pushed): a low/out staple you explicitly
-      // deferred must not sneak back in through the restock door.
+      // `gone` (not just dismissed/pushed): a low/out STAPLE belongs in the
+      // Staples list, so it must not sneak onto Active through the restock door.
       if (dismissed.has(`item:${p.name}`) || gone(p.name)) continue;
       const e = ov(p.name, p.buy);
       rows.push({
@@ -544,22 +505,21 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey, statusAtByKey, shopMetaMap]);
+  }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey, shopMetaMap]);
 
-  /** Active = the dominant "get this now" list. `allRows` already excludes
-   *  staples (the always-have pin hides them via inHave) EXCEPT when they're
-   *  flagged low/out, which auto-surfaces them here. */
+  /** Active = the dominant "get this now" list. Staples never appear here. */
   const activeRows = allRows;
 
   /** Staples = the tucked-away pile you toggle to. "We need pine nuts — but not
-   *  soon." Pinning an item a staple (long-press) parks it here, out of Active,
-   *  for as long as it needs; the pin persists (always-have, IndexedDB). It
-   *  comes back to Active on its own when flagged low/out. */
+   *  soon." Pinning an item (long-press) parks it here, out of Active, for as
+   *  long as it needs; the pin persists (always-have, IndexedDB).
+   *
+   *  This is ALSO the staples shopping list: when a staple runs low/out it does
+   *  NOT jump to Active — it surfaces right here, flagged low/out and sorted to
+   *  the top, because that's what makes it worth buying. */
   const stapleRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
-    // An item lives in exactly ONE view. A staple that's flagged low/out is
-    // auto-surfaced onto Active as a restock line — don't also list it here, or
-    // it reads as a duplicate.
+    // An item lives in exactly ONE view.
     const onActive = new Set(activeRows.map((r) => matchKey(r.baseName)));
     for (const key of Object.keys(alwaysHaveMap)) {
       if (!alwaysHaveMap[key] || pushedSet.has(key) || onActive.has(key)) continue;
@@ -577,9 +537,23 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         kind: ex ? 'extra' : 'recipe',
       });
     }
-    return rows.sort((a, b) => a.name.localeCompare(b.name));
+    // Needs-buying first (out, then low), then the rest alphabetically — the
+    // staples you're actually out of shouldn't be buried in the pile.
+    const rank = (s?: PantryStatus) => (s === 'out' ? 0 : s === 'low' ? 1 : 2);
+    return rows.sort(
+      (a, b) =>
+        rank(a.pantryStatus) - rank(b.pantryStatus) || a.name.localeCompare(b.name),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alwaysHaveMap, extras, visibleItems, overrides, pushedSet, statusByKey, activeRows]);
+
+  /** How many staples are actually flagged for restock (low/out) — surfaced on
+   *  the Staples segment so you can see there's something to buy without
+   *  switching views. */
+  const staplesToBuy = useMemo(
+    () => stapleRows.filter((r) => r.pantryStatus === 'low' || r.pantryStatus === 'out').length,
+    [stapleRows],
+  );
 
   /** Rows for whichever view you're on; selection + push read from these. */
   const currentRows = listView === 'active' ? activeRows : stapleRows;
@@ -1124,8 +1098,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         <View style={styles.viewSegment}>
           <SegmentedControl
             segments={[
+              // Both counts mean the same thing: how much there is to BUY.
+              // Active = items to get now. Staples = staples that have run
+              // low/out (the ones you have plenty of aren't shopping).
               { key: 'active', label: 'Active', count: activeRows.length },
-              { key: 'staples', label: 'Staples', count: stapleRows.length },
+              { key: 'staples', label: 'Staples', count: staplesToBuy },
             ]}
             value={listView}
             onChange={(k) => switchView(k as 'active' | 'staples')}
