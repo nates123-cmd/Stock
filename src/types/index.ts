@@ -148,7 +148,7 @@ export type PipelineIdea = {
    * Optional so existing persisted rows revive fine; absent reads as 'idea'.
    */
   kind?: 'idea' | 'ingredient' | 'link' | 'recipe';
-  status: 'captured' | 'researching' | 'ready' | 'attempted' | 'promoted';
+  status: 'captured' | 'ready' | 'attempted' | 'promoted';
   references: { url: string; label: string }[];
   /** for plan-as-experiment */
   bestGuessIngredients?: Ingredient[];

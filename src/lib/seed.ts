@@ -416,7 +416,7 @@ export function seedPantry(): PantryItem[] {
 /**
  * Sample Pipeline ideas (spec §8) — half-formed things, deliberately separate
  * from cooked recipes. Spread across statuses so the §8 tabs (Active /
- * Captured / Researching / Ready / Archive) all have content, including one
+ * Captured / Ready / Archive) all have content, including one
  * already promoted into the seeded recipe library for the Archive tab.
  */
 export function seedPipeline(): PipelineIdea[] {
@@ -441,7 +441,7 @@ export function seedPipeline(): PipelineIdea[] {
       id: 'idea_starter',
       title: 'Revive the sourdough starter',
       note: 'It has been in the fridge since February. Two days of 1:1:1 feeds before it is bake-ready.',
-      status: 'researching',
+      status: 'ready',
       references: [
         { url: 'https://www.kingarthurbaking.com/recipes/sourdough-starter-recipe', label: 'King Arthur — starter' },
       ],

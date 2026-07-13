@@ -21,13 +21,12 @@ import { bestGuessIngredients } from '@/lib/parsing';
 import { formatAmount, relativeAge } from '@/lib/format';
 import type { Ingredient, PipelineIdea } from '@/types';
 
+// No 'researching' stage — captured goes straight to ready.
 const NEXT_STATUS: Partial<Record<PipelineIdea['status'], PipelineIdea['status']>> = {
-  captured: 'researching',
-  researching: 'ready',
+  captured: 'ready',
 };
 const STATUS_TONE: Record<PipelineIdea['status'], PillTone> = {
   captured: 'muted',
-  researching: 'warn',
   ready: 'ok',
   attempted: 'accent',
   promoted: 'muted',

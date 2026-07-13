@@ -224,7 +224,7 @@ export default function PlanScreen() {
           segments={[
             { key: 'shop', label: 'Shop' },
             { key: 'plan', label: 'Plan' },
-            { key: 'pantry', label: 'Have' },
+            { key: 'pantry', label: 'Pantry' },
           ]}
           value={segment}
           onChange={(k) => setSegment(k as 'shop' | 'plan' | 'pantry')}

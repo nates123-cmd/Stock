@@ -18,11 +18,10 @@ import { usePlanStore } from '@/store/plan';
 import { relativeAge } from '@/lib/format';
 import type { PipelineIdea } from '@/types';
 
-type Tab = 'Active' | 'Captured' | 'Researching' | 'Ready' | 'Archive';
+type Tab = 'Active' | 'Captured' | 'Ready' | 'Archive';
 
 const STATUS_COLOR: Record<PipelineIdea['status'], ColorToken> = {
   captured: 'line',
-  researching: 'warn',
   ready: 'ok',
   attempted: 'accent',
   promoted: 'textFaint',
@@ -30,7 +29,6 @@ const STATUS_COLOR: Record<PipelineIdea['status'], ColorToken> = {
 
 const STATUS_LABEL: Record<PipelineIdea['status'], string> = {
   captured: 'captured',
-  researching: 'researching',
   ready: 'ready to try',
   attempted: 'attempted',
   promoted: 'promoted',
@@ -133,7 +131,6 @@ export default function PipelineScreen() {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'Active', label: `Active (${activeCount})` },
     { key: 'Captured', label: 'Captured' },
-    { key: 'Researching', label: 'Researching' },
     { key: 'Ready', label: 'Ready' },
     { key: 'Archive', label: 'Archive' },
   ];
@@ -144,8 +141,6 @@ export default function PipelineScreen() {
     let rs = ideas;
     if (tab === 'Active') rs = ideas.filter((i) => i.status !== 'promoted');
     else if (tab === 'Captured') rs = ideas.filter((i) => i.status === 'captured');
-    else if (tab === 'Researching')
-      rs = ideas.filter((i) => i.status === 'researching');
     else if (tab === 'Ready') rs = ideas.filter((i) => i.status === 'ready');
     else rs = ideas.filter((i) => i.status === 'promoted');
     return [...rs].sort(byNew);

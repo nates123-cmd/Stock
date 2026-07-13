@@ -40,6 +40,17 @@ async function persist(idea: PipelineIdea): Promise<void> {
   }
 }
 
+/**
+ * The 'researching' stage was removed. Anything persisted in it would otherwise
+ * be stranded in a status that no longer exists (it'd match no tab and have no
+ * next step), so land it in 'ready' on the way in.
+ */
+function dropResearching(idea: PipelineIdea): PipelineIdea {
+  return (idea.status as string) === 'researching'
+    ? { ...idea, status: 'ready' }
+    : idea;
+}
+
 export const usePipelineStore = create<PipelineState>((set, get) => ({
   ideas: [],
   hydrated: false,
@@ -54,14 +65,17 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           for (const i of seedPipeline()) await pipelineRepo.upsert(i);
           rows = await pipelineRepo.all();
         }
-        set({ ideas: rows, hydrated: true });
+        set({ ideas: rows.map(dropResearching), hydrated: true });
         return;
       } catch (e) {
         console.warn('[stock] pipeline hydrate failed, using seed', e);
       }
     }
     const saved = await webPersist.load<PipelineIdea[]>('pipeline');
-    set({ ideas: saved ?? seedPipeline(), hydrated: true });
+    set({
+      ideas: (saved ?? seedPipeline()).map(dropResearching),
+      hydrated: true,
+    });
   },
 
   getById: (id) => get().ideas.find((i) => i.id === id),
