@@ -218,11 +218,19 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   /** The Instacart fill we're waiting on. The Beelink agent claims the queued
    *  job and drives a real browser, so it takes a minute or two — poll it and
    *  tell the user what actually landed in the cart instead of a blind "sent!". */
-  const [job, setJob] = useState<{ id: string; status: JobStatus } | null>(null);
+  const [job, setJob] = useState<{
+    id: string;
+    status: JobStatus;
+    /** Exactly the rows we handed the agent — so we can settle up against them
+     *  when it's done, without trying to reverse-map Wegmans product names. */
+    rows: FlatRow[];
+  } | null>(null);
   const [jobResult, setJobResult] = useState<{
     ok: boolean;
+    addedCount: number;
     added: { name: string; qty: number }[];
-    unresolved: string[];
+    /** Our names for what the agent couldn't get. These STAY on the list. */
+    missing: string[];
     error?: string;
   } | null>(null);
   useEffect(() => {
@@ -231,30 +239,52 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const poll = async () => {
       const s = await jobStatus(job.id);
       if (cancelled || !s) return;
-      if (s.status === 'done' || s.status === 'error') {
-        const r = (s.result ?? {}) as {
-          added?: { name: string; qty: number }[];
-          unresolved?: unknown[];
-        };
-        setJobResult(
-          s.status === 'done'
-            ? {
-                ok: true,
-                added: r.added ?? [],
-                unresolved: (r.unresolved ?? []).map((u) => String(u)),
-              }
-            : {
-                ok: false,
-                added: [],
-                unresolved: [],
-                error: s.error ?? 'The cart agent errored.',
-              },
-        );
-        setHint(null);
-        setJob({ id: job.id, status: s.status });
-      } else if (s.status !== job.status) {
-        setJob({ id: job.id, status: s.status });
+      if (s.status !== 'done' && s.status !== 'error') {
+        if (s.status !== job.status) setJob({ ...job, status: s.status });
+        return;
       }
+
+      if (s.status === 'error') {
+        // Nothing reached the cart — keep every item on the list.
+        setJobResult({
+          ok: false,
+          addedCount: 0,
+          added: [],
+          missing: [],
+          error: s.error ?? 'The cart agent errored.',
+        });
+        setHint(null);
+        setJob({ ...job, status: s.status });
+        return;
+      }
+
+      const r = (s.result ?? {}) as {
+        added?: { name: string; qty: number }[];
+        unresolved?: unknown[];
+      };
+      const added = r.added ?? [];
+      // The agent reports what it couldn't match. Resolve those back to OUR row
+      // names, and only mark the REST as pushed — anything it couldn't get has
+      // to stay on the list, or you'd silently never buy it.
+      const missKeys = new Set((r.unresolved ?? []).map((u) => matchKey(String(u))));
+      const gotRows = job.rows.filter((row) => !missKeys.has(matchKey(row.baseName)));
+      const missRows = job.rows.filter((row) => missKeys.has(matchKey(row.baseName)));
+      if (gotRows.length > 0) {
+        pushToPushed(
+          gotRows.map((row) => row.baseName),
+          'wegmans',
+        );
+      }
+      setJobResult({
+        ok: true,
+        addedCount: added.length,
+        added,
+        missing: missRows.length > 0
+          ? missRows.map((row) => row.name)
+          : (r.unresolved ?? []).map((u) => String(u)),
+      });
+      setHint(null);
+      setJob({ ...job, status: s.status });
     };
     const iv = setInterval(poll, 4000);
     void poll();
@@ -903,14 +933,12 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const pushToWegmans = async () => {
     const rows = selectedRows;
     if (rows.length === 0) return;
-    const markPushed = () => {
-      pushToPushed(rows.map((r) => r.baseName), 'wegmans');
-      clearSelection();
-    };
     if (!INSTACART_AVAILABLE()) {
+      // No job to watch on this path, so settle up immediately.
       setHint('Not signed in — copying the list and opening Instacart to paste.');
       await copyAndOpen();
-      markPushed();
+      pushToPushed(rows.map((r) => r.baseName), 'wegmans');
+      clearSelection();
       return;
     }
     try {
@@ -929,11 +957,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           })),
         ),
       );
-      // Don't claim success yet — the Beelink agent hasn't touched the cart.
-      // Watch the job and report what actually landed (see the poll effect).
-      setJob({ id, status: 'queued' });
+      // Nothing is "pushed" yet — this only QUEUED a job. The Beelink agent
+      // still has to drive a real browser, and it may not find everything.
+      // Rows only leave the list once the agent confirms it added them (see the
+      // poll effect); whatever it can't get STAYS, so it doesn't get silently
+      // dropped and never bought.
+      setJob({ id, status: 'queued', rows });
       setHint('Filling your Wegmans cart… this takes a minute.');
-      markPushed();
+      clearSelection();
     } catch (e) {
       setHint(`Couldn't push: ${(e as Error).message}`);
     } finally {
@@ -1327,15 +1358,16 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             </Heading>
             {jobResult.ok ? (
               <Text color="textMuted">
-                {jobResult.added.length} item
-                {jobResult.added.length === 1 ? '' : 's'} added to your Wegmans
-                cart.
-                {jobResult.unresolved.length > 0
-                  ? ` ${jobResult.unresolved.length} couldn’t be matched.`
-                  : ''}
+                {jobResult.addedCount} item
+                {jobResult.addedCount === 1 ? '' : 's'} added
+                {jobResult.missing.length > 0
+                  ? `; ${jobResult.missing.join(', ')} not available — kept on your list.`
+                  : '.'}
               </Text>
             ) : (
-              <Text color="accent">{jobResult.error}</Text>
+              <Text color="accent">
+                {jobResult.error} Nothing left your list.
+              </Text>
             )}
 
             <ScrollView style={styles.combineScroll}>
@@ -1348,11 +1380,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                   </Text>
                 </View>
               ))}
-              {jobResult.unresolved.map((u, i) => (
+              {jobResult.missing.map((u, i) => (
                 <View key={`u-${u}-${i}`} style={styles.jobRow}>
                   <Glyph name="close" size={13} color="warn" />
                   <Text color="textFaint" style={styles.flex} numberOfLines={2}>
-                    {u} — not found
+                    {u} — not available, still on your list
                   </Text>
                 </View>
               ))}
