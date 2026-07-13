@@ -12,13 +12,13 @@ type Dest = 'shopping' | 'totry' | 'recipe';
 
 const DESTS: { key: Dest; label: string }[] = [
   { key: 'shopping', label: 'Shopping' },
-  { key: 'totry', label: 'To Try' },
+  { key: 'totry', label: 'Ideas' },
   { key: 'recipe', label: 'Recipe' },
 ];
 
 /**
  * Global quick-capture sheet (redesign — the cart-+ FAB target). Type + enter,
- * done. Defaults to Shopping; the chip row redirects to To Try or a new recipe.
+ * done. Defaults to Shopping; the chip row redirects to Ideas or a new recipe.
  * Mounted once via GlobalCapture in (tabs)/_layout, not per-screen.
  */
 export function CaptureSheet({
@@ -66,7 +66,7 @@ export function CaptureSheet({
       setConfirm(`Added "${value}" to shopping`);
     } else {
       await capture(value, '', 'idea');
-      setConfirm(`Saved "${value}" to To Try`);
+      setConfirm(`Saved "${value}" to Ideas`);
     }
     setText('');
   };

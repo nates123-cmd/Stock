@@ -102,7 +102,7 @@ export default function RecipesLibrary() {
     [filtered, segment],
   );
 
-  // To-Try bin = the Pipeline ideas, still-active (unpromoted), newest first.
+  // Ideas bin = the Pipeline ideas, still-active (unpromoted), newest first.
   const toTry = useMemo(() => {
     const byNew = (a: PipelineIdea, b: PipelineIdea) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -115,9 +115,9 @@ export default function RecipesLibrary() {
   );
 
   const segments = [
-    { key: 'totry', label: 'To Try', count: toTry.length },
-    { key: 'favorites', label: 'Favorites', count: favoriteCount },
+    { key: 'totry', label: 'Ideas', count: toTry.length },
     { key: 'all', label: 'All' },
+    { key: 'favorites', label: 'Favorites', count: favoriteCount },
   ];
 
   const plansMode = filter === 'Cook plans';
@@ -176,7 +176,7 @@ export default function RecipesLibrary() {
             ))}
             {toTry.length === 0 ? (
               <View style={styles.empty}>
-                <Text color="textMuted">Nothing to try yet.</Text>
+                <Text color="textMuted">No ideas yet.</Text>
                 <Text color="textFaint">Capture an idea, ingredient or link.</Text>
               </View>
             ) : null}
@@ -314,7 +314,7 @@ export default function RecipesLibrary() {
             }}>
             <Text variant="bodyStrong">Idea</Text>
             <Text color="textFaint">
-              Something to try — a dish, an ingredient, a link. Lands in To Try.
+              Something to try — a dish, an ingredient, a link. Lands in Ideas.
             </Text>
           </Pressable>
           {/* Cook plans are a third thing: a whole-meal production. Only offered
