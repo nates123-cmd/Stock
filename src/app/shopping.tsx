@@ -30,7 +30,7 @@ import { usePantryStore } from '@/store/pantry';
 import { useShopMetaStore } from '@/store/shopMeta';
 import { usePushedStore } from '@/store/pushed';
 import type { PantryLocation, PantryStatus } from '@/types';
-import { matchKey } from '@/lib/pantry';
+import { baseIngredient, matchKey } from '@/lib/pantry';
 import { alwaysHaveKey, isAlwaysHave } from '@/lib/alwaysHave';
 import {
   STORES,
@@ -40,7 +40,7 @@ import {
   type ShopMeta,
   type StoreId,
 } from '@/lib/shopStores';
-import { reviewGroups } from '@/lib/cartCombine';
+import { reviewGroups, groupSignature } from '@/lib/cartCombine';
 import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
 import {
   consolidateSmart,
@@ -375,40 +375,37 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // buy line; rather than trust that silently, surface each multi-recipe group
   // for a one-at-a-time decision: Combine (default) / Keep separate / Edit qty.
   const combineGroups = useMemo(() => reviewGroups(items), [items]);
-  const [combineReviewed, setCombineReviewed] = useState(false);
   const [combineOpen, setCombineOpen] = useState(false);
-  /** Groups you've already decided this run — they leave the sheet. Lines arrive
-   *  ALREADY merged, so "Combine" used to be a no-op that just re-selected the
-   *  default and looked broken. Now BOTH buttons are real actions: they resolve
-   *  the group on the spot and it disappears from the sheet. */
-  const [combineResolved, setCombineResolved] = useState<Set<string>>(new Set());
-  const pendingGroups = useMemo(
-    () => combineGroups.filter((g) => !combineResolved.has(g.name)),
-    [combineGroups, combineResolved],
+  /** Session-only bail-out: "not now" closes the sheet without deciding, and it
+   *  can ask again next visit. Real decisions persist (combineMap). */
+  const [combineSnoozed, setCombineSnoozed] = useState(false);
+
+  /** Persisted decisions, keyed by group signature — survives the unmount that
+   *  happens every time you leave the Shop segment. */
+  const combineMap = useShopMetaStore((s) => s.combine);
+  const setCombine = useShopMetaStore((s) => s.setCombine);
+
+  /** Lines with the persisted "keep separate" decisions applied. Re-derived on
+   *  every load, so a split survives regen instead of silently re-merging. */
+  const decidedItems = useMemo(
+    () =>
+      items.flatMap((line) =>
+        combineMap[groupSignature(line.name, line.sources)] === 'separate'
+          ? splitMerged(line)
+          : [line],
+      ),
+    [items, combineMap],
   );
-  useEffect(() => {
-    if (!refining && !combineReviewed && pendingGroups.length > 0) setCombineOpen(true);
-  }, [refining, combineReviewed, pendingGroups.length]);
-  /** Nothing left to decide → close it out. */
-  useEffect(() => {
-    if (combineOpen && pendingGroups.length === 0) {
-      setCombineReviewed(true);
-      setCombineOpen(false);
-    }
-  }, [combineOpen, pendingGroups.length]);
-  const resolveGroup = (name: string, choice: 'combine' | 'separate') => {
-    // 'combine' = keep the merged line as-is (that's how it already arrives).
-    // 'separate' = split it back into one line per recipe, right now.
-    if (choice === 'separate') {
-      setItems((prev) =>
-        prev.flatMap((line) => (line.name === name ? splitMerged(line) : [line])),
-      );
-    }
-    setCombineResolved((prev) => new Set(prev).add(name));
-  };
-  /** "Done" bails out: anything undecided keeps the merged default. */
+
+  const resolveGroup = (sig: string, choice: 'combine' | 'separate') =>
+    setCombine(sig, choice);
+  /** "Combine all" — accept the merged default for everything still pending. */
   const applyCombineReview = () => {
-    setCombineReviewed(true);
+    for (const g of pendingGroups) setCombine(g.sig, 'combine');
+    setCombineOpen(false);
+  };
+  const snoozeCombine = () => {
+    setCombineSnoozed(true);
     setCombineOpen(false);
   };
 
@@ -417,9 +414,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // (note 7a). Session `dismissed` still handles same-run pantry-restock drops.
   const visibleItems = useMemo(
     () =>
-      items.filter((i) => !dismissed.has(`item:${i.name}`) && !isSuppressed(i.name)),
+      decidedItems.filter(
+        (i) => !dismissed.has(`item:${i.name}`) && !isSuppressed(i.name),
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, dismissed, suppressedMap],
+    [decidedItems, dismissed, suppressedMap],
   );
 
   /** Should this canonical name appear in the Already-have bucket? True if
@@ -468,6 +467,23 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     () => new Set(pushedItems.map((e) => e.key)),
     [pushedItems],
   );
+  /**
+   * Was this name pushed? Matched LOOSELY, the same way the pantry matches.
+   * Exact keys don't work: the list says "shallot" but the cart got "shallots",
+   * "basil leaves" vs "basil", "ripe tomatoes" vs "tomatoes" — so pushed items
+   * kept sitting on the list. Prefix covers shallot/shallots and basil leaves/
+   * basil; head-noun covers ripe tomatoes/tomatoes and cooked chickpeas/chickpeas.
+   */
+  const wasPushed = (name: string): boolean => {
+    const k = matchKey(name);
+    if (pushedSet.has(k)) return true;
+    const b = baseIngredient(name);
+    for (const key of pushedSet) {
+      if (key.startsWith(k) || k.startsWith(key)) return true;
+      if (baseIngredient(key) === b) return true;
+    }
+    return false;
+  };
 
   /** Pantry restock rows: items you've flagged low/out in the pantry that no
    *  planned-recipe row or extra already covers. Surfaced as their own buy
@@ -554,7 +570,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       const o = overrides[matchKey(base)];
       return { name: o?.name || base, qty: o?.qty ?? qty };
     };
-    const gone = (base: string) => inHave(base) || pushedSet.has(matchKey(base));
+    const gone = (base: string) => inHave(base) || wasPushed(base);
     for (const i of visibleItems) {
       if (gone(i.name)) continue;
       const e = ov(i.name, i.buy);
@@ -607,6 +623,28 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   /** Active = the dominant "get this now" list. Staples never appear here. */
   const activeRows = allRows;
 
+  /**
+   * Which duplicate groups are still worth asking about. Two filters:
+   *  1. no persisted decision yet (so it never re-asks what you've settled), and
+   *  2. the item is actually ON the active list — no point deciding how to merge
+   *     black pepper when it's a staple you already have and were never going to
+   *     buy. Only things you're actually shopping for.
+   */
+  const pendingGroups = useMemo(() => {
+    const onList = new Set(activeRows.map((r) => matchKey(r.baseName)));
+    return combineGroups.filter(
+      (g) => !combineMap[g.sig] && onList.has(matchKey(g.name)),
+    );
+  }, [combineGroups, combineMap, activeRows]);
+
+  useEffect(() => {
+    if (!refining && !combineSnoozed && pendingGroups.length > 0) setCombineOpen(true);
+  }, [refining, combineSnoozed, pendingGroups.length]);
+  /** Nothing left to decide → close it out. */
+  useEffect(() => {
+    if (combineOpen && pendingGroups.length === 0) setCombineOpen(false);
+  }, [combineOpen, pendingGroups.length]);
+
   /** Staples = the tucked-away pile you toggle to. "We need pine nuts — but not
    *  soon." Pinning an item (long-press) parks it here, out of Active, for as
    *  long as it needs; the pin persists (always-have, IndexedDB).
@@ -619,7 +657,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // An item lives in exactly ONE view.
     const onActive = new Set(activeRows.map((r) => matchKey(r.baseName)));
     for (const key of Object.keys(alwaysHaveMap)) {
-      if (!alwaysHaveMap[key] || pushedSet.has(key) || onActive.has(key)) continue;
+      if (!alwaysHaveMap[key] || wasPushed(key) || onActive.has(key)) continue;
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
       const base = ex?.canonicalName ?? it?.name ?? key;
@@ -1417,16 +1455,16 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ) : null}
       </Overlay>
 
-      <Overlay visible={combineOpen} onClose={applyCombineReview}>
+      <Overlay visible={combineOpen} onClose={snoozeCombine}>
         <View style={styles.combineSheet}>
           <Heading variant="recipeTitle">Combine duplicates?</Heading>
           <Text color="textMuted">
             The same item showed up in more than one recipe. Combine, or keep
-            them separate.
+            them separate. Your answer sticks — you won’t be asked again.
           </Text>
           <ScrollView style={styles.combineScroll}>
             {pendingGroups.map((g) => (
-              <View key={g.name} style={styles.combineCard}>
+              <View key={g.sig} style={styles.combineCard}>
                 <Text variant="bodyStrong" numberOfLines={1}>
                   {g.name}
                 </Text>
@@ -1442,7 +1480,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                       group and drops it off the sheet. Edit the qty first if you
                       want a different merged amount. */}
                   <Pressable
-                    onPress={() => resolveGroup(g.name, 'combine')}
+                    onPress={() => resolveGroup(g.sig, 'combine')}
                     style={[styles.combineBtn, styles.combineBtnOn]}
                     accessibilityRole="button"
                     accessibilityLabel={`Combine ${g.name} to ${g.suggestion}`}>
@@ -1451,7 +1489,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                     </Text>
                   </Pressable>
                   <Pressable
-                    onPress={() => resolveGroup(g.name, 'separate')}
+                    onPress={() => resolveGroup(g.sig, 'separate')}
                     style={styles.combineBtn}
                     accessibilityRole="button"
                     accessibilityLabel={`Keep ${g.name} separate`}>
@@ -1482,6 +1520,12 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             flex
             onPress={applyCombineReview}
           />
+          <Pressable
+            style={styles.menuCancel}
+            onPress={snoozeCombine}
+            accessibilityRole="button">
+            <Text color="textMuted">Not now</Text>
+          </Pressable>
         </View>
       </Overlay>
 

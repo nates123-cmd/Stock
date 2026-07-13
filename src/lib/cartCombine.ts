@@ -33,6 +33,34 @@ const UNIT_MAP: Record<string, string> = {
   gal: 'gal',
 };
 
+/**
+ * Words that look like a unit but are really a SIZE, so they count as one of the
+ * thing. Without this, "1 shallot" + "1 medium shallot" suggested the nonsense
+ * "1 shallots + 1 medium" instead of "2 shallots" — `medium` fell through as its
+ * own unit bucket. Packaging words (clove, bunch, can, head…) are NOT here: they
+ * are meaningful units and sum fine on their own.
+ */
+const SIZE_WORDS = new Set([
+  'small',
+  'sm',
+  'medium',
+  'med',
+  'large',
+  'lg',
+  'extra-large',
+  'extra large',
+  'xl',
+  'jumbo',
+  'whole',
+]);
+
+/** Does this "unit" actually just mean "one of them"? */
+function isCountUnit(unit: string | null | undefined): boolean {
+  if (!unit) return true;
+  const u = unit.trim().toLowerCase();
+  return u === '' || u === 'pc' || SIZE_WORDS.has(u);
+}
+
 const describer = convert();
 
 function convId(unit: string | null | undefined): string | null {
@@ -77,7 +105,8 @@ export function combinedQty(name: string, sources: ShoppingSource[]): CombineRes
   const withUnit: { amount: number; unit: string }[] = [];
   for (const s of sources) {
     if (s.amount == null) continue;
-    if (!s.unit || s.unit === 'pc') count += s.amount;
+    // `!s.unit` first so TS narrows s.unit to string in the else branch.
+    if (!s.unit || isCountUnit(s.unit)) count += s.amount;
     else withUnit.push({ amount: s.amount, unit: s.unit });
   }
 
@@ -112,8 +141,23 @@ export function combinedQty(name: string, sources: ShoppingSource[]): CombineRes
   return { text: parts.join(' + ') || 'as needed', convertible };
 }
 
+/**
+ * Stable identity for a duplicate group: the item plus exactly which recipe
+ * contributions make it up. Decisions are stored against this, so a group you've
+ * already settled never asks again — but if the plan changes the contributions,
+ * the signature changes and it's a genuinely new question.
+ */
+export function groupSignature(name: string, sources: ShoppingSource[]): string {
+  const parts = sources
+    .map((s) => `${s.recipe}:${s.amount ?? ''}${s.unit ?? ''}`)
+    .sort();
+  return `${name.trim().toLowerCase()}|${parts.join(',')}`;
+}
+
 export type CombineGroup = {
   name: string;
+  /** stable key for remembering the decision (see groupSignature) */
+  sig: string;
   sources: ShoppingSource[];
   /** per-source labels: ["1 lemon (Shakshuka)", "1 lemon (Chana)"] */
   perSource: string[];
@@ -135,6 +179,7 @@ export function reviewGroups(lines: ShoppingLine[]): CombineGroup[] {
     const { text, convertible } = combinedQty(l.name, l.sources);
     out.push({
       name: l.name,
+      sig: groupSignature(l.name, l.sources),
       sources: l.sources,
       perSource: l.sources.map((s) => sourceLabel(s, l.name)),
       suggestion: text,

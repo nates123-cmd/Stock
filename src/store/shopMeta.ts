@@ -21,11 +21,21 @@ import type { ShopMeta } from '@/lib/shopStores';
 
 const NATIVE = Platform.OS !== 'web';
 
+export type CombineChoice = 'combine' | 'separate';
+
 type ShopMetaState = {
   /** normalized name → true (deleted from plan-derived lists, stays gone). */
   suppressed: Record<string, true>;
   /** normalized name → per-item store tag + detail. */
   meta: Record<string, ShopMeta>;
+  /**
+   * Cart-combine decisions, keyed by group signature (see cartCombine
+   * groupSignature). MUST persist: the shopping list is unmounted every time you
+   * leave the Shop segment, so a session-only decision meant the "Combine
+   * duplicates?" sheet re-asked the same questions on every visit — and a "keep
+   * separate" never survived, since the lines regenerate merged.
+   */
+  combine: Record<string, CombineChoice>;
   hydrated: boolean;
   hydrate: () => Promise<void>;
   suppress: (name: string) => void;
@@ -33,6 +43,7 @@ type ShopMetaState = {
   isSuppressed: (name: string) => boolean;
   setMeta: (name: string, patch: ShopMeta) => void;
   clearMeta: (name: string) => void;
+  setCombine: (sig: string, choice: CombineChoice) => void;
 };
 
 const clean = (m: ShopMeta): ShopMeta => {
@@ -47,20 +58,30 @@ const clean = (m: ShopMeta): ShopMeta => {
 export const useShopMetaStore = create<ShopMetaState>((set, get) => ({
   suppressed: {},
   meta: {},
+  combine: {},
   hydrated: false,
 
   hydrate: async () => {
     if (get().hydrated) return;
     if (!NATIVE) {
-      const [sup, met] = await Promise.all([
+      const [sup, met, comb] = await Promise.all([
         webPersist.load<Record<string, true>>('shop-suppressed'),
         webPersist.load<Record<string, ShopMeta>>('shop-meta'),
+        webPersist.load<Record<string, CombineChoice>>('shop-combine'),
       ]);
-      set({ suppressed: sup ?? {}, meta: met ?? {}, hydrated: true });
+      set({
+        suppressed: sup ?? {},
+        meta: met ?? {},
+        combine: comb ?? {},
+        hydrated: true,
+      });
       return;
     }
     set({ hydrated: true });
   },
+
+  setCombine: (sig, choice) =>
+    set((s) => ({ combine: { ...s.combine, [sig]: choice } })),
 
   suppress: (name) =>
     set((s) => ({ suppressed: { ...s.suppressed, [alwaysHaveKey(name)]: true } })),
@@ -96,5 +117,6 @@ if (!NATIVE) {
   useShopMetaStore.subscribe((s) => {
     void webPersist.save('shop-suppressed', s.suppressed);
     void webPersist.save('shop-meta', s.meta);
+    void webPersist.save('shop-combine', s.combine);
   });
 }
