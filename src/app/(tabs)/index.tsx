@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AppState, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  AppState,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import ReanimatedSwipeable, {
@@ -8,7 +17,13 @@ import ReanimatedSwipeable, {
 // Inside a Swipeable, RN's Pressable consumes pointer events before the Pan
 // handler can pick them up — rows below use gesture-handler's Pressable so the
 // swipe actually registers on web.
-import { Pressable as GHPressable } from 'react-native-gesture-handler';
+import { Pressable as GHPressable, Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import {
   Text,
   Numeric,
@@ -55,6 +70,7 @@ export default function PlanScreen() {
   const planMeals = usePlanStore((s) => s.meals);
   const setStatus = usePlanStore((s) => s.setStatus);
   const removeDish = usePlanStore((s) => s.removeDish);
+  const moveDish = usePlanStore((s) => s.moveDish);
   const setMealType = usePlanStore((s) => s.setMealType);
   const splitMeal = usePlanStore((s) => s.splitMeal);
   const recipes = useRecipeStore((s) => s.recipes);
@@ -205,6 +221,53 @@ export default function PlanScreen() {
     return d ?? days[0] ?? new Date(todayMs);
   }, [days, selectedKey, todayMs]);
 
+  /**
+   * Drag-a-dish-to-another-day.
+   *
+   * Every drop target (a day section in the agenda, a day chip in the strip)
+   * registers its on-screen rect here. While you drag, we hit-test your finger
+   * against those rects. Measuring in WINDOW coords is what makes this work
+   * across both layouts and through a scrolled list — a layout-relative y would
+   * be wrong the moment the page scrolls.
+   *
+   * The swipe-to-delete on a dish is HORIZONTAL, so the drag is constrained to
+   * VERTICAL (activeOffsetY / failOffsetX below): the two gestures never fight.
+   */
+  const dropZones = useRef(
+    new Map<string, { x: number; y: number; w: number; h: number; date: Date }>(),
+  );
+  const registerZone = useCallback(
+    (key: string, rect: { x: number; y: number; w: number; h: number } | null, date: Date) => {
+      if (!rect) dropZones.current.delete(key);
+      else dropZones.current.set(key, { ...rect, date });
+    },
+    [],
+  );
+  const [dragging, setDragging] = useState<string | null>(null); // dishId
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+
+  const zoneAt = useCallback((x: number, y: number): string | null => {
+    for (const [key, z] of dropZones.current) {
+      if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) return key;
+    }
+    return null;
+  }, []);
+
+  const onDragMove = useCallback(
+    (x: number, y: number) => setHoverKey(zoneAt(x, y)),
+    [zoneAt],
+  );
+  const onDragEnd = useCallback(
+    (mealId: string, dishId: string, x: number, y: number) => {
+      const key = zoneAt(x, y);
+      setDragging(null);
+      setHoverKey(null);
+      const z = key ? dropZones.current.get(key) : undefined;
+      if (z) void moveDish(mealId, dishId, z.date);
+    },
+    [zoneAt, moveDish],
+  );
+
   const renderDay = (day: Date) => (
     <DayMeals
       key={dateKey(day)}
@@ -216,6 +279,12 @@ export default function PlanScreen() {
       onAdd={() => openPicker(day)}
       onDelete={(mealId, dishId) => removeDish(mealId, dishId)}
       onOpenDish={(meal, dish) => setManage({ meal, dish })}
+      registerZone={registerZone}
+      hovered={hoverKey === dateKey(day)}
+      dragging={dragging}
+      onDragStart={setDragging}
+      onDragMove={onDragMove}
+      onDragEnd={onDragEnd}
     />
   );
 
@@ -303,8 +372,14 @@ export default function PlanScreen() {
                     0,
                   );
                   return (
-                    <Pressable
+                    /* Also a drop target: in this view only one day's meals are
+                       shown, so the chips are what you drag a dish onto. */
+                    <DropChip
                       key={key}
+                      dayKey={key}
+                      day={day}
+                      registerZone={registerZone}
+                      hovered={hoverKey === key}
                       onPress={() => setSelectedKey(key)}
                       style={[styles.dayChip, selected && styles.dayChipOn]}>
                       <Text
@@ -320,7 +395,7 @@ export default function PlanScreen() {
                       ) : (
                         <View style={styles.dotSpacer} />
                       )}
-                    </Pressable>
+                    </DropChip>
                   );
                 })}
               </ScrollView>
@@ -468,6 +543,12 @@ function DayMeals({
   onAdd,
   onDelete,
   onOpenDish,
+  registerZone,
+  hovered,
+  dragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
 }: {
   day: Date;
   today: boolean;
@@ -477,11 +558,31 @@ function DayMeals({
   onAdd: () => void;
   onDelete: (mealId: string, dishId: string) => void;
   onOpenDish: (meal: Meal, dish: Dish) => void;
+  registerZone: DropZoneRegistrar;
+  hovered: boolean;
+  dragging: string | null;
+  onDragStart: (dishId: string) => void;
+  onDragMove: (x: number, y: number) => void;
+  onDragEnd: (mealId: string, dishId: string, x: number, y: number) => void;
 }) {
   const { dow, date } = dayLabel(day);
   const empty = meals.every((m) => m.dishes.length === 0);
+  const zoneRef = useRef<View | null>(null);
+  const key = dateKey(day);
+  // Measure in WINDOW coords: a layout-relative y is wrong the moment the page
+  // scrolls, and the agenda scrolls.
+  const measure = useCallback(() => {
+    zoneRef.current?.measureInWindow((x, y, w, h) =>
+      registerZone(key, { x, y, w, h }, day),
+    );
+  }, [registerZone, key, day]);
+  useEffect(() => () => registerZone(key, null, day), [registerZone, key, day]);
+
   return (
-    <View style={styles.dayBlock}>
+    <View
+      ref={zoneRef}
+      onLayout={measure}
+      style={[styles.dayBlock, hovered && styles.dayBlockHover]}>
       <View style={styles.dayHead}>
         <Text variant="sectionLabel" color={today ? 'accent' : 'textMuted'}>
           {today ? 'TODAY' : dow}
@@ -505,7 +606,13 @@ function DayMeals({
                 </Text>
               ) : null}
               {meal.dishes.map((dish) => (
-                <SwipeableDish key={dish.id} onDelete={() => onDelete(meal.id, dish.id)}>
+                <DraggableDish
+                  key={dish.id}
+                  dragging={dragging === dish.id}
+                  onDragStart={() => onDragStart(dish.id)}
+                  onDragMove={onDragMove}
+                  onDragEnd={(x, y) => onDragEnd(meal.id, dish.id, x, y)}
+                  onDelete={() => onDelete(meal.id, dish.id)}>
                   <DishRow
                     meal={meal}
                     label={dishLabel(dish)}
@@ -513,7 +620,7 @@ function DayMeals({
                     experimental={!!dish.pipelineId}
                     onPress={() => onOpenDish(meal, dish)}
                   />
-                </SwipeableDish>
+                </DraggableDish>
               ))}
             </View>
           ),
@@ -598,6 +705,116 @@ function DishRow({
 }
 
 /** Wraps a DishRow with the swipe-left → Delete affordance. */
+/** A day chip that is also a drop target (horizontal view). */
+function DropChip({
+  dayKey,
+  day,
+  registerZone,
+  hovered,
+  onPress,
+  style,
+  children,
+}: {
+  dayKey: string;
+  day: Date;
+  registerZone: DropZoneRegistrar;
+  hovered: boolean;
+  onPress: () => void;
+  style: StyleProp<ViewStyle>;
+  children: ReactNode;
+}) {
+  const ref = useRef<View | null>(null);
+  const measure = useCallback(() => {
+    ref.current?.measureInWindow((x, y, w, h) =>
+      registerZone(dayKey, { x, y, w, h }, day),
+    );
+  }, [registerZone, dayKey, day]);
+  useEffect(() => () => registerZone(dayKey, null, day), [registerZone, dayKey, day]);
+  return (
+    <View ref={ref} onLayout={measure}>
+      <Pressable onPress={onPress} style={[style, hovered && styles.dropChipHover]}>
+        {children}
+      </Pressable>
+    </View>
+  );
+}
+
+export type DropZoneRegistrar = (
+  key: string,
+  rect: { x: number; y: number; w: number; h: number } | null,
+  date: Date,
+) => void;
+
+/**
+ * A dish you can drag to another day, that you can still swipe to delete.
+ *
+ * The two gestures are separated by DIRECTION, which is the whole trick:
+ *  - horizontal  → falls through to the Swipeable underneath (delete)
+ *  - vertical    → picks the dish up and moves it
+ *
+ * `activeOffsetY` means the pan only claims the gesture once you've moved
+ * vertically; `failOffsetX` makes it give up the moment you move sideways. So a
+ * swipe never turns into a drag and a drag never turns into a delete.
+ */
+function DraggableDish({
+  dragging,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+  onDelete,
+  children,
+}: {
+  dragging: boolean;
+  onDragStart: () => void;
+  onDragMove: (x: number, y: number) => void;
+  onDragEnd: (x: number, y: number) => void;
+  onDelete: () => void;
+  children: ReactNode;
+}) {
+  const dy = useSharedValue(0);
+  const lifted = useSharedValue(0);
+
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-12, 12])
+        .failOffsetX([-20, 20])
+        .onStart(() => {
+          lifted.value = withTiming(1, { duration: 120 });
+          runOnJS(onDragStart)();
+        })
+        .onUpdate((e) => {
+          dy.value = e.translationY;
+          runOnJS(onDragMove)(e.absoluteX, e.absoluteY);
+        })
+        .onEnd((e) => {
+          runOnJS(onDragEnd)(e.absoluteX, e.absoluteY);
+        })
+        .onFinalize(() => {
+          dy.value = withTiming(0, { duration: 140 });
+          lifted.value = withTiming(0, { duration: 140 });
+        }),
+    [onDragStart, onDragMove, onDragEnd, dy, lifted],
+  );
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: dy.value },
+      { scale: 1 + lifted.value * 0.03 },
+    ],
+    opacity: 1 - lifted.value * 0.15,
+    zIndex: lifted.value > 0 ? 10 : 0,
+  }));
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View style={animStyle} pointerEvents={dragging ? 'box-only' : 'auto'}>
+        <SwipeableDish onDelete={onDelete}>{children}</SwipeableDish>
+      </Animated.View>
+    </GestureDetector>
+  );
+}
+
 function SwipeableDish({
   onDelete,
   children,
@@ -779,6 +996,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   dayChipOn: { borderColor: colors.accent, backgroundColor: colors.bg3 },
+  dropChipHover: { borderColor: colors.accent, backgroundColor: colors.bg3 },
   dayChipNum: { fontSize: 18 },
   dot: {
     width: 5,
@@ -794,6 +1012,10 @@ const styles = StyleSheet.create({
   agenda: { padding: layout.screenPadding, gap: 14 },
   moreDays: { alignItems: 'center', paddingVertical: 16 },
 
+  dayBlockHover: {
+    backgroundColor: colors.bg2,
+    borderRadius: 12,
+  },
   dayBlock: {
     gap: 8,
     paddingTop: 8,

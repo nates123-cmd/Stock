@@ -107,6 +107,8 @@ type PlanState = {
   ) => Promise<void>;
   /** Remove a dish; if it was the meal's last dish, the meal goes too. */
   removeDish: (mealId: string, dishId: string) => Promise<void>;
+  /** Drag a dish to another day. Keeps its meal type; drops an emptied meal. */
+  moveDish: (mealId: string, dishId: string, toDate: Date) => Promise<void>;
   /** Label (or clear) a meal's lunch/dinner split. */
   setMealType: (mealId: string, type: MealType | null) => Promise<void>;
   /** Move one dish out of a meal into a (new or existing) meal of `type`. */
@@ -175,6 +177,67 @@ export const usePlanStore = create<PlanState>((set, get) => ({
       return { meals: [...s.meals, saved!] };
     });
     await persistMeal(saved);
+  },
+
+  /**
+   * Move a dish to another day (drag it from Tue to Wed). Lands in that day's
+   * meal of the same type, creating the meal if there isn't one, and drops the
+   * source meal if it's now empty — a day shouldn't keep a ghost meal with no
+   * dishes in it.
+   *
+   * Done as ONE state update, not removeDish-then-addDish: two updates means two
+   * renders, and the dish visibly disappears before it reappears.
+   */
+  moveDish: async (mealId, dishId, toDate) => {
+    const key = dateKey(toDate);
+    let sourceSaved: Meal | undefined;
+    let targetSaved: Meal | undefined;
+    let removedId: string | undefined;
+
+    set((s) => {
+      const source = s.meals.find((m) => m.id === mealId);
+      const dish = source?.dishes.find((d) => d.id === dishId);
+      if (!source || !dish) return s;
+
+      const type = source.type ?? null;
+      // Already there? Nothing to do — don't churn the store on a no-op drop.
+      if (dateKey(source.date) === key) return s;
+
+      let meals = s.meals;
+
+      // 1. Take it off the source day.
+      const left = source.dishes.filter((d) => d.id !== dishId);
+      if (left.length === 0) {
+        removedId = source.id;
+        meals = meals.filter((m) => m.id !== source.id);
+      } else {
+        sourceSaved = { ...source, dishes: left };
+        meals = meals.map((m) => (m.id === source.id ? sourceSaved! : m));
+      }
+
+      // 2. Put it on the target day — same meal type, or a new meal.
+      const existing = meals.find(
+        (m) => dateKey(m.date) === key && (m.type ?? null) === type,
+      );
+      if (existing) {
+        targetSaved = { ...existing, dishes: [...existing.dishes, dish] };
+        meals = meals.map((m) => (m.id === existing.id ? targetSaved! : m));
+      } else {
+        targetSaved = {
+          id: uid('meal'),
+          date: toDate,
+          type,
+          status: 'planned',
+          dishes: [dish],
+        };
+        meals = [...meals, targetSaved];
+      }
+      return { meals };
+    });
+
+    if (removedId) await removeMealRow(removedId);
+    else if (sourceSaved) await persistMeal(sourceSaved);
+    if (targetSaved) await persistMeal(targetSaved);
   },
 
   removeDish: async (mealId, dishId) => {
