@@ -459,16 +459,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       });
     }
     for (const ex of extras) {
-      // Manual adds are an explicit "I want this now", so they OVERRIDE the
-      // staple pin — adding "olive oil" by hand shows it even though it's an
-      // always-have staple (staples otherwise live in Have and surface only
-      // when low/out). Marking it have (swipe right) or pushing it still
-      // clears the row; the staple pin alone no longer hides it.
-      if (
-        isMarked(haveByName, ex.canonicalName) ||
-        pushedSet.has(matchKey(ex.canonicalName))
-      )
-        continue;
+      // A staple pin hides the row from Active — that IS "Move to Staples", and
+      // it has to apply to manual adds too, or the row lives in both views at
+      // once. Adding a name on Active that's currently pinned un-pins it (see
+      // submitAdd), so an explicit "I want this now" still lands here.
+      if (gone(ex.canonicalName)) continue;
       rows.push({
         key: `e:${ex.id}`,
         name: ex.canonicalName,
@@ -508,8 +503,12 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  comes back to Active on its own when flagged low/out. */
   const stapleRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
+    // An item lives in exactly ONE view. A staple that's flagged low/out is
+    // auto-surfaced onto Active as a restock line — don't also list it here, or
+    // it reads as a duplicate.
+    const onActive = new Set(activeRows.map((r) => matchKey(r.baseName)));
     for (const key of Object.keys(alwaysHaveMap)) {
-      if (!alwaysHaveMap[key] || pushedSet.has(key)) continue;
+      if (!alwaysHaveMap[key] || pushedSet.has(key) || onActive.has(key)) continue;
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
       const base = ex?.canonicalName ?? it?.name ?? key;
@@ -526,7 +525,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return rows.sort((a, b) => a.name.localeCompare(b.name));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alwaysHaveMap, extras, visibleItems, overrides, pushedSet, statusByKey]);
+  }, [alwaysHaveMap, extras, visibleItems, overrides, pushedSet, statusByKey, activeRows]);
 
   /** Rows for whichever view you're on; selection + push read from these. */
   const currentRows = listView === 'active' ? activeRows : stapleRows;
@@ -714,9 +713,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     addExtra([
       { canonicalName: name, amount, unit, originLabel: 'added by you', originId: null },
     ]);
-    // Adding while on Staples pins it a staple, so it lands there instead of
-    // Active — "note the pine nuts, don't put them in my face."
-    if (listView === 'staples') setAlways(name, true);
+    // Adding while on Staples pins it, so it lands there instead of Active —
+    // "note the pine nuts, don't put them in my face." Adding on Active is the
+    // opposite intent ("I want this now"), so it UN-pins a name that's currently
+    // a staple; otherwise the new row would be hidden by its own pin.
+    setAlways(name, listView === 'staples');
     setAddName('');
     setAddQty('');
   };
