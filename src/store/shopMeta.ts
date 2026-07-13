@@ -36,6 +36,13 @@ type ShopMetaState = {
    * separate" never survived, since the lines regenerate merged.
    */
   combine: Record<string, CombineChoice>;
+  /**
+   * Manual merges: alias matchKey → target matchKey. The user checked two rows
+   * ("shallot" + "shallots") and combined them, so from now on they fold into
+   * one line. MUST persist — the list is rebuilt from the plan on every visit,
+   * so a merge that lived in component state would evaporate immediately.
+   */
+  merges: Record<string, string>;
   hydrated: boolean;
   hydrate: () => Promise<void>;
   suppress: (name: string) => void;
@@ -44,6 +51,10 @@ type ShopMetaState = {
   setMeta: (name: string, patch: ShopMeta) => void;
   clearMeta: (name: string) => void;
   setCombine: (sig: string, choice: CombineChoice) => void;
+  /** Fold `aliases` into `target` (all matchKeys). */
+  mergeInto: (target: string, aliases: string[]) => void;
+  /** Undo a merge: drop every alias pointing at this target. */
+  unmerge: (target: string) => void;
 };
 
 const clean = (m: ShopMeta): ShopMeta => {
@@ -59,20 +70,23 @@ export const useShopMetaStore = create<ShopMetaState>((set, get) => ({
   suppressed: {},
   meta: {},
   combine: {},
+  merges: {},
   hydrated: false,
 
   hydrate: async () => {
     if (get().hydrated) return;
     if (!NATIVE) {
-      const [sup, met, comb] = await Promise.all([
+      const [sup, met, comb, mrg] = await Promise.all([
         webPersist.load<Record<string, true>>('shop-suppressed'),
         webPersist.load<Record<string, ShopMeta>>('shop-meta'),
         webPersist.load<Record<string, CombineChoice>>('shop-combine'),
+        webPersist.load<Record<string, string>>('shop-merges'),
       ]);
       set({
         suppressed: sup ?? {},
         meta: met ?? {},
         combine: comb ?? {},
+        merges: mrg ?? {},
         hydrated: true,
       });
       return;
@@ -82,6 +96,29 @@ export const useShopMetaStore = create<ShopMetaState>((set, get) => ({
 
   setCombine: (sig, choice) =>
     set((s) => ({ combine: { ...s.combine, [sig]: choice } })),
+
+  mergeInto: (target, aliases) =>
+    set((s) => {
+      const next = { ...s.merges };
+      for (const a of aliases) {
+        if (a === target) continue;
+        next[a] = target;
+      }
+      // Re-point anything that pointed at an alias, so chains can't form.
+      for (const [k, v] of Object.entries(next)) {
+        if (aliases.includes(v)) next[k] = target;
+      }
+      return { merges: next };
+    }),
+
+  unmerge: (target) =>
+    set((s) => {
+      const next = { ...s.merges };
+      for (const [k, v] of Object.entries(next)) {
+        if (v === target || k === target) delete next[k];
+      }
+      return { merges: next };
+    }),
 
   suppress: (name) =>
     set((s) => ({ suppressed: { ...s.suppressed, [alwaysHaveKey(name)]: true } })),
@@ -118,5 +155,6 @@ if (!NATIVE) {
     void webPersist.save('shop-suppressed', s.suppressed);
     void webPersist.save('shop-meta', s.meta);
     void webPersist.save('shop-combine', s.combine);
+    void webPersist.save('shop-merges', s.merges);
   });
 }

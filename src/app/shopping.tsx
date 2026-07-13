@@ -40,12 +40,10 @@ import {
   type ShopMeta,
   type StoreId,
 } from '@/lib/shopStores';
-import { reviewGroups, groupSignature } from '@/lib/cartCombine';
 import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
 import {
   consolidateSmart,
   consolidateLocalSmart,
-  splitMerged,
   instacartText,
   CATEGORY_ORDER,
   categorizeIngredient,
@@ -374,51 +372,26 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // The consolidation groups the SAME ingredient from several recipes into one
   // buy line; rather than trust that silently, surface each multi-recipe group
   // for a one-at-a-time decision: Combine (default) / Keep separate / Edit qty.
-  const combineGroups = useMemo(() => reviewGroups(items), [items]);
-  const [combineOpen, setCombineOpen] = useState(false);
-  /** Session-only bail-out: "not now" closes the sheet without deciding, and it
-   *  can ask again next visit. Real decisions persist (combineMap). */
-  const [combineSnoozed, setCombineSnoozed] = useState(false);
-
-  /** Persisted decisions, keyed by group signature — survives the unmount that
-   *  happens every time you leave the Shop segment. */
+  /** Combining is MANUAL now (check rows → Combine) plus a non-blocking
+   *  suggestion at the bottom. The old "Combine duplicates?" modal is gone: it
+   *  interrupted, it re-asked, and it asked about the wrong things.
+   *
+   *  `merges` (alias matchKey → target matchKey) is the persisted rule; `combine`
+   *  now just records which suggestions you've dismissed. */
+  const mergesMap = useShopMetaStore((s) => s.merges);
+  const mergeInto = useShopMetaStore((s) => s.mergeInto);
+  const unmerge = useShopMetaStore((s) => s.unmerge);
   const combineMap = useShopMetaStore((s) => s.combine);
   const setCombine = useShopMetaStore((s) => s.setCombine);
-
-  /** Lines with the persisted "keep separate" decisions applied. Re-derived on
-   *  every load, so a split survives regen instead of silently re-merging. */
-  const decidedItems = useMemo(
-    () =>
-      items.flatMap((line) =>
-        combineMap[groupSignature(line.name, line.sources)] === 'separate'
-          ? splitMerged(line)
-          : [line],
-      ),
-    [items, combineMap],
-  );
-
-  const resolveGroup = (sig: string, choice: 'combine' | 'separate') =>
-    setCombine(sig, choice);
-  /** "Combine all" — accept the merged default for everything still pending. */
-  const applyCombineReview = () => {
-    for (const g of pendingGroups) setCombine(g.sig, 'combine');
-    setCombineOpen(false);
-  };
-  const snoozeCombine = () => {
-    setCombineSnoozed(true);
-    setCombineOpen(false);
-  };
 
   // Suppressed (deleted plan-derived) items are filtered here — the single
   // consolidation funnel every path reads from — so a delete survives regen
   // (note 7a). Session `dismissed` still handles same-run pantry-restock drops.
   const visibleItems = useMemo(
     () =>
-      decidedItems.filter(
-        (i) => !dismissed.has(`item:${i.name}`) && !isSuppressed(i.name),
-      ),
+      items.filter((i) => !dismissed.has(`item:${i.name}`) && !isSuppressed(i.name)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [decidedItems, dismissed, suppressedMap],
+    [items, dismissed, suppressedMap],
   );
 
   /** Should this canonical name appear in the Already-have bucket? True if
@@ -563,6 +536,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     origin?: string | null;
     pantryStatus?: PantryStatus;
     kind: 'recipe' | 'extra' | 'restock';
+    /** Set when this row is a manual merge — the rows folded into it. Delete
+     *  removes them all; the long-press sheet offers to split them back out. */
+    members?: FlatRow[];
   };
   const allRows = useMemo<FlatRow[]>(() => {
     const rows: FlatRow[] = [];
@@ -620,30 +596,76 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey, shopMetaMap]);
 
-  /** Active = the dominant "get this now" list. Staples never appear here. */
-  const activeRows = allRows;
+  /** Active = the dominant "get this now" list, with manual merges folded in. */
+  const activeRows = useMemo(() => {
+    const groups = new Map<string, FlatRow[]>();
+    for (const r of allRows) {
+      const k = mergesMap[matchKey(r.baseName)] ?? matchKey(r.baseName);
+      const g = groups.get(k);
+      if (g) g.push(r);
+      else groups.set(k, [r]);
+    }
+    const out: FlatRow[] = [];
+    for (const [k, group] of groups) {
+      if (group.length === 1) {
+        out.push(group[0]!);
+        continue;
+      }
+      // The merge target keeps its name; if it isn't on the list this week, fall
+      // back to the simplest name in the group (Nate's rule).
+      const target =
+        group.find((r) => matchKey(r.baseName) === k) ?? simplestRow(group);
+      out.push({
+        ...target,
+        key: `m:${k}`,
+        qty: sumQtyStrings(group.map((r) => r.qty)),
+        members: group,
+      });
+    }
+    return out;
+  }, [allRows, mergesMap]);
 
   /**
-   * Which duplicate groups are still worth asking about. Two filters:
-   *  1. no persisted decision yet (so it never re-asks what you've settled), and
-   *  2. the item is actually ON the active list — no point deciding how to merge
-   *     black pepper when it's a staple you already have and were never going to
-   *     buy. Only things you're actually shopping for.
+   * One non-blocking suggestion at a time: two rows on the list that look like
+   * the same thing ("shallot" + "shallots", "tomatoes" + "ripe tomatoes").
+   * Dismissals persist, so it won't nag about the same pair twice.
    */
-  const pendingGroups = useMemo(() => {
-    const onList = new Set(activeRows.map((r) => matchKey(r.baseName)));
-    return combineGroups.filter(
-      (g) => !combineMap[g.sig] && onList.has(matchKey(g.name)),
-    );
-  }, [combineGroups, combineMap, activeRows]);
+  const suggestion = useMemo(() => {
+    for (let i = 0; i < activeRows.length; i++) {
+      for (let j = i + 1; j < activeRows.length; j++) {
+        const a = activeRows[i]!;
+        const b = activeRows[j]!;
+        if (!looksLikeSameItem(a.baseName, b.baseName)) continue;
+        const sig = [matchKey(a.baseName), matchKey(b.baseName)].sort().join('~');
+        if (combineMap[sig]) continue; // already dismissed
+        return { a, b, sig };
+      }
+    }
+    return null;
+  }, [activeRows, combineMap]);
 
-  useEffect(() => {
-    if (!refining && !combineSnoozed && pendingGroups.length > 0) setCombineOpen(true);
-  }, [refining, combineSnoozed, pendingGroups.length]);
-  /** Nothing left to decide → close it out. */
-  useEffect(() => {
-    if (combineOpen && pendingGroups.length === 0) setCombineOpen(false);
-  }, [combineOpen, pendingGroups.length]);
+  /** Merge the checked rows into one. Shortest/simplest name wins. */
+  const combineSelected = () => {
+    if (selectedRows.length < 2) return;
+    const target = simplestRow(selectedRows);
+    mergeInto(
+      matchKey(target.baseName),
+      selectedRows.map((r) => matchKey(r.baseName)),
+    );
+    clearSelection();
+  };
+  const acceptSuggestion = () => {
+    if (!suggestion) return;
+    const target = simplestRow([suggestion.a, suggestion.b]);
+    mergeInto(matchKey(target.baseName), [
+      matchKey(suggestion.a.baseName),
+      matchKey(suggestion.b.baseName),
+    ]);
+    setCombine(suggestion.sig, 'combine');
+  };
+  const dismissSuggestion = () => {
+    if (suggestion) setCombine(suggestion.sig, 'separate');
+  };
 
   /** Staples = the tucked-away pile you toggle to. "We need pine nuts — but not
    *  soon." Pinning an item (long-press) parks it here, out of Active, for as
@@ -876,13 +898,24 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  delete does: on Staples it un-pins (back to Active) rather than destroying;
    *  extras go for good, restock rows drop for the run, plan rows suppress so
    *  they stay gone across regen. */
-  const deleteSelected = () => {
-    for (const row of selectedRows) {
-      if (listView === 'staples') pinStaple(row.baseName, false);
-      else if (row.extraId) removeExtra(row.extraId);
-      else if (row.kind === 'restock') dismissItem(row.baseName);
-      else deleteItem(row.baseName);
+  /** Delete ONE row. A merged row deletes every row folded into it, or you'd
+   *  delete the visible line and its members would pop straight back out. */
+  const deleteRow = (row: FlatRow) => {
+    if (listView === 'staples') {
+      pinStaple(row.baseName, false);
+      return;
     }
+    if (row.members) {
+      unmerge(matchKey(row.baseName));
+      for (const m of row.members) deleteRow(m);
+      return;
+    }
+    if (row.extraId) removeExtra(row.extraId);
+    else if (row.kind === 'restock') dismissItem(row.baseName);
+    else deleteItem(row.baseName);
+  };
+  const deleteSelected = () => {
+    for (const row of selectedRows) deleteRow(row);
     clearSelection();
   };
 
@@ -1088,15 +1121,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         onToggleHave={() => openBuy(row.baseName)}
         onCheck={() => toggleSelect(row.baseName)}
         checked={isSelected(row.baseName)}
-        onDelete={() =>
-          listView === 'staples'
-            ? pinStaple(row.baseName, false) // unpin → back to the active list
-            : row.extraId
-              ? removeExtra(row.extraId)
-              : row.kind === 'restock'
-                ? dismissItem(row.baseName)
-                : deleteItem(row.baseName)
-        }
+        onDelete={() => deleteRow(row)}
         onLongPress={() => setMenu(row)}
         marked={false}
         always={false}
@@ -1362,9 +1387,17 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
               pinStaple(menu.baseName, !isAlwaysHave(menu.baseName, alwaysHaveMap));
               setMenu(null);
             }}
+            // Only offered on a merged row — undoes the combine.
+            onSplit={
+              menu.members
+                ? () => {
+                    unmerge(matchKey(menu.baseName));
+                    setMenu(null);
+                  }
+                : undefined
+            }
             onDelete={() => {
-              if (menu.extraId) removeExtra(menu.extraId);
-              else deleteItem(menu.baseName);
+              deleteRow(menu);
               setMenu(null);
             }}
             onClose={() => setMenu(null)}
@@ -1455,79 +1488,25 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ) : null}
       </Overlay>
 
-      <Overlay visible={combineOpen} onClose={snoozeCombine}>
-        <View style={styles.combineSheet}>
-          <Heading variant="recipeTitle">Combine duplicates?</Heading>
-          <Text color="textMuted">
-            The same item showed up in more than one recipe. Combine, or keep
-            them separate. Your answer sticks — you won’t be asked again.
-          </Text>
-          <ScrollView style={styles.combineScroll}>
-            {pendingGroups.map((g) => (
-              <View key={g.sig} style={styles.combineCard}>
-                <Text variant="bodyStrong" numberOfLines={1}>
-                  {g.name}
-                </Text>
-                <Text color="textFaint" style={styles.combineSources} numberOfLines={3}>
-                  {g.perSource.join(' · ')}
-                </Text>
-                <Text color={g.convertible ? 'ok' : 'warn'} style={styles.combineSuggest}>
-                  → Combine to {g.suggestion}
-                  {g.convertible ? '' : ' (mixed units)'}
-                </Text>
-                <View style={styles.combineActions}>
-                  {/* Both are actions, not a toggle: tapping either settles this
-                      group and drops it off the sheet. Edit the qty first if you
-                      want a different merged amount. */}
-                  <Pressable
-                    onPress={() => resolveGroup(g.sig, 'combine')}
-                    style={[styles.combineBtn, styles.combineBtnOn]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Combine ${g.name} to ${g.suggestion}`}>
-                    <Text variant="sectionLabel" color="bg">
-                      Combine
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => resolveGroup(g.sig, 'separate')}
-                    style={styles.combineBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Keep ${g.name} separate`}>
-                    <Text variant="sectionLabel" color="textMuted">
-                      Keep separate
-                    </Text>
-                  </Pressable>
-                  <TextInput
-                    defaultValue={g.suggestion}
-                    // Qty edit only — don't resolve here, or the card would
-                    // vanish out from under you mid-edit.
-                    onEndEditing={(e) => {
-                      const t = e.nativeEvent.text.trim();
-                      if (t) editItemQty(g.name, t);
-                    }}
-                    placeholder="Edit qty"
-                    placeholderTextColor={colors.textFaint}
-                    style={[styles.editInput, styles.combineQty]}
-                    accessibilityLabel={`Edit combined quantity for ${g.name}`}
-                  />
-                </View>
-              </View>
-            ))}
-          </ScrollView>
+      {/* Suggestion bar — non-blocking, one at a time, only when you're not
+          mid-selection. Replaces the "Combine duplicates?" modal. */}
+      {suggestion && selectedRows.length === 0 ? (
+        <BottomActionBar
+          meta={
+            <Text color="textMuted">
+              “{suggestion.a.name}” and “{suggestion.b.name}” look like the same
+              thing.
+            </Text>
+          }>
           <Button
-            label={`Combine all${pendingGroups.length > 1 ? ` · ${pendingGroups.length}` : ''}`}
-            glyph="done"
+            label="Dismiss"
+            variant="secondary"
             flex
-            onPress={applyCombineReview}
+            onPress={dismissSuggestion}
           />
-          <Pressable
-            style={styles.menuCancel}
-            onPress={snoozeCombine}
-            accessibilityRole="button">
-            <Text color="textMuted">Not now</Text>
-          </Pressable>
-        </View>
-      </Overlay>
+          <Button label="Combine" glyph="done" flex onPress={acceptSuggestion} />
+        </BottomActionBar>
+      ) : null}
 
       {/* Push bar pops up only while ≥1 row is selected (Reminders-style). */}
       {selectedRows.length > 0 ? (
@@ -1535,8 +1514,20 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           meta={
             <View style={styles.selectMeta}>
               <Pressable onPress={clearSelection} hitSlop={6} accessibilityRole="button">
-                <Text color="textFaint">{selectedRows.length} selected · tap to deselect</Text>
+                <Text color="textFaint">{selectedRows.length} selected</Text>
               </Pressable>
+              {/* Manual combine: check two look-alikes, fold them into one. */}
+              {selectedRows.length >= 2 && listView === 'active' ? (
+                <Pressable
+                  onPress={combineSelected}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Combine ${selectedRows.length} items into one`}>
+                  <Text variant="sectionLabel" color="ok">
+                    Combine · {selectedRows.length}
+                  </Text>
+                </Pressable>
+              ) : null}
               {/* Destructive, so it sits up here away from the push buttons. */}
               <Pressable
                 onPress={deleteSelected}
@@ -1828,6 +1819,59 @@ function extraQty(ex: ExtraItem): string {
   return formatAmount(ex.amount, ex.unit) || 'some';
 }
 
+/**
+ * Do these two shopping-list names refer to the same ingredient? Deliberately
+ * loose but not reckless:
+ *  - prefix either way  → "shallot"/"shallots", "basil"/"basil leaves"
+ *  - same head-noun, but only when one side is a single word → "tomatoes"/"ripe
+ *    tomatoes". The single-word guard is what stops "olive oil" from being
+ *    suggested as a merge with "sesame oil".
+ */
+function looksLikeSameItem(a: string, b: string): boolean {
+  const ka = matchKey(a);
+  const kb = matchKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  if (ka.startsWith(kb) || kb.startsWith(ka)) return true;
+  const oneIsPlain = ka.split(' ').length === 1 || kb.split(' ').length === 1;
+  return oneIsPlain && baseIngredient(a) === baseIngredient(b);
+}
+
+/** The cleanest shopping name in a group — fewest words, then shortest. */
+function simplestRow<T extends { name: string; baseName: string }>(rows: T[]): T {
+  return [...rows].sort((x, y) => {
+    const wx = matchKey(x.baseName).split(' ').length;
+    const wy = matchKey(y.baseName).split(' ').length;
+    return wx - wy || x.baseName.length - y.baseName.length;
+  })[0]!;
+}
+
+/**
+ * Add up the quantities of merged rows. Sums when the units agree (or there are
+ * none); otherwise keeps the distinct parts side by side rather than inventing a
+ * conversion — "1 lb + 2 cups" is honest, a made-up total isn't.
+ */
+function sumQtyStrings(qtys: string[]): string {
+  const real = qtys.map((q) => q.trim()).filter((q) => q && q !== 'as needed');
+  if (real.length === 0) return qtys.some((q) => q === 'as needed') ? 'as needed' : '';
+  const buckets = new Map<string, number>();
+  const freeform: string[] = [];
+  for (const q of real) {
+    const { amount, unit } = parseQty(q);
+    if (amount == null) {
+      freeform.push(q);
+      continue;
+    }
+    const u = (unit ?? '').trim().toLowerCase();
+    buckets.set(u, (buckets.get(u) ?? 0) + amount);
+  }
+  const parts = [...buckets.entries()].map(([u, a]) => {
+    const n = `${+a.toFixed(2)}`;
+    return u ? `${n} ${u}` : n;
+  });
+  return [...parts, ...freeform].join(' + ');
+}
+
 /** Loose "2 cups" / "3" / "a pinch" → {amount, unit} parse for manual adds and
  *  inline qty edits. A leading number splits into amount + unit; anything else
  *  is kept whole as the unit (so "a pinch" / "to taste" survive). */
@@ -1857,6 +1901,7 @@ function RowDetailSheet({
   onSetStore,
   onSetField,
   onToggleAlways,
+  onSplit,
   onDelete,
   onClose,
 }: {
@@ -1869,6 +1914,8 @@ function RowDetailSheet({
   onSetStore: (store: StoreId | null) => void;
   onSetField: (patch: ShopMeta) => void;
   onToggleAlways: () => void;
+  /** Only set on a merged row. */
+  onSplit?: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -1978,6 +2025,17 @@ function RowDetailSheet({
               : 'Keeps it off the active list — it lives in Staples, and shows up there to buy when it runs low.'}
           </Text>
         </Pressable>
+        {onSplit ? (
+          <Pressable
+            style={styles.menuItem}
+            onPress={onSplit}
+            accessibilityRole="button">
+            <Text variant="bodyStrong">Split back apart</Text>
+            <Text color="textFaint" style={styles.menuItemHint}>
+              Undo the combine — these go back to separate lines.
+            </Text>
+          </Pressable>
+        ) : null}
         <Pressable
           style={styles.menuItem}
           onPress={onDelete}
