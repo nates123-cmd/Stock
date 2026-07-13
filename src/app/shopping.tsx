@@ -297,28 +297,32 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  the item into the pantry (location + qty) before it leaves the list. */
   const [buying, setBuying] = useState<{ name: string; qty: string } | null>(null);
   /** Shop view grouping: by shelf category (default) or by store tag (note 3). */
-  /** Sort-by-store: OFF by default (the flat list is the default view), and
-   *  persisted so it stays on if you leave it on. Most useful on Staples, where
-   *  you work the pile store by store. */
-  const STORE_SORT_KEY = 'stock:shopping-group-by-store';
-  const [groupByStore, setGroupByStore] = useState(() => {
-    if (typeof window === 'undefined') return false;
+  /** How the list is grouped. 'none' (a flat list) is the default; by store, or
+   *  by the recipe that asked for each item. Persisted so it stays where you
+   *  leave it. Store grouping earns its keep on Staples; recipe grouping only
+   *  makes sense on Active, where the rows actually come from recipes. */
+  type GroupBy = 'none' | 'store' | 'recipe';
+  const GROUP_KEY = 'stock:shopping-group-by';
+  const [groupBy, setGroupByState] = useState<GroupBy>(() => {
+    if (typeof window === 'undefined') return 'none';
     try {
-      return window.localStorage?.getItem(STORE_SORT_KEY) === '1';
+      const v = window.localStorage?.getItem(GROUP_KEY);
+      return v === 'store' || v === 'recipe' ? v : 'none';
     } catch {
-      return false;
+      return 'none';
     }
   });
-  const toggleGroupByStore = () =>
-    setGroupByStore((v) => {
-      const next = !v;
-      try {
-        window.localStorage?.setItem(STORE_SORT_KEY, next ? '1' : '0');
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
+  const setGroupBy = (v: GroupBy) => {
+    setGroupByState(v);
+    try {
+      window.localStorage?.setItem(GROUP_KEY, v);
+    } catch {
+      /* ignore */
+    }
+  };
+  /** Tapping an active mode turns it back off. */
+  const toggleGroup = (v: Exclude<GroupBy, 'none'>) =>
+    setGroupBy(groupBy === v ? 'none' : v);
   /** Bulk store assignment for the checked rows. */
   const [storeSheet, setStoreSheet] = useState(false);
 
@@ -621,6 +625,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     origin?: string | null;
     pantryStatus?: PantryStatus;
     kind: 'recipe' | 'extra' | 'restock';
+    /** Which recipes asked for this — drives the group-by-recipe view. Empty for
+     *  things you added by hand. */
+    recipes?: string[];
     /** Set when this row is a manual merge — the rows folded into it. Delete
      *  removes them all; the long-press sheet offers to split them back out. */
     members?: FlatRow[];
@@ -643,6 +650,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         extraId: null,
         pantryStatus: statusFor(i.name),
         kind: 'recipe',
+        recipes: dedupeRecipes(i.sources),
       });
     }
     for (const ex of extras) {
@@ -699,6 +707,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ...target,
         key: `m:${k}`,
         qty: sumQtyStrings(group.map((r) => r.qty)),
+        // A merged row belongs to every recipe its members came from.
+        recipes: [...new Set(group.flatMap((r) => r.recipes ?? []))],
         members: group,
       });
     }
@@ -816,9 +826,40 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   /** Rows for whichever view you're on; selection + push read from these. */
   const currentRows = listView === 'active' ? activeRows : stapleRows;
 
+  /**
+   * Rows bucketed by the recipe that asked for them — "what do I need for the
+   * chicken?". An ingredient two recipes want shows under BOTH, on purpose: the
+   * question this view answers is per-recipe. Selection is keyed by item, so
+   * checking it in one group checks it everywhere, which is the honest behaviour
+   * (you're buying it once). Anything you added by hand has no recipe, so it
+   * gets its own group at the end.
+   */
+  const recipeGroups = useMemo(() => {
+    if (groupBy !== 'recipe' || listView !== 'active') return null;
+    const byRecipe = new Map<string, FlatRow[]>();
+    const loose: FlatRow[] = [];
+    for (const r of currentRows) {
+      const names = r.recipes ?? [];
+      if (names.length === 0) {
+        loose.push(r);
+        continue;
+      }
+      for (const n of names) {
+        const g = byRecipe.get(n);
+        if (g) g.push(r);
+        else byRecipe.set(n, [r]);
+      }
+    }
+    const out = [...byRecipe.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([label, rows]) => ({ label, rows }));
+    if (loose.length > 0) out.push({ label: 'Added by you', rows: loose });
+    return out;
+  }, [groupBy, listView, currentRows]);
+
   /** Rows bucketed by store tag — only when sort-by-store is on. */
   const storeGroups = useMemo(() => {
-    if (!groupByStore) return null;
+    if (groupBy !== 'store') return null;
     const buckets: { id: StoreId | null; label: string; rows: FlatRow[] }[] = [
       ...STORES.map((s) => ({
         id: s.id as StoreId | null,
@@ -834,7 +875,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return buckets.filter((b) => b.rows.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupByStore, currentRows, shopMetaMap]);
+  }, [groupBy, currentRows, shopMetaMap]);
 
 
   /** The current selection, resolved to rows (drives the pop-up push bar). */
@@ -1398,18 +1439,35 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
         {currentRows.length > 0 ? (
           <View style={styles.selectAllRow}>
-            {/* Sort-by-store is opt-in; the flat list stays the default. */}
-            <Pressable
-              onPress={toggleGroupByStore}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityState={{ selected: groupByStore }}>
-              <Text
-                variant="sectionLabel"
-                color={groupByStore ? 'accent' : 'textFaint'}>
-                {groupByStore ? 'By store' : 'Sort by store'}
-              </Text>
-            </Pressable>
+            {/* Grouping is opt-in — the flat list stays the default. Tapping an
+                active mode turns it back off. Recipe grouping is Active-only:
+                staples don't come from recipes. */}
+            <View style={styles.groupToggles}>
+              <Pressable
+                onPress={() => toggleGroup('store')}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityState={{ selected: groupBy === 'store' }}>
+                <Text
+                  variant="sectionLabel"
+                  color={groupBy === 'store' ? 'accent' : 'textFaint'}>
+                  By store
+                </Text>
+              </Pressable>
+              {listView === 'active' ? (
+                <Pressable
+                  onPress={() => toggleGroup('recipe')}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: groupBy === 'recipe' }}>
+                  <Text
+                    variant="sectionLabel"
+                    color={groupBy === 'recipe' ? 'accent' : 'textFaint'}>
+                    By recipe
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
             <Pressable onPress={toggleSelectAll} hitSlop={6} accessibilityRole="button">
               <Text variant="sectionLabel" color="accent">
                 {allSelected ? 'Deselect all' : 'Select all'}
@@ -1418,16 +1476,29 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           </View>
         ) : null}
 
-        {storeGroups
-          ? storeGroups.map((g) => (
-              <View key={g.label} style={styles.section}>
-                <SectionLabel color={g.id ? 'text' : 'textMuted'}>
+        {recipeGroups
+          ? recipeGroups.map((g) => (
+              <View key={`rg:${g.label}`} style={styles.section}>
+                <SectionLabel color="text">
                   {g.label} · {g.rows.length}
                 </SectionLabel>
-                {g.rows.map(renderRow)}
+                {/* An item wanted by two recipes renders under both, so the row
+                    key has to be scoped to the group or React sees a duplicate. */}
+                {g.rows.map((row) =>
+                  renderRow({ ...row, key: `${g.label}:${row.key}` }),
+                )}
               </View>
             ))
-          : currentRows.map(renderRow)}
+          : storeGroups
+            ? storeGroups.map((g) => (
+                <View key={g.label} style={styles.section}>
+                  <SectionLabel color={g.id ? 'text' : 'textMuted'}>
+                    {g.label} · {g.rows.length}
+                  </SectionLabel>
+                  {g.rows.map(renderRow)}
+                </View>
+              ))
+            : currentRows.map(renderRow)}
 
         {/* Reminders-style inline add: tap the blank row and type. Enter keeps
             the keyboard up so you can add several in a row. */}
@@ -2559,6 +2630,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  groupToggles: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   selectAllRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
