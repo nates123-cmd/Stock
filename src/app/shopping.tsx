@@ -420,7 +420,23 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   };
 
   /** The ONE way to move an item to Staples / back to Active. */
-  const pinStaple = (name: string, on: boolean) => setAlways(name, on);
+  const pinStaple = (name: string, on: boolean) => {
+    setAlways(name, on);
+    if (!on) return;
+    // Marking something "always have" makes it a pantry staple — so put it IN
+    // the pantry if it isn't there already. Without this, the pin and the pantry
+    // are two disconnected stores and an item ends up half-in / half-out.
+    //
+    // Only create when absent: applyPaste on an existing item records a PURCHASE
+    // (extends purchaseHistory, refreshes the restock cycle), and declaring
+    // something a staple isn't the same as buying it.
+    const exists = pantryItems.some((p) =>
+      looksLikeSameItem(p.canonicalName, name),
+    );
+    if (!exists) {
+      void applyPaste([{ canonicalName: name, isStaple: true }]);
+    }
+  };
 
   /** Multi-select (matchKey-normalized so "kosher salt" / "salt" collapse). */
   const isSelected = (name: string) => selected.has(matchKey(name));

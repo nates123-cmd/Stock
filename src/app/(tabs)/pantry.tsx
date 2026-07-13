@@ -15,6 +15,12 @@ import {
 } from '@/components';
 import { colors } from '@/design';
 import { usePantryStore } from '@/store/pantry';
+import {
+  categorizePantryItem,
+  PANTRY_CATEGORY_ORDER,
+  PANTRY_CATEGORY_LABEL,
+  type PantryCategory,
+} from '@/lib/pantryCategories';
 import { useExtrasStore } from '@/store/extras';
 import {
   cycleEstimateDays,
@@ -180,15 +186,38 @@ export default function PantryScreen() {
     return { date: latest, count };
   }, [items]);
 
-  // Within each section, sort by status descending (out → low → fine) so the
-  // actionable items land at the top (spec §10).
-  const staples = sortByStatus(items.filter((i) => i.isStaple));
-  const loose = items.filter((i) => !i.isStaple);
-  const recent = sortByStatus(loose.filter((i) => isRecentlyAdded(i)));
-  const olderThanWindow = loose.filter((i) => !isRecentlyAdded(i));
-  const fridge = sortByStatus(olderThanWindow.filter((i) => i.location === 'fridge'));
-  const freezer = sortByStatus(olderThanWindow.filter((i) => i.location === 'freezer'));
-  const shelf = sortByStatus(olderThanWindow.filter((i) => i.location === 'pantry'));
+  /**
+   * Everything that ISN'T already surfaced in Running-low at the top, grouped by
+   * shelf category. Two deliberate changes:
+   *
+   *  1. An item appears in exactly ONE place. A low/out staple used to show in
+   *     Running-low AND again in its own section below (the pine-nuts duplicate).
+   *     Running-low wins; it doesn't repeat underneath.
+   *  2. Grouped by what the thing IS (oils, spices, baked goods…), not by where
+   *     it's stored. Fridge/freezer/pantry lumped every shelf-stable item into
+   *     one giant bucket.
+   */
+  const inLowOrOut = useMemo(
+    () => new Set(lowOrOut.map((i) => i.id)),
+    [lowOrOut],
+  );
+  const categorized = useMemo(() => {
+    const rest = items.filter((i) => !inLowOrOut.has(i.id));
+    const groups = new Map<PantryCategory, typeof rest>();
+    for (const it of rest) {
+      const cat = categorizePantryItem(it.canonicalName);
+      const g = groups.get(cat);
+      if (g) g.push(it);
+      else groups.set(cat, [it]);
+    }
+    return PANTRY_CATEGORY_ORDER.filter((c) => (groups.get(c)?.length ?? 0) > 0).map(
+      (c) => ({
+        cat: c,
+        label: PANTRY_CATEGORY_LABEL[c],
+        items: sortByStatus(groups.get(c)!),
+      }),
+    );
+  }, [items, inLowOrOut]);
 
   return (
     <View style={styles.root}>
@@ -265,22 +294,12 @@ export default function PantryScreen() {
           </View>
         ) : null}
 
-        {staples.length > 0 ? (
-          <Section label="Always have">
-            {staples.map((it) => (
-              <StapleRow
-                key={it.id}
-                item={it}
-                onCycle={() => cycleStatus(it.id)}
-                onMenu={() => openMenu(it)}
-              />
-            ))}
-          </Section>
-        ) : null}
-
-        {recent.length > 0 ? (
-          <Section label={`Recently added · ${recent.length}`}>
-            {recent.map((it) => (
+        {/* Grouped by what the thing IS. A staple is just a pantry item like any
+            other now — it sits in its category, not in a separate "Always have"
+            pile. Anything low/out is already up top and is NOT repeated here. */}
+        {categorized.map((g) => (
+          <Section key={g.cat} label={`${g.label} · ${g.items.length}`}>
+            {g.items.map((it) => (
               <LooseRow
                 key={it.id}
                 item={it}
@@ -289,46 +308,7 @@ export default function PantryScreen() {
               />
             ))}
           </Section>
-        ) : null}
-
-        {fridge.length > 0 ? (
-          <Section label="Fridge">
-            {fridge.map((it) => (
-              <LooseRow
-                key={it.id}
-                item={it}
-                onCycle={() => cycleStatus(it.id)}
-                onMenu={() => openMenu(it)}
-              />
-            ))}
-          </Section>
-        ) : null}
-
-        {freezer.length > 0 ? (
-          <Section label="Freezer">
-            {freezer.map((it) => (
-              <LooseRow
-                key={it.id}
-                item={it}
-                onCycle={() => cycleStatus(it.id)}
-                onMenu={() => openMenu(it)}
-              />
-            ))}
-          </Section>
-        ) : null}
-
-        {shelf.length > 0 ? (
-          <Section label="Pantry shelf">
-            {shelf.map((it) => (
-              <LooseRow
-                key={it.id}
-                item={it}
-                onCycle={() => cycleStatus(it.id)}
-                onMenu={() => openMenu(it)}
-              />
-            ))}
-          </Section>
-        ) : null}
+        ))}
 
         {items.length === 0 ? (
           <View style={styles.empty}>
