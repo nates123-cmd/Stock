@@ -1725,12 +1725,12 @@ function RowDetailSheet({
           onPress={onToggleAlways}
           accessibilityRole="button">
           <Text variant="bodyStrong" color={isAlways ? 'accent' : 'text'}>
-            {isAlways ? 'Move back to Active' : 'Move to Staples'}
+            {isAlways ? 'Remove “always have”' : 'Always have'}
           </Text>
           <Text color="textFaint" style={styles.menuItemHint}>
             {isAlways
               ? 'Back on the active list as a regular buy item.'
-              : 'Off the active list — parked in Staples until you want it, or until it runs low.'}
+              : 'Keeps it off the active list — it lives in Staples, and shows up there to buy when it runs low.'}
           </Text>
         </Pressable>
         <Pressable
