@@ -153,6 +153,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // (restock-merge — sets it 'fine', extends the cycle). Shopping leads; the
   // pantry is downstream of it.
   const applyPaste = usePantryStore((s) => s.applyPaste);
+  const toggleStaple = usePantryStore((s) => s.toggleStaple);
   const statusByKey = useMemo(() => {
     const m = new Map<string, PantryStatus>();
     for (const p of pantryItems) {
@@ -467,22 +468,42 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     return isMarked(haveByName, name);
   };
 
-  /** The ONE way to move an item to Staples / back to Active. */
+  /**
+   * The ONE way to move an item to Staples / back to Active. "Staple" lives in
+   * TWO stores — the always-have pin and the pantry's `isStaple` — so both ends
+   * have to move together, or the item is half-in / half-out.
+   */
   const pinStaple = (name: string, on: boolean) => {
     setAlways(name, on);
-    if (!on) return;
+
+    if (!on) {
+      // Removing a staple has to clear the PANTRY flag too. Clearing only the
+      // pin left `isStaple` set, so the item was still a staple in the other
+      // store and the row never left the list — "Remove didn't work".
+      // Once it's cleared, it's an ordinary item again: if it's low/out it
+      // surfaces on Active as a normal restock line, which is right.
+      for (const p of pantryItems) {
+        if (p.isStaple && looksLikeSameItem(p.canonicalName, name)) {
+          void toggleStaple(p.id);
+        }
+      }
+      return;
+    }
+
     // Marking something "always have" makes it a pantry staple — so put it IN
-    // the pantry if it isn't there already. Without this, the pin and the pantry
-    // are two disconnected stores and an item ends up half-in / half-out.
+    // the pantry if it isn't there already.
     //
     // Only create when absent: applyPaste on an existing item records a PURCHASE
     // (extends purchaseHistory, refreshes the restock cycle), and declaring
-    // something a staple isn't the same as buying it.
-    const exists = pantryItems.some((p) =>
+    // something a staple isn't the same as buying it. If it IS already there but
+    // isn't flagged a staple, just flip the flag.
+    const existing = pantryItems.find((p) =>
       looksLikeSameItem(p.canonicalName, name),
     );
-    if (!exists) {
+    if (!existing) {
       void applyPaste([{ canonicalName: name, isStaple: true }]);
+    } else if (!existing.isStaple) {
+      void toggleStaple(existing.id);
     }
   };
 
@@ -641,24 +662,19 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         kind: 'extra',
       });
     }
-    for (const p of pantryRestockLines) {
-      // `gone` (not just dismissed/pushed): a low/out STAPLE belongs in the
-      // Staples list, so it must not sneak onto Active through the restock door.
-      if (dismissed.has(`item:${p.name}`) || gone(p.name)) continue;
-      const e = ov(p.name, p.buy);
-      rows.push({
-        key: `p:${p.name}`,
-        name: e.name,
-        baseName: p.name,
-        qty: e.qty,
-        extraId: null,
-        pantryStatus: statusFor(p.name),
-        kind: 'restock',
-      });
-    }
+    // NOTE: pantry restock lines are deliberately NOT here.
+    //
+    // Flagging anything in the pantry low/out used to push it straight onto
+    // Active, so things Nate never called staples — chile flakes — appeared on
+    // his buy list out of nowhere. Anything in the PANTRY is "stuff you have":
+    // when it runs low it restocks in STAPLES (see stapleRows). Active is for
+    // what the week's recipes need, plus what you add by hand.
+    //
+    // A pantry item that IS in a recipe still shows on Active via visibleItems
+    // above — the recipe needs it, so it belongs on the buy list.
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, pantryRestockLines, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey, shopMetaMap]);
+  }, [visibleItems, extras, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey, shopMetaMap]);
 
   /** Active = the dominant "get this now" list, with manual merges folded in. */
   const activeRows = useMemo(() => {
@@ -756,13 +772,15 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     //
     //  - PINNED (always-have, parked from the list): always shown. That's the
     //    "we need pine nuts, but not soon" pile — the whole point of the view.
-    //  - PANTRY staple (salt, black pepper…): shown ONLY when it's low/out.
-    //    Something you have plenty of isn't shopping, it's just in your pantry,
-    //    and listing it here buried the pile in things Nate already has.
+    //  - ANYTHING IN THE PANTRY: shown ONLY when it's low/out. Something you
+    //    have plenty of isn't shopping, it's just in your pantry. And this is
+    //    where pantry restocks land — they used to be dumped on Active, which is
+    //    how chile flakes turned up on the buy list unbidden.
     const pinnedKeys = new Set(
       Object.keys(alwaysHaveMap).filter((k) => alwaysHaveMap[k]),
     );
-    const stapleKeys = new Set<string>([...pinnedKeys, ...pantryStapleKeys]);
+    const pantryKeys = pantryItems.map((p) => matchKey(p.canonicalName));
+    const stapleKeys = new Set<string>([...pinnedKeys, ...pantryKeys]);
     for (const key of stapleKeys) {
       if (wasPushed(key) || onActive.has(key)) continue;
       if (!pinnedKeys.has(key)) {
