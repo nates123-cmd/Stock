@@ -721,6 +721,20 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     setAddQty('');
   };
 
+  /** Delete every checked row. Routes each one the same way a single-row swipe
+   *  delete does: on Staples it un-pins (back to Active) rather than destroying;
+   *  extras go for good, restock rows drop for the run, plan rows suppress so
+   *  they stay gone across regen. */
+  const deleteSelected = () => {
+    for (const row of selectedRows) {
+      if (listView === 'staples') setAlways(row.baseName, false);
+      else if (row.extraId) removeExtra(row.extraId);
+      else if (row.kind === 'restock') dismissItem(row.baseName);
+      else deleteItem(row.baseName);
+    }
+    clearSelection();
+  };
+
   /** Switch Active/Staples — clear the selection so it can't leak across views. */
   const switchView = (v: 'active' | 'staples') => {
     setListView(v);
@@ -1279,9 +1293,25 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       {selectedRows.length > 0 ? (
         <BottomActionBar
           meta={
-            <Pressable onPress={clearSelection} hitSlop={6} accessibilityRole="button">
-              <Text color="textFaint">{selectedRows.length} selected · tap to deselect</Text>
-            </Pressable>
+            <View style={styles.selectMeta}>
+              <Pressable onPress={clearSelection} hitSlop={6} accessibilityRole="button">
+                <Text color="textFaint">{selectedRows.length} selected · tap to deselect</Text>
+              </Pressable>
+              {/* Destructive, so it sits up here away from the push buttons. */}
+              <Pressable
+                onPress={deleteSelected}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  listView === 'staples'
+                    ? `Remove ${selectedRows.length} from Staples`
+                    : `Delete ${selectedRows.length} items`
+                }>
+                <Text variant="sectionLabel" color="accent">
+                  {listView === 'staples' ? 'Remove' : 'Delete'} · {selectedRows.length}
+                </Text>
+              </Pressable>
+            </View>
           }>
           <Button
             label={`Push to Reminders · ${selectedRows.length}`}
@@ -1960,6 +1990,12 @@ const styles = StyleSheet.create({
   },
   reminderBtn: { marginTop: 20 },
   viewSegment: { paddingBottom: 12 },
+  selectMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   selectAllRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 6 },
   pushedSection: { marginTop: 24 },
   pushedHeader: {
