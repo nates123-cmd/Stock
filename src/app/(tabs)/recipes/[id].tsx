@@ -12,7 +12,7 @@ import {
 import { Overlay } from '@/components';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow } from '@/components';
+import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow, RecipeTools } from '@/components';
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -20,10 +20,10 @@ import { usePlanStore } from '@/store/plan';
 import { useCookStore } from '@/store/cooks';
 import { dayTag, isSameDay } from '@/lib/week';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
-import { convertToGrams } from '@/lib/parsing';
 import { uid } from '@/lib/id';
+import { pickRecipePhoto } from '@/lib/photo';
 import type { Ingredient, MealType, Recipe, Step, Unit } from '@/types';
-import { formatMinutes, formatAmount } from '@/lib/format';
+import { formatMinutes } from '@/lib/format';
 import { shortDate } from '@/lib/pantry';
 import type { Nutrition, RecipeSource } from '@/types';
 
@@ -56,20 +56,6 @@ export default function RecipeDetail() {
   }, [allRecipes]);
   const [clean, setClean] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const [converting, setConverting] = useState(false);
-  /** Conversion preview — each candidate is the ingredient + its proposed grams. */
-  const [convertPreview, setConvertPreview] = useState<
-    Array<{ ing: Ingredient; grams: number }> | null
-  >(null);
-  /** ids the user has unchecked in the preview (default = all on). */
-  const [convertOff, setConvertOff] = useState<Set<string>>(new Set());
-  /** Non-null while the Scale overlay is open; carries the proposed serves. */
-  const [scalingTo, setScalingTo] = useState<number | null>(null);
-  /** Scale overlay mode: by servings (×N) or pinned to one ingredient's amount. */
-  const [scaleMode, setScaleMode] = useState<'serves' | 'ingredient'>('serves');
-  /** Ingredient mode: which ingredient is pinned + the amount you actually have. */
-  const [pivotId, setPivotId] = useState<string | null>(null);
-  const [pivotTarget, setPivotTarget] = useState('');
   const [editingSource, setEditingSource] = useState(false);
   const [sourceNameInput, setSourceNameInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
@@ -166,116 +152,6 @@ export default function RecipeDetail() {
     setHint(
       `Added to ${dayTag(day)}${planMeal ? ` · ${planMeal}` : ''}`,
     );
-  };
-
-  const previewConvertToGrams = async () => {
-    setConverting(true);
-    setHint(null);
-    try {
-      const results = await convertToGrams(recipe.ingredients);
-      if (results.length === 0) {
-        setHint(
-          'Nothing to convert — all amounts are already in grams (or are counted items / to-taste).',
-        );
-        return;
-      }
-      const byId = new Map(results.map((r) => [r.id, r.grams]));
-      const candidates = recipe.ingredients
-        .filter((i) => byId.has(i.id))
-        .map((ing) => ({ ing, grams: byId.get(ing.id) as number }));
-      setConvertPreview(candidates);
-      setConvertOff(new Set());
-    } catch (e) {
-      setHint(e instanceof Error ? e.message : 'Conversion failed.');
-    } finally {
-      setConverting(false);
-    }
-  };
-
-  const applyConversionPreview = async () => {
-    if (!convertPreview) return;
-    const toApply = convertPreview.filter((c) => !convertOff.has(c.ing.id));
-    if (toApply.length === 0) {
-      setConvertPreview(null);
-      return;
-    }
-    const byId = new Map(toApply.map((c) => [c.ing.id, c.grams]));
-    // Pure data update — unit conversion is a transformation, not an edit,
-    // so don't push a Modification (no strikethrough diff).
-    const updated = recipe.ingredients.map((ing) => {
-      const grams = byId.get(ing.id);
-      if (grams == null) return ing;
-      return { ...ing, amount: grams, unit: 'g' };
-    });
-    await save({ ...recipe, ingredients: updated, modifiedAt: new Date() });
-    setHint(
-      `Converted ${toApply.length} ${toApply.length === 1 ? 'ingredient' : 'ingredients'} to grams.`,
-    );
-    setConvertPreview(null);
-  };
-
-  const toggleConvertCandidate = (id: string) =>
-    setConvertOff((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  const applyScale = async () => {
-    if (scalingTo == null || scalingTo === recipe.yield.serves || scalingTo < 1) {
-      setScalingTo(null);
-      return;
-    }
-    const ratio = scalingTo / recipe.yield.serves;
-    const updated = recipe.ingredients.map((ing) =>
-      ing.amount == null
-        ? ing
-        : { ...ing, amount: Math.round(ing.amount * ratio * 100) / 100 },
-    );
-    await save({
-      ...recipe,
-      ingredients: updated,
-      yield: { ...recipe.yield, serves: scalingTo },
-      modifiedAt: new Date(),
-    });
-    setHint(`Scaled to ${scalingTo} servings.`);
-    setScalingTo(null);
-  };
-
-  // Ingredient-pivot scaling (spec §9 extension): pin one ingredient to the
-  // amount you actually have, scale everything else by that ratio. Use case:
-  // only 600 g of pepper on hand → set pepper to 600 g, the rest follows.
-  const scalable = recipe.ingredients.filter((i) => i.amount != null);
-  const pivot = recipe.ingredients.find((i) => i.id === pivotId) ?? null;
-  const pivotRatio = (() => {
-    const t = parseFloat(pivotTarget);
-    if (!pivot || pivot.amount == null || !Number.isFinite(t) || t <= 0) return null;
-    return t / pivot.amount;
-  })();
-
-  const applyScaleByIngredient = async () => {
-    if (!pivot || pivot.amount == null || pivotRatio == null) {
-      setScalingTo(null);
-      return;
-    }
-    const ratio = pivotRatio;
-    const updated = recipe.ingredients.map((ing) =>
-      ing.amount == null
-        ? ing
-        : { ...ing, amount: Math.round(ing.amount * ratio * 100) / 100 },
-    );
-    const newServes = Math.max(1, Math.round(recipe.yield.serves * ratio));
-    await save({
-      ...recipe,
-      ingredients: updated,
-      yield: { ...recipe.yield, serves: newServes },
-      modifiedAt: new Date(),
-    });
-    setHint(
-      `Scaled to ${formatAmount(Math.round((parseFloat(pivotTarget)) * 100) / 100, pivot.unit)} ${pivot.canonicalName}.`,
-    );
-    setScalingTo(null);
   };
 
   return (
@@ -416,7 +292,7 @@ export default function RecipeDetail() {
           onPress={() => setPlanning(true)}
         />
 
-        <View style={styles.toolbar}>
+        <RecipeTools recipe={recipe} onSave={save} onHint={setHint}>
           <Button
             label="Cook"
             glyph="done"
@@ -425,26 +301,7 @@ export default function RecipeDetail() {
               router.push({ pathname: '/cook/[id]', params: { id: recipe.id } })
             }
           />
-          <Button
-            label={converting ? 'Converting…' : 'To grams'}
-            glyph="bench"
-            variant="secondary"
-            flex
-            disabled={converting}
-            onPress={previewConvertToGrams}
-          />
-          <Button
-            label="Scale"
-            variant="secondary"
-            flex
-            onPress={() => {
-              setScaleMode('serves');
-              setPivotId(recipe.ingredients.find((i) => i.amount != null)?.id ?? null);
-              setPivotTarget('');
-              setScalingTo(recipe.yield.serves);
-            }}
-          />
-        </View>
+        </RecipeTools>
         {hint ? (
           <Text color="textMuted" style={styles.hint}>
             {hint}
@@ -453,7 +310,7 @@ export default function RecipeDetail() {
 
         <View style={wide ? styles.twoCol : undefined}>
           <View style={wide ? styles.colLeft : undefined}>
-            <SectionLabel style={styles.sectionLabel}>Ingredients</SectionLabel>
+            <SectionHeader label="Ingredients" onEdit={() => setEditing(true)} />
             <View style={styles.ingredients}>
               {recipe.ingredients.map((ing) => {
                 const annotation = clean ? null : ingredientAnnotation(ing);
@@ -500,7 +357,7 @@ export default function RecipeDetail() {
           </View>
 
           <View style={wide ? styles.colRight : undefined}>
-            <SectionLabel style={styles.sectionLabel}>Method</SectionLabel>
+            <SectionHeader label="Method" onEdit={() => setEditing(true)} />
             <View style={styles.method}>
               {steps.map((s) => (
                 <View key={s.id} style={styles.stepRow}>
@@ -543,148 +400,6 @@ export default function RecipeDetail() {
         ) : null}
       </ScrollView>
 
-      <Overlay
-        visible={scalingTo != null}
-        onClose={() => setScalingTo(null)}>
-        {scalingTo != null ? (
-          <View style={styles.scaleSheet}>
-            <Text variant="recipeTitle">Scale recipe</Text>
-            <ChipRow>
-              <FilterChip
-                label="By servings"
-                active={scaleMode === 'serves'}
-                onPress={() => setScaleMode('serves')}
-              />
-              <FilterChip
-                label="By ingredient"
-                active={scaleMode === 'ingredient'}
-                onPress={() => setScaleMode('ingredient')}
-              />
-            </ChipRow>
-
-            {scaleMode === 'serves' ? (
-              <>
-                <Text color="textFaint" style={styles.scaleHint}>
-                  Multiplies all amounts. Tweak anything weird afterward (tap an
-                  ingredient to fine-tune).
-                </Text>
-                <View style={styles.scaleControl}>
-                  <Pressable
-                    onPress={() => setScalingTo(Math.max(1, scalingTo - 1))}
-                    style={styles.scaleBtn}
-                    hitSlop={8}>
-                    <Text variant="recipeTitle">−</Text>
-                  </Pressable>
-                  <View style={styles.scaleNumWrap}>
-                    <Numeric color="text" style={styles.scaleNum}>
-                      {scalingTo}
-                    </Numeric>
-                    <Text color="textMuted">servings</Text>
-                  </View>
-                  <Pressable
-                    onPress={() => setScalingTo(Math.min(99, scalingTo + 1))}
-                    style={styles.scaleBtn}
-                    hitSlop={8}>
-                    <Text variant="recipeTitle">+</Text>
-                  </Pressable>
-                </View>
-                <Text color="textMuted" style={styles.scaleRatio}>
-                  {scalingTo === recipe.yield.serves
-                    ? `Same as current (${recipe.yield.serves})`
-                    : `${(scalingTo / recipe.yield.serves).toFixed(2).replace(/\.?0+$/, '')}× from ${recipe.yield.serves}`}
-                </Text>
-              </>
-            ) : (
-              <>
-                <Text color="textFaint" style={styles.scaleHint}>
-                  Pin one ingredient to the amount you actually have — everything
-                  else scales to match.
-                </Text>
-                <ChipRow>
-                  {scalable.map((ing) => (
-                    <FilterChip
-                      key={ing.id}
-                      label={ing.canonicalName}
-                      active={pivotId === ing.id}
-                      onPress={() => setPivotId(ing.id)}
-                    />
-                  ))}
-                </ChipRow>
-                {pivot ? (
-                  <View style={styles.pivotInputRow}>
-                    <Text color="textMuted">I have</Text>
-                    <TextInput
-                      value={pivotTarget}
-                      onChangeText={setPivotTarget}
-                      keyboardType="numeric"
-                      placeholder={
-                        pivot.amount != null ? String(pivot.amount) : '—'
-                      }
-                      placeholderTextColor={colors.textFaint}
-                      style={styles.pivotInput}
-                    />
-                    <Text color="textMuted">
-                      {pivot.unit ?? ''} {pivot.canonicalName}
-                    </Text>
-                  </View>
-                ) : null}
-                <Text color="textMuted" style={styles.scaleRatio}>
-                  {pivotRatio == null
-                    ? 'Enter an amount to preview'
-                    : `${(Math.round(pivotRatio * 100) / 100)}× from ${formatAmount(pivot!.amount, pivot!.unit)}`}
-                </Text>
-              </>
-            )}
-
-            <ScrollView style={styles.scaleList}>
-              {recipe.ingredients.map((ing) => {
-                if (ing.amount == null) return null;
-                const ratio =
-                  scaleMode === 'serves'
-                    ? scalingTo / recipe.yield.serves
-                    : pivotRatio;
-                const newAmt =
-                  ratio == null
-                    ? ing.amount
-                    : Math.round(ing.amount * ratio * 100) / 100;
-                return (
-                  <View key={ing.id} style={styles.scaleRow}>
-                    <Text style={styles.convertName} numberOfLines={1}>
-                      {ing.canonicalName}
-                    </Text>
-                    <Numeric color="textMuted">
-                      {formatAmount(ing.amount, ing.unit)} →{' '}
-                      {formatAmount(newAmt, ing.unit)}
-                    </Numeric>
-                  </View>
-                );
-              })}
-            </ScrollView>
-            <View style={styles.convertButtons}>
-              <Button
-                label="Cancel"
-                variant="secondary"
-                flex
-                onPress={() => setScalingTo(null)}
-              />
-              <Button
-                label="Apply"
-                glyph="done"
-                flex
-                disabled={
-                  scaleMode === 'serves'
-                    ? scalingTo === recipe.yield.serves
-                    : pivotRatio == null || pivotRatio === 1
-                }
-                onPress={
-                  scaleMode === 'serves' ? applyScale : applyScaleByIngredient
-                }
-              />
-            </View>
-          </View>
-        ) : null}
-      </Overlay>
-
       <Overlay visible={planning} onClose={() => setPlanning(false)}>
         <View style={styles.planSheet}>
           <Text variant="recipeTitle">Add to plan</Text>
@@ -721,52 +436,6 @@ export default function RecipeDetail() {
         </View>
       </Overlay>
 
-      <Overlay
-        visible={convertPreview != null}
-        onClose={() => setConvertPreview(null)}>
-        {convertPreview ? (
-          <View style={styles.convertSheet}>
-            <Text variant="recipeTitle">Convert to grams</Text>
-            <Text color="textFaint" style={styles.convertHint}>
-              Uncheck anything you'd rather keep in its original units.
-            </Text>
-            <ScrollView style={styles.convertList}>
-              {convertPreview.map(({ ing, grams }) => {
-                const on = !convertOff.has(ing.id);
-                return (
-                  <Pressable
-                    key={ing.id}
-                    onPress={() => toggleConvertCandidate(ing.id)}
-                    style={styles.convertRow}>
-                    <View style={[styles.convertCheck, on && styles.convertCheckOn]}>
-                      {on ? <Glyph name="done" size={12} color="bg" /> : null}
-                    </View>
-                    <Text style={styles.convertName}>{ing.canonicalName}</Text>
-                    <Numeric color="textMuted">
-                      {formatAmount(ing.amount, ing.unit)} → {grams} g
-                    </Numeric>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            <View style={styles.convertButtons}>
-              <Button
-                label="Cancel"
-                variant="secondary"
-                flex
-                onPress={() => setConvertPreview(null)}
-              />
-              <Button
-                label={`Convert ${convertPreview.length - convertOff.size}`}
-                glyph="done"
-                flex
-                disabled={convertPreview.length - convertOff.size === 0}
-                onPress={applyConversionPreview}
-              />
-            </View>
-          </View>
-        ) : null}
-      </Overlay>
     </SafeAreaView>
   );
 }
@@ -1042,6 +711,26 @@ function NotesEditor({
   );
 }
 
+/**
+ * A section label with its own "Edit" affordance.
+ *
+ * Editing ingredients / method was always possible, but the only way in was a
+ * small "Edit" link in the top bar — so it read as un-editable. Put the way in
+ * next to the thing it edits.
+ */
+function SectionHeader({ label, onEdit }: { label: string; onEdit: () => void }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <SectionLabel style={styles.sectionLabel}>{label}</SectionLabel>
+      <Pressable onPress={onEdit} hitSlop={8}>
+        <Text variant="bodyStrong" color="accent">
+          Edit
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function TopBar({
   onBack,
   clean,
@@ -1127,6 +816,11 @@ const styles = StyleSheet.create({
   toolbar: { flexDirection: 'row', gap: 10 },
   hint: { paddingTop: 8, fontStyle: 'italic' },
   sectionLabel: { paddingTop: 24, paddingBottom: 12 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   twoCol: { flexDirection: 'row', gap: 36, alignItems: 'flex-start' },
   colLeft: { flex: 4, minWidth: 0 },
   colRight: { flex: 6, minWidth: 0 },
@@ -1311,6 +1005,24 @@ function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }
       .map((s) => ({ id: s.id, body: s.body })),
   );
   const [saving, setSaving] = useState(false);
+  // Photo — shoot one or pick one; committed with the rest of the edit on Save.
+  const [imageUrl, setImageUrl] = useState<string | undefined>(recipe.imageUrl);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  const choosePhoto = async (source: 'camera' | 'library') => {
+    if (photoBusy) return;
+    setPhotoBusy(true);
+    setPhotoError(null);
+    try {
+      const uri = await pickRecipePhoto(source);
+      if (uri) setImageUrl(uri);
+    } catch (e) {
+      setPhotoError(e instanceof Error ? e.message : 'Could not add that photo.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
 
   const setIng = (id: string, patch: Partial<IngDraft>) =>
     setIngs((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -1375,6 +1087,7 @@ function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }
       ...recipe,
       title: title.trim() || recipe.title,
       yield: { serves: servesNum, totalMinutes: minNum },
+      imageUrl,
       ingredients,
       steps: nextSteps,
       modifiedAt: new Date(),
@@ -1402,6 +1115,40 @@ function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }
       <ScrollView
         contentContainerStyle={editStyles.body}
         keyboardShouldPersistTaps="handled">
+        <View style={editStyles.field}>
+          <SectionLabel color="textMuted">Photo</SectionLabel>
+          {imageUrl ? (
+            <Image source={{ uri: imageUrl }} style={editStyles.photo} resizeMode="cover" />
+          ) : (
+            <View style={editStyles.photoEmpty}>
+              <Glyph name="recipes" size={20} color="textFaint" />
+              <Text color="textFaint">No photo yet</Text>
+            </View>
+          )}
+          <View style={editStyles.photoButtons}>
+            <Button
+              label={photoBusy ? 'Working…' : 'Take photo'}
+              variant="secondary"
+              flex
+              disabled={photoBusy}
+              onPress={() => choosePhoto('camera')}
+            />
+            <Button
+              label="Choose photo"
+              variant="secondary"
+              flex
+              disabled={photoBusy}
+              onPress={() => choosePhoto('library')}
+            />
+          </View>
+          {imageUrl ? (
+            <Pressable onPress={() => setImageUrl(undefined)} hitSlop={6}>
+              <Text color="warn">Remove photo</Text>
+            </Pressable>
+          ) : null}
+          {photoError ? <Text color="warn">{photoError}</Text> : null}
+        </View>
+
         <View style={editStyles.field}>
           <SectionLabel color="textMuted">Title</SectionLabel>
           <TextInput
@@ -1533,6 +1280,20 @@ const editStyles = StyleSheet.create({
   body: { padding: layout.screenPadding, paddingBottom: 40, gap: 14 },
   field: { gap: 6 },
   flex: { flex: 1 },
+  photo: { width: '100%', height: 180, borderRadius: 12, backgroundColor: colors.bg2 },
+  photoEmpty: {
+    width: '100%',
+    height: 110,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  photoButtons: { flexDirection: 'row', gap: 10 },
   row2: { flexDirection: 'row', gap: 12 },
   heading: { paddingTop: 10 },
   list: { gap: 8 },
