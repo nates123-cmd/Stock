@@ -130,7 +130,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   }, [hydratePushed, prunePushed]);
   // Subscribe to have-state so rows re-render on tap (we use the Map directly
   // for derived booleans below, but the selector keeps us reactive).
-  const haveByName = useHaveStore((s) => s.byName);
+  const haveChecked = useHaveStore((s) => s.checked);
   const alwaysHaveMap = useHaveStore((s) => s.alwaysHave);
   const markHave = useHaveStore((s) => s.mark);
   const unmarkHave = useHaveStore((s) => s.unmark);
@@ -154,6 +154,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // pantry is downstream of it.
   const applyPaste = usePantryStore((s) => s.applyPaste);
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
+  const setPantryStatus = usePantryStore((s) => s.setStatus);
   const statusByKey = useMemo(() => {
     const m = new Map<string, PantryStatus>();
     for (const p of pantryItems) {
@@ -518,7 +519,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     if (isAlwaysHave(name, alwaysHaveMap) || isPantryStaple(name)) return true;
     const ps = statusFor(name);
     if (ps === 'out' || ps === 'low') return false; // non-staple restock → Active
-    return isMarked(haveByName, name);
+    return isMarked(haveChecked, name);
   };
 
   /**
@@ -656,7 +657,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     );
     return [...fromItems, ...fromExtras, ...fromPantry];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, haveByName, alwaysHaveMap, pantryRestockLines, dismissed]);
+  }, [visibleItems, extras, haveChecked, alwaysHaveMap, pantryRestockLines, dismissed]);
 
   /** The active list, folded flat (minimalist, Reminders-style). Recipe items,
    *  manual adds, and low/out restock staples in one ordered list — no category
@@ -731,7 +732,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // above — the recipe needs it, so it belongs on the buy list.
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, dismissed, overrides, pushedSet, haveByName, alwaysHaveMap, statusByKey, shopMetaMap]);
+  }, [visibleItems, extras, dismissed, overrides, pushedSet, haveChecked, alwaysHaveMap, statusByKey, shopMetaMap]);
 
   /** Active = the dominant "get this now" list, with manual merges folded in. */
   const activeRows = useMemo(() => {
@@ -1005,7 +1006,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     for (const e of extras) if (inHave(e.canonicalName)) n++;
     return n;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, haveByName, alwaysHaveMap, ghostAlways]);
+  }, [visibleItems, extras, haveChecked, alwaysHaveMap, ghostAlways]);
 
   const buyCount = buyLines.length;
 
@@ -1018,8 +1019,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     });
 
   const toggleHave = (name: string) => {
-    if (isMarked(haveByName, name)) unmarkHave(name);
-    else markHave(name);
+    if (isMarked(haveChecked, name)) {
+      unmarkHave(name);
+    } else {
+      markHave(name);
+      // Same reason as skipBuy: a low/out flag outranks the check-off, so
+      // without this the row would strike through and then come straight back.
+      void clearLowOut(name);
+    }
     // First toggle teaches the polarity — kill the onboarding banner the
     // moment the user has performed the action it describes.
     if (showOnboard) dismissOnboard();
@@ -1052,12 +1059,33 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     setBuying(null);
   };
 
-  /** "Already had it": clear the row without touching the pantry. */
+  /**
+   * "Already had it": clear the row without restocking the pantry.
+   *
+   * A low/out pantry flag outranks the check-off in `inHave` (that's the
+   * depletion loop that legitimately brings things back). But saying "I already
+   * have it" contradicts that flag — so clear it, or the row is un-check-off-able
+   * and reappears on the very next render.
+   */
   const skipBuy = () => {
     if (!buying) return;
     markHave(buying.name);
+    void clearLowOut(buying.name);
     if (showOnboard) dismissOnboard();
     setBuying(null);
+  };
+
+  /** Reset any low/out pantry flag matching this shopping-list name back to fine. */
+  const clearLowOut = async (name: string) => {
+    const k = matchKey(name);
+    for (const p of pantryItems) {
+      const s = p.status ?? 'fine';
+      if (s !== 'low' && s !== 'out') continue;
+      const pk = matchKey(p.canonicalName);
+      if (pk === k || pk.startsWith(k) || k.startsWith(pk)) {
+        await setPantryStatus(p.id, 'fine');
+      }
+    }
   };
 
   /** Dismiss a consolidated row for this run (session-local). */
@@ -1076,14 +1104,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const checkedNames = useMemo(() => {
     const out: { name: string; extraId: string | null }[] = [];
     for (const i of visibleItems)
-      if (isMarked(haveByName, i.name) && !isAlwaysHave(i.name, alwaysHaveMap))
+      if (isMarked(haveChecked, i.name) && !isAlwaysHave(i.name, alwaysHaveMap))
         out.push({ name: i.name, extraId: null });
     for (const e of extras)
-      if (isMarked(haveByName, e.canonicalName) && !isAlwaysHave(e.canonicalName, alwaysHaveMap))
+      if (isMarked(haveChecked, e.canonicalName) && !isAlwaysHave(e.canonicalName, alwaysHaveMap))
         out.push({ name: e.canonicalName, extraId: e.id });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, haveByName, alwaysHaveMap]);
+  }, [visibleItems, extras, haveChecked, alwaysHaveMap]);
   const clearChecked = () => {
     for (const c of checkedNames) {
       if (c.extraId) removeExtra(c.extraId);
@@ -2115,15 +2143,17 @@ function ShoppingRow({
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/** Strikethrough state: "marked" within the current shop run (last 6h). */
-function isMarked(
-  byName: Record<string, { count: number; lastAt: Date }>,
-  name: string,
-): boolean {
-  const r = byName[name.toLowerCase().trim()];
-  if (!r) return false;
-  const at = r.lastAt instanceof Date ? r.lastAt.getTime() : new Date(r.lastAt).getTime();
-  return Date.now() - at < 6 * 60 * 60 * 1000;
+/**
+ * Strikethrough state: the user checked this off, and it STAYS checked.
+ *
+ * This used to be "marked within the last 6 hours", inferred from a timestamp.
+ * Six hours after a shop, every checked-off row silently came back — which is
+ * what "items keep adding themselves to my list" actually was. Checking off is
+ * now an explicit, persisted fact; the pantry going low/out is what brings an
+ * item back (see `inHave`), not the clock.
+ */
+function isMarked(checked: Record<string, true>, name: string): boolean {
+  return checked[name.toLowerCase().trim()] === true;
 }
 
 /** Pre-shop hint: "you’ve marked this name ≥ 3× in the last 60 days." */

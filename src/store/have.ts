@@ -18,6 +18,17 @@ export type HaveRecord = { count: number; lastAt: Date };
 
 type HaveState = {
   byName: Record<string, HaveRecord>;
+  /**
+   * Names checked off the shopping list. Checking off is PERMANENT: it stays
+   * checked until you uncheck it, or until the pantry says you're low/out
+   * again (see `inHave` in shopping.tsx — a low/out pantry status outranks
+   * this, which is the intended "bought → pantry → depletes → resurfaces" loop).
+   *
+   * This used to be inferred from `byName[k].lastAt` being within the last 6
+   * hours. That meant every item you checked off silently came BACK six hours
+   * later, which read as items adding themselves to the list at random.
+   */
+  checked: Record<string, true>;
   /** Canonical names the user has pinned as "I always have this." These
    *  auto-route to the Already-have bucket on every shopping list and never
    *  surface as buy items. Per-canonical-name; persists across runs. */
@@ -36,18 +47,21 @@ const key = (s: string) => s.toLowerCase().trim();
 
 export const useHaveStore = create<HaveState>((set, get) => ({
   byName: {},
+  checked: {},
   alwaysHave: {},
   hydrated: false,
 
   hydrate: async () => {
     if (get().hydrated) return;
     if (!NATIVE) {
-      const [saved, alw] = await Promise.all([
+      const [saved, chk, alw] = await Promise.all([
         webPersist.load<Record<string, HaveRecord>>('have-counts'),
+        webPersist.load<Record<string, true>>('have-checked'),
         webPersist.load<Record<string, true>>('always-have'),
       ]);
       set({
         byName: saved ?? {},
+        checked: chk ?? {},
         alwaysHave: alw ?? {},
         hydrated: true,
       });
@@ -59,35 +73,32 @@ export const useHaveStore = create<HaveState>((set, get) => ({
   mark: (name) => {
     const k = key(name);
     set((s) => ({
+      // count + lastAt still drive the "you likely already have this" hint.
       byName: {
         ...s.byName,
         [k]: { count: (s.byName[k]?.count ?? 0) + 1, lastAt: new Date() },
       },
+      checked: { ...s.checked, [k]: true },
     }));
   },
 
   unmark: (name) => {
     const k = key(name);
     set((s) => {
+      const nextChecked = { ...s.checked };
+      delete nextChecked[k];
       const r = s.byName[k];
-      if (!r) return s;
+      if (!r) return { checked: nextChecked };
       const nextCount = Math.max(0, r.count - 1);
       const updated = { ...s.byName };
       if (nextCount === 0) delete updated[k];
       else updated[k] = { count: nextCount, lastAt: r.lastAt };
-      return { byName: updated };
+      return { byName: updated, checked: nextChecked };
     });
   },
 
-  /** Has the user marked this name as "have" on the current list yet? */
-  isMarked: (name) => {
-    // Marked on the current list = count was bumped within the last few minutes.
-    // We approximate "current session" with "within the last 6 hours" so that
-    // refreshing the page doesn't lose the marks for the in-progress shop.
-    const r = get().byName[key(name)];
-    if (!r) return false;
-    return Date.now() - r.lastAt.getTime() < 6 * 60 * 60 * 1000;
-  },
+  /** Checked off the list. Sticks until unchecked (or the pantry goes low/out). */
+  isMarked: (name) => get().checked[key(name)] === true,
 
   likelyHave: (name) => {
     const r = get().byName[key(name)];
@@ -112,6 +123,7 @@ export const useHaveStore = create<HaveState>((set, get) => ({
 if (!NATIVE) {
   useHaveStore.subscribe((s) => {
     void webPersist.save('have-counts', s.byName);
+    void webPersist.save('have-checked', s.checked);
     void webPersist.save('always-have', s.alwaysHave);
   });
 }
