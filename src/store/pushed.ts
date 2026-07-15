@@ -7,13 +7,13 @@ import { matchKey } from '@/lib/pantry';
  * "Pushed" list (Apple Reminders-style). When you select rows and push them to
  * Wegmans or Reminders, they leave the active shopping list and land here —
  * a collapsed record of what went out, in case an order isn't fully covered.
- * Entries self-expire after ~2 days so the list keeps itself clean.
+ * Entries self-expire after 24h so the list keeps itself clean.
  *
  * Web (the PWA) persists via IndexedDB, which round-trips Date objects; native
  * gets a session-only copy (fine — Stock is web-first).
  */
 const NATIVE = Platform.OS !== 'web';
-const EXPIRY_MS = 48 * 60 * 60 * 1000; // ~2 days
+const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24h
 
 export type PushDest = 'wegmans' | 'reminders';
 export type PushedEntry = {

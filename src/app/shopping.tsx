@@ -573,7 +573,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     });
   const clearSelection = () => setSelected(new Set());
 
-  /** Names the user pushed to a channel in the last ~2 days — dropped from the
+  /** Names the user pushed to a channel in the last 24h — dropped from the
    *  active list, parked in the collapsed "Pushed" section. */
   const pushedSet = useMemo(
     () => new Set(pushedItems.map((e) => e.key)),
@@ -662,7 +662,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   /** The active list, folded flat (minimalist, Reminders-style). Recipe items,
    *  manual adds, and low/out restock staples in one ordered list — no category
    *  or store sections. Items marked "have" (swiped right) or pushed in the last
-   *  ~2 days drop out. `name`/`qty` reflect any inline-edit override; `baseName`
+   *  24h drop out. `name`/`qty` reflect any inline-edit override; `baseName`
    *  is the stable key the override + selection hang off. */
   type FlatRow = {
     key: string;
@@ -827,15 +827,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // An item lives in exactly ONE view.
     const onActive = new Set(activeRows.map((r) => matchKey(r.baseName)));
 
-    // Staples is a SHOPPING list, not a mirror of the pantry. Two sources, and
-    // they earn their place differently:
+    // The Staples shopping list is what you NEED TO BUY, not a mirror of what's
+    // pinned or what's in the pantry.
     //
-    //  - PINNED (always-have, parked from the list): always shown. That's the
-    //    "we need pine nuts, but not soon" pile — the whole point of the view.
-    //  - ANYTHING IN THE PANTRY: shown ONLY when it's low/out. Something you
-    //    have plenty of isn't shopping, it's just in your pantry. And this is
-    //    where pantry restocks land — they used to be dumped on Active, which is
-    //    how chile flakes turned up on the buy list unbidden.
+    //  - Pantry = everything you currently have.
+    //  - "Always have" is a PANTRY property (pinStaple puts it in the pantry as
+    //    a staple). Marking it does NOT put it on this list — you just said you
+    //    have it.
+    //  - A staple lands here ONLY when it runs low/out, i.e. there's actually
+    //    something to buy. Have plenty → it stays in the pantry, off this list.
+    //
+    // Both sources (the always-have pin and the pantry's own isStaple) collapse
+    // to the same rule: show it only when it's low/out.
     const pinnedKeys = new Set(
       Object.keys(alwaysHaveMap).filter((k) => alwaysHaveMap[k]),
     );
@@ -843,10 +846,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const stapleKeys = new Set<string>([...pinnedKeys, ...pantryKeys]);
     for (const key of stapleKeys) {
       if (wasPushed(key) || onActive.has(key)) continue;
-      if (!pinnedKeys.has(key)) {
-        const st = statusFor(key);
-        if (st !== 'low' && st !== 'out') continue; // have plenty → pantry's job
-      }
+      const st = statusFor(key);
+      if (st !== 'low' && st !== 'out') continue; // have plenty → pantry's job
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
       const pan = pantryItems.find((p) => matchKey(p.canonicalName) === key);
@@ -1141,15 +1142,24 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     setAddQty('');
   };
 
-  /** Delete every checked row. Routes each one the same way a single-row swipe
-   *  delete does: on Staples it un-pins (back to Active) rather than destroying;
-   *  extras go for good, restock rows drop for the run, plan rows suppress so
-   *  they stay gone across regen. */
   /** Delete ONE row. A merged row deletes every row folded into it, or you'd
-   *  delete the visible line and its members would pop straight back out. */
+   *  delete the visible line and its members would pop straight back out.
+   *  On Staples, "delete" means "don't need to buy now" (clears the low/out
+   *  flag, stays a staple); extras go for good, restock rows drop for the run,
+   *  plan rows suppress so they stay gone across regen. */
   const deleteRow = (row: FlatRow) => {
     if (listView === 'staples') {
-      pinStaple(row.baseName, false);
+      // Deleting off the STAPLES shopping list means "handled it / don't need to
+      // buy now" — NOT "stop being a staple". A staple only appears here when
+      // it's low/out, so clear that flag: it leaves the buy list and stays a
+      // pantry staple (off Active, because inHave keeps staples off Active).
+      //
+      // This used to call pinStaple(false), which un-pinned the item — and an
+      // un-pinned item the week's recipes still need bounced straight back onto
+      // Active. That was the "I delete it from Staples and it reappears in
+      // Active" loop. To genuinely un-staple something, use "Remove always have"
+      // in the long-press menu.
+      void clearLowOut(row.baseName);
       return;
     }
     if (row.members) {
@@ -1598,7 +1608,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           />
         </Pressable>
 
-        {/* Pushed: what went out to Wegmans/Reminders in the last ~2 days.
+        {/* Pushed: what went out to Wegmans/Reminders in the last 24h.
             Collapsed by default; tap a row to pull it back onto the list. */}
         {listView === 'active' && pushedItems.length > 0 ? (
           <View style={styles.pushedSection}>
