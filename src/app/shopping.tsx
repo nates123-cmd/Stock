@@ -883,15 +883,24 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       Object.keys(alwaysHaveMap).filter((k) => alwaysHaveMap[k]),
     );
     const pantryKeys = pantryItems.map((p) => matchKey(p.canonicalName));
-    const stapleKeys = new Set<string>([...pinnedKeys, ...pantryKeys]);
+    // Anything you added directly to this list is an EXTRA — include its key
+    // even if it isn't pinned/in the pantry, so a hand-added staple is never
+    // dropped for lack of a pin.
+    const extraKeys = extras.map((e) => matchKey(e.canonicalName));
+    const stapleKeys = new Set<string>([...pinnedKeys, ...pantryKeys, ...extraKeys]);
     for (const key of stapleKeys) {
       if (wasPushed(key) || onActive.has(key)) continue;
-      const st = statusFor(key);
-      if (st !== 'low' && st !== 'out') continue; // have plenty → pantry's job
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
       const pan = pantryItems.find((p) => matchKey(p.canonicalName) === key);
       const base = ex?.canonicalName ?? it?.name ?? pan?.canonicalName ?? key;
+      // Bought/checked → it's handled, drop it (same as elsewhere).
+      if (isMarked(haveChecked, base)) continue;
+      // A manually-added item (an EXTRA you put on this list) STAYS regardless of
+      // stock status — you explicitly added it. A pantry-derived staple only
+      // shows when it's actually low/out (else it's just stuff you already have).
+      const st = statusFor(key);
+      if (!ex && st !== 'low' && st !== 'out') continue;
       const o = overrides[matchKey(base)];
       rows.push({
         key: `s:${key}`,
@@ -1189,10 +1198,15 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  plan rows suppress so they stay gone across regen. */
   const deleteRow = (row: FlatRow) => {
     if (listView === 'staples') {
-      // Deleting off the STAPLES shopping list means "handled it / don't need to
-      // buy now" — NOT "stop being a staple". A staple only appears here when
-      // it's low/out, so clear that flag: it leaves the buy list and stays a
-      // pantry staple (off Active, because inHave keeps staples off Active).
+      // A hand-added staple is an extra — delete actually removes it.
+      if (row.extraId) {
+        removeExtra(row.extraId);
+        return;
+      }
+      // For a pantry-derived staple, deleting means "handled it / don't need to
+      // buy now" — NOT "stop being a staple". It appears here only when low/out,
+      // so clear that flag: it leaves the buy list and stays a pantry staple
+      // (off Active, because inHave keeps staples off Active).
       //
       // This used to call pinStaple(false), which un-pinned the item — and an
       // un-pinned item the week's recipes still need bounced straight back onto
