@@ -573,7 +573,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     });
   const clearSelection = () => setSelected(new Set());
 
-  /** Names the user pushed to a channel in the last ~2 days — dropped from the
+  /** Names the user pushed to a channel in the last 24h — dropped from the
    *  active list, parked in the collapsed "Pushed" section. */
   const pushedSet = useMemo(
     () => new Set(pushedItems.map((e) => e.key)),
@@ -662,7 +662,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   /** The active list, folded flat (minimalist, Reminders-style). Recipe items,
    *  manual adds, and low/out restock staples in one ordered list — no category
    *  or store sections. Items marked "have" (swiped right) or pushed in the last
-   *  ~2 days drop out. `name`/`qty` reflect any inline-edit override; `baseName`
+   *  24h drop out. `name`/`qty` reflect any inline-edit override; `baseName`
    *  is the stable key the override + selection hang off. */
   type FlatRow = {
     key: string;
@@ -1598,7 +1598,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           />
         </Pressable>
 
-        {/* Pushed: what went out to Wegmans/Reminders in the last ~2 days.
+        {/* Pushed: what went out to Wegmans/Reminders in the last 24h.
             Collapsed by default; tap a row to pull it back onto the list. */}
         {listView === 'active' && pushedItems.length > 0 ? (
           <View style={styles.pushedSection}>
