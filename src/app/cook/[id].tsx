@@ -17,6 +17,7 @@ import {
   StepBody,
   IngredientAmount,
   IngredientName,
+  RecipeTools,
 } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -80,6 +81,8 @@ export default function CookScreen() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>('cooking');
   const [note, setNote] = useState('');
+  // Result copy from the bench tools (To grams / Scale) shown in Glance.
+  const [toolHint, setToolHint] = useState<string | null>(null);
   const startedAt = useRef(new Date());
 
   // Cook identity is fixed at mount so any in-cook modifications can stamp
@@ -413,6 +416,9 @@ export default function CookScreen() {
           onMarkCooked={finishCook}
           onEditIngredient={setEditingIng}
           onAddIngredient={() => setAddingIng(true)}
+          onSaveRecipe={saveRecipe}
+          toolHint={toolHint}
+          onToolHint={setToolHint}
         />
       ) : (
         <NotesBody recipe={recipe} note={note} setNote={setNote} saved={noteSaved} dirty={noteDirty} />
@@ -576,6 +582,9 @@ function GlanceBody({
   onMarkCooked,
   onEditIngredient,
   onAddIngredient,
+  onSaveRecipe,
+  toolHint,
+  onToolHint,
 }: {
   recipe: Recipe;
   lastNote?: string;
@@ -589,6 +598,9 @@ function GlanceBody({
   onMarkCooked: () => void;
   onEditIngredient: (ing: Ingredient) => void;
   onAddIngredient: () => void;
+  onSaveRecipe: (r: Recipe) => Promise<void> | void;
+  toolHint: string | null;
+  onToolHint: (m: string | null) => void;
 }) {
   const time = formatMinutes(recipe.yield.totalMinutes);
   return (
@@ -609,6 +621,15 @@ function GlanceBody({
               “{lastNote}”
             </Text>
           </Card>
+        ) : null}
+
+        {/* Bench tools, right where the amounts are — you need "to grams" and
+            "scale" standing at the counter, not only back in the Recipes tab. */}
+        <RecipeTools recipe={recipe} onSave={onSaveRecipe} onHint={onToolHint} />
+        {toolHint ? (
+          <Text color="textMuted" style={styles.toolHint}>
+            {toolHint}
+          </Text>
         ) : null}
 
         <Card style={styles.ingCard}>
@@ -1077,6 +1098,7 @@ const styles = StyleSheet.create({
   dim: { opacity: 0.35 },
   glanceContent: { padding: layout.screenPadding, gap: 14, paddingBottom: 30 },
   glanceTitle: { fontSize: 22 },
+  toolHint: { fontStyle: 'italic', lineHeight: 18 },
   lastNoteCard: { gap: 6 },
   lastNoteText: { lineHeight: 20, fontStyle: 'italic' },
   ingCard: { gap: 8 },
