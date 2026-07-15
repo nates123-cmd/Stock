@@ -11,6 +11,8 @@ import {
   Button,
   Pill,
   Glyph,
+  Overlay,
+  SearchBar,
   type PillTone,
 } from '@/components';
 import { colors } from '@/design';
@@ -37,15 +39,19 @@ export default function IdeaDetail() {
   const { id, openCart } = useLocalSearchParams<{ id: string; openCart?: string }>();
   const idea = usePipelineStore((s) => s.ideas.find((i) => i.id === id));
   const setStatus = usePipelineStore((s) => s.setStatus);
+  const setDetails = usePipelineStore((s) => s.setDetails);
   const setBestGuess = usePipelineStore((s) => s.setBestGuess);
+  const setLinkedRecipe = usePipelineStore((s) => s.setLinkedRecipe);
   const addReference = usePipelineStore((s) => s.addReference);
   const removeReference = usePipelineStore((s) => s.removeReference);
   const remove = usePipelineStore((s) => s.remove);
+  const recipes = useRecipeStore((s) => s.recipes);
   const recipeTitle = useRecipeStore((s) =>
     idea?.promotedRecipeId
       ? s.recipes.find((r) => r.id === idea.promotedRecipeId)?.title
       : undefined,
   );
+  const linkedRecipe = recipes.find((r) => r.id === idea?.linkedRecipeId);
   const addExtras = useExtrasStore((s) => s.add);
   const removeExtrasByOrigin = useExtrasStore((s) => s.removeByOrigin);
   const extras = useExtrasStore((s) => s.items);
@@ -56,6 +62,11 @@ export default function IdeaDetail() {
   const [captureText, setCaptureText] = useState('');
   const [busy, setBusy] = useState(false);
   const [pushed, setPushed] = useState<number | null>(null);
+  // Inline note editor + the "attach a recipe" picker.
+  const [noteDraft, setNoteDraft] = useState(idea?.note ?? '');
+  const [noteEditing, setNoteEditing] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickQuery, setPickQuery] = useState('');
 
   // Pipeline list-card "+ Cart" → opens here with openCart=1 when the idea
   // has no best-guess yet (spec §8). Auto-open the capture sheet so the
@@ -169,11 +180,89 @@ export default function IdeaDetail() {
         <Text color="textFaint">· {relativeAge(idea.createdAt)}</Text>
       </View>
 
-      {idea.note ? (
-        <Text color="textMuted" style={styles.note}>
-          {idea.note}
-        </Text>
-      ) : null}
+      {/* Notes — tap to edit inline. A half-baked entry lives on its notes. */}
+      {noteEditing ? (
+        <View style={styles.noteEdit}>
+          <TextInput
+            value={noteDraft}
+            onChangeText={setNoteDraft}
+            placeholder="Notes — what you want to try, tweaks, where you saw it…"
+            placeholderTextColor={colors.textFaint}
+            multiline
+            autoFocus
+            style={styles.noteInput}
+          />
+          <View style={styles.noteActions}>
+            <Button
+              label="Cancel"
+              variant="secondary"
+              flex
+              onPress={() => {
+                setNoteDraft(idea.note ?? '');
+                setNoteEditing(false);
+              }}
+            />
+            <Button
+              label="Save"
+              glyph="done"
+              flex
+              onPress={async () => {
+                await setDetails(idea.id, { note: noteDraft });
+                setNoteEditing(false);
+              }}
+            />
+          </View>
+        </View>
+      ) : (
+        <Pressable
+          onPress={() => {
+            setNoteDraft(idea.note ?? '');
+            setNoteEditing(true);
+          }}
+          style={styles.notePress}>
+          {idea.note ? (
+            <Text color="textMuted" style={styles.note}>
+              {idea.note}
+            </Text>
+          ) : (
+            <Text color="accent" style={styles.note}>
+              + Add notes
+            </Text>
+          )}
+        </Pressable>
+      )}
+
+      {/* Attach an existing recipe — "I found a recipe I want to try for this." */}
+      <View style={styles.section}>
+        <SectionLabel color="textMuted">Recipe</SectionLabel>
+        {linkedRecipe ? (
+          <View style={styles.linkedRow}>
+            <Pressable
+              style={styles.flex}
+              onPress={() =>
+                router.push({ pathname: '/recipes/[id]', params: { id: linkedRecipe.id } })
+              }>
+              <Text variant="bodyStrong" color="accent" numberOfLines={1}>
+                {linkedRecipe.title}
+              </Text>
+              <Text color="textFaint">Tap to open</Text>
+            </Pressable>
+            <Pressable onPress={() => void setLinkedRecipe(idea.id, null)} hitSlop={8}>
+              <Text color="textFaint">unlink</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <Button
+            label="Attach a recipe"
+            glyph="add"
+            variant="secondary"
+            onPress={() => {
+              setPickQuery('');
+              setPickerOpen(true);
+            }}
+          />
+        )}
+      </View>
 
       {promoted ? (
         <Card style={styles.promotedCard}>
@@ -342,6 +431,37 @@ export default function IdeaDetail() {
           />
         </View>
       </View>
+
+      <Overlay visible={pickerOpen} onClose={() => setPickerOpen(false)}>
+        <View style={styles.pickerSheet}>
+          <Heading variant="recipeTitle">Attach a recipe</Heading>
+          <SearchBar value={pickQuery} onChangeText={setPickQuery} />
+          <View style={styles.pickerList}>
+            {recipes
+              .filter((r) =>
+                r.title.toLowerCase().includes(pickQuery.trim().toLowerCase()),
+              )
+              .slice(0, 30)
+              .map((r) => (
+                <Pressable
+                  key={r.id}
+                  style={styles.pickerRow}
+                  onPress={async () => {
+                    await setLinkedRecipe(idea.id, r.id);
+                    setPickerOpen(false);
+                  }}>
+                  <Text variant="bodyStrong" numberOfLines={1} style={styles.flex}>
+                    {r.title}
+                  </Text>
+                  <Glyph name="next" size={16} color="textFaint" />
+                </Pressable>
+              ))}
+            {recipes.length === 0 ? (
+              <Text color="textFaint">No recipes saved yet.</Text>
+            ) : null}
+          </View>
+        </View>
+      </Overlay>
     </Screen>
   );
 }
@@ -364,6 +484,37 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   note: { lineHeight: 21, paddingVertical: 10 },
+  notePress: {},
+  noteEdit: { paddingVertical: 10, gap: 10 },
+  noteInput: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.bg2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.text,
+    minHeight: 90,
+    textAlignVertical: 'top',
+  },
+  noteActions: { flexDirection: 'row', gap: 10 },
+  linkedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  pickerSheet: { gap: 12 },
+  pickerList: { gap: 2, maxHeight: 360 },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.lineSoft,
+  },
   promotedCard: { gap: 10, marginTop: 12 },
   statusRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
   cookedBtn: { marginTop: 10 },

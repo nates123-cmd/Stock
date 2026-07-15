@@ -14,12 +14,17 @@ export function RecipeCard({
   onPress,
   favorite,
   onToggleFavorite,
+  toTry,
+  onToggleToTry,
 }: {
   recipe: Recipe;
   onPress?: () => void;
   /** Current favourite state. Omit to hide the star entirely. */
   favorite?: boolean;
   onToggleFavorite?: () => void;
+  /** Current "to try" state. Omit `onToggleToTry` to hide the flag entirely. */
+  toTry?: boolean;
+  onToggleToTry?: () => void;
 }) {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
@@ -37,6 +42,25 @@ export function RecipeCard({
           <Text variant="recipeTitle" style={styles.title}>
             {recipe.title}
           </Text>
+          {onToggleToTry ? (
+            <Pressable
+              onPress={onToggleToTry}
+              hitSlop={10}
+              style={styles.fav}
+              accessibilityRole="button"
+              accessibilityState={{ selected: !!toTry }}
+              accessibilityLabel={
+                toTry
+                  ? `Remove ${recipe.title} from to-try`
+                  : `Mark ${recipe.title} to try`
+              }>
+              <Glyph
+                name={toTry ? 'toTry' : 'toTryOff'}
+                size={18}
+                color={toTry ? 'accent' : 'textFaint'}
+              />
+            </Pressable>
+          ) : null}
           {onToggleFavorite ? (
             // Its own press target so favouriting doesn't open the recipe.
             <Pressable

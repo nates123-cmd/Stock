@@ -24,6 +24,8 @@ type PipelineState = {
   setKind: (id: string, kind: PipelineIdea['kind']) => Promise<void>;
   setDetails: (id: string, patch: { title?: string; note?: string }) => Promise<void>;
   setStatus: (id: string, status: PipelineIdea['status']) => Promise<void>;
+  /** Attach (or clear, with null) an existing recipe to this idea. */
+  setLinkedRecipe: (id: string, recipeId: string | null) => Promise<void>;
   addReference: (id: string, ref: Ref) => Promise<void>;
   removeReference: (id: string, index: number) => Promise<void>;
   setBestGuess: (id: string, ingredients: Ingredient[]) => Promise<void>;
@@ -129,6 +131,18 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       ideas: s.ideas.map((i) => {
         if (i.id !== id) return i;
         updated = { ...i, status };
+        return updated;
+      }),
+    }));
+    if (updated) await persist(updated);
+  },
+
+  setLinkedRecipe: async (id, recipeId) => {
+    let updated: PipelineIdea | undefined;
+    set((s) => ({
+      ideas: s.ideas.map((i) => {
+        if (i.id !== id) return i;
+        updated = { ...i, linkedRecipeId: recipeId ?? undefined };
         return updated;
       }),
     }));

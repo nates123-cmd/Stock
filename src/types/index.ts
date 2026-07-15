@@ -73,6 +73,12 @@ export type Recipe = {
   nutrition?: Nutrition;
   /** user-pinned favorite — surfaces under the Recipes "Favorites" segment */
   isFavorite?: boolean;
+  /**
+   * "To try" — a full recipe you've saved but haven't cooked yet and want to
+   * get to. Surfaces under the Recipes "To Try" segment alongside half-baked
+   * idea entries. Auto-cleared when the recipe is cooked (see saveCook).
+   */
+  isToTry?: boolean;
 };
 
 export type Ingredient = {
@@ -156,6 +162,12 @@ export type PipelineIdea = {
   createdAt: Date;
   /** once cooked */
   promotedRecipeId?: string;
+  /**
+   * An existing recipe attached to this idea (e.g. "I found a recipe I want to
+   * try for this"). Distinct from `promotedRecipeId` — attaching doesn't
+   * promote/close the idea, it just links a recipe you can open from here.
+   */
+  linkedRecipeId?: string;
 };
 
 /* ---------------------------------------------------------------------------

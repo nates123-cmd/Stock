@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -187,7 +187,14 @@ export default function CookScreen() {
       servingsCooked: effectiveServings,
     };
     await recordCook(cook);
-    await saveRecipe({ ...recipe, cookCount: recipe.cookCount + 1, modifiedAt: finishedAt });
+    // Cooking it clears the "to try" flag — you've now tried it, so it drops out
+    // of the To Try segment on its own.
+    await saveRecipe({
+      ...recipe,
+      cookCount: recipe.cookCount + 1,
+      isToTry: false,
+      modifiedAt: finishedAt,
+    });
     // Tide calorie push — fire-and-forget so a failed network call never
     // blocks the save. Has its own no-op paths for no-nutrition / signed-out.
     void pushCookToTide(cook, recipe, effectiveServings);
@@ -606,6 +613,9 @@ function GlanceBody({
   return (
     <View style={styles.flex}>
       <ScrollView contentContainerStyle={styles.glanceContent}>
+        {recipe.imageUrl ? (
+          <Image source={{ uri: recipe.imageUrl }} style={styles.glanceHero} resizeMode="cover" />
+        ) : null}
         <Heading variant="recipeTitle" style={styles.glanceTitle}>
           {recipe.title}
         </Heading>
@@ -1097,6 +1107,7 @@ const styles = StyleSheet.create({
   },
   dim: { opacity: 0.35 },
   glanceContent: { padding: layout.screenPadding, gap: 14, paddingBottom: 30 },
+  glanceHero: { width: '100%', height: 180, borderRadius: 12, backgroundColor: colors.bg2 },
   glanceTitle: { fontSize: 22 },
   toolHint: { fontStyle: 'italic', lineHeight: 18 },
   lastNoteCard: { gap: 6 },

@@ -29,6 +29,8 @@ export const glyph = {
   close: '✕', // Dismiss / close overlay
   fav: '★', // Favorite, on. U+2605 is text-presentation — monochrome, on-family.
   favOff: '☆', // Favorite, off (hollow). Not an emoji star (that renders colorful).
+  toTry: '⚑', // "To try", on (filled flag). U+2691 is text-presentation — monochrome.
+  toTryOff: '⚐', // "To try", off (hollow flag). Sibling of ⚑, both on-family with the star.
 } as const;
 
 export type GlyphName = keyof typeof glyph;
