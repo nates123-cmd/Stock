@@ -17,6 +17,15 @@ export type JobItem = { name: string; dest: 'IC' | 'LO'; qty: number };
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
+/**
+ * Which storefront the Beelink agent should fill. Both go through the same
+ * Instacart pipeline (Costco same-day IS Instacart). 'wegmans' is the legacy
+ * default — the insert stays byte-identical for it so the existing, working
+ * Wegmans path is untouched. A non-default retailer is written to a `retailer`
+ * column; the Beelink instacart-agent must read it and drive that storefront.
+ */
+export type Retailer = 'wegmans' | 'costco';
+
 export const INSTACART_AVAILABLE = () => !!supabase;
 
 /** Map buy lines → job items. Everything defaults to the Instacart cart. */
@@ -32,13 +41,22 @@ export function toJobItems(lines: ShoppingLine[], local?: Set<string>): JobItem[
  * Queue an Instacart fill. Only IC items are sent to the Beelink (LO items are
  * handled on-device). Returns the job id, or throws.
  */
-export async function sendToInstacart(items: JobItem[]): Promise<string> {
+export async function sendToInstacart(
+  items: JobItem[],
+  retailer: Retailer = 'wegmans',
+): Promise<string> {
   if (!supabase) throw new Error('Sign in to send to Instacart.');
   const ic = items.filter((i) => i.dest === 'IC');
   if (!ic.length) throw new Error('No items marked for Instacart.');
+  // Keep the Wegmans insert byte-identical to what already works — only add the
+  // `retailer` column for a non-default storefront. (If the column doesn't yet
+  // exist in `instacart_jobs`, a Costco push errors out cleanly rather than
+  // silently being filled as Wegmans.)
+  const row: Record<string, unknown> = { items }; // user_id defaults to auth.uid()
+  if (retailer !== 'wegmans') row.retailer = retailer;
   const { data, error } = await supabase
     .from('instacart_jobs')
-    .insert({ items }) // user_id defaults to auth.uid() via the column default
+    .insert(row)
     .select('id')
     .single();
   if (error) throw new Error(error.message);

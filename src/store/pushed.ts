@@ -15,7 +15,7 @@ import { matchKey } from '@/lib/pantry';
 const NATIVE = Platform.OS !== 'web';
 const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24h
 
-export type PushDest = 'wegmans' | 'reminders';
+export type PushDest = 'wegmans' | 'reminders' | 'amazon' | 'costco';
 export type PushedEntry = {
   /** matchKey of the item name — the stable de-dupe/exclusion key. */
   key: string;
