@@ -154,6 +154,8 @@ export default function CaptureFlow() {
   const [title, setTitle] = useState(params.prefillTitle ?? '');
   const [serves, setServes] = useState('4');
   const [intention, setIntention] = useState('');
+  // Flag it "to try" at capture time (you've saved it but haven't cooked it).
+  const [toTry, setToTry] = useState(false);
   // Editable source/origin — seeded from the parsed/detected source when a
   // draft lands in review, then user-correctable (patch #77641107).
   const [source, setSource] = useState<RecipeSource | null>(null);
@@ -371,6 +373,7 @@ export default function CaptureFlow() {
       nutrition: draft.nutrition,
       myNotes: refsNote,
       firstCookIntention: intention.trim() || undefined,
+      isToTry: toTry || undefined,
       linkedPipelineId: params.ideaId || linkedIdeaId || undefined,
       createdAt: now,
       modifiedAt: now,
@@ -420,6 +423,8 @@ export default function CaptureFlow() {
             setServes={setServes}
             intention={intention}
             setIntention={setIntention}
+            toTry={toTry}
+            setToTry={setToTry}
             source={source ?? draft.source ?? src}
             setSource={setSource}
             relatedIdeas={relatedIdeas}
@@ -607,6 +612,8 @@ function ReviewStep({
   setServes,
   intention,
   setIntention,
+  toTry,
+  setToTry,
   source,
   setSource,
   relatedIdeas,
@@ -622,6 +629,8 @@ function ReviewStep({
   setServes: (s: string) => void;
   intention: string;
   setIntention: (s: string) => void;
+  toTry: boolean;
+  setToTry: (b: boolean) => void;
   source: RecipeSource;
   setSource: (s: RecipeSource) => void;
   relatedIdeas: PipelineIdea[];
@@ -815,6 +824,24 @@ function ReviewStep({
             style={[styles.field, styles.fieldMulti]}
           />
         </View>
+
+        <Pressable
+          onPress={() => setToTry(!toTry)}
+          style={styles.toTryToggle}
+          accessibilityRole="button"
+          accessibilityState={{ selected: toTry }}>
+          <Glyph
+            name={toTry ? 'toTry' : 'toTryOff'}
+            size={20}
+            color={toTry ? 'accent' : 'textFaint'}
+          />
+          <View style={styles.flex}>
+            <Text variant="bodyStrong">Mark “to try”</Text>
+            <Text color="textFaint">
+              Haven’t cooked it yet — surfaces under the Recipes “To Try” tab.
+            </Text>
+          </View>
+        </Pressable>
       </ScrollView>
 
       <BottomActionBar>
@@ -962,6 +989,13 @@ const styles = StyleSheet.create({
   fieldMulti: { minHeight: 70, textAlignVertical: 'top' },
   row2: { flexDirection: 'row', gap: 14 },
   reviewSection: { gap: 8 },
+  toTryToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    marginTop: 4,
+  },
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   confTag: { fontStyle: 'italic', fontSize: 12 },
   sourceInline: { paddingTop: 6 },

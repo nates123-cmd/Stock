@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -16,6 +16,7 @@ import { FilterChip, ChipRow } from './Chip';
 import { colors } from '@/design';
 import { convertToGrams } from '@/lib/parsing';
 import { formatAmount } from '@/lib/format';
+import { usePrefsStore } from '@/store/prefs';
 import type { Ingredient, Recipe } from '@/types';
 
 /**
@@ -59,6 +60,46 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
   const [pivotId, setPivotId] = useState<string | null>(null);
   const [pivotTarget, setPivotTarget] = useState('');
 
+  // Sticky "to grams". Once you apply a conversion, `preferGrams` turns on and
+  // every recipe auto-converts the first time it's opened — so you never press
+  // the button again. See [[store/prefs]].
+  const preferGrams = usePrefsStore((s) => s.preferGrams);
+  const setPreferGrams = usePrefsStore((s) => s.setPreferGrams);
+  // Guard: don't re-attempt auto-convert for the same recipe every render.
+  const autoTried = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!preferGrams) return;
+    if (autoTried.current.has(recipe.id)) return;
+    // Anything non-gram with a real amount + unit is convertible.
+    const hasConvertible = recipe.ingredients.some(
+      (i) => i.amount != null && i.amount > 0 && i.unit && !/^(g|kg|mg)$/i.test(i.unit.trim()),
+    );
+    if (!hasConvertible) return;
+    autoTried.current.add(recipe.id);
+    let alive = true;
+    void (async () => {
+      try {
+        const results = await convertToGrams(recipe.ingredients);
+        if (!alive || results.length === 0) return;
+        const byId = new Map(results.map((r) => [r.id, r.grams]));
+        const updated = recipe.ingredients.map((ing) => {
+          const grams = byId.get(ing.id);
+          return grams == null ? ing : { ...ing, amount: grams, unit: 'g' };
+        });
+        await onSave({ ...recipe, ingredients: updated, modifiedAt: new Date() });
+      } catch {
+        // Offline / no Claude / parse fail — leave the recipe as-is, silently.
+        // Allow a later retry for this recipe.
+        autoTried.current.delete(recipe.id);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferGrams, recipe.id]);
+
   const previewConvertToGrams = async () => {
     setConverting(true);
     onHint(null);
@@ -99,8 +140,10 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
       return { ...ing, amount: grams, unit: 'g' };
     });
     await onSave({ ...recipe, ingredients: updated, modifiedAt: new Date() });
+    // Make it sticky: from now on, new recipes auto-convert to grams on open.
+    if (!preferGrams) setPreferGrams(true);
     onHint(
-      `Converted ${toApply.length} ${toApply.length === 1 ? 'ingredient' : 'ingredients'} to grams.`,
+      `Converted ${toApply.length} ${toApply.length === 1 ? 'ingredient' : 'ingredients'} to grams. New recipes will convert automatically.`,
     );
     setConvertPreview(null);
   };

@@ -21,6 +21,8 @@ type RecipeState = {
   save: (recipe: Recipe) => Promise<void>;
   /** Flip a recipe's isFavorite flag and persist via the save path. */
   toggleFavorite: (id: string) => Promise<void>;
+  /** Flip a recipe's isToTry flag and persist via the save path. */
+  toggleToTry: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
 };
 
@@ -71,6 +73,12 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
     const current = get().recipes.find((r) => r.id === id);
     if (!current) return;
     await get().save({ ...current, isFavorite: !current.isFavorite });
+  },
+
+  toggleToTry: async (id) => {
+    const current = get().recipes.find((r) => r.id === id);
+    if (!current) return;
+    await get().save({ ...current, isToTry: !current.isToTry });
   },
 
   remove: async (id) => {

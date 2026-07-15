@@ -42,6 +42,7 @@ export default function RecipeDetail() {
   const allRecipes = useRecipeStore((s) => s.recipes);
   const save = useRecipeStore((s) => s.save);
   const toggleFavorite = useRecipeStore((s) => s.toggleFavorite);
+  const toggleToTry = useRecipeStore((s) => s.toggleToTry);
   // Autocomplete source for the tag editor — every tag used anywhere in the
   // library, deduped case-insensitively (spec §6 tag editor).
   const allTagsAcrossLibrary = useMemo(() => {
@@ -175,6 +176,21 @@ export default function RecipeDetail() {
           <Heading variant="screenTitle" style={styles.title}>
             {recipe.title}
           </Heading>
+          <Pressable
+            onPress={() => void toggleToTry(recipe.id)}
+            hitSlop={10}
+            style={styles.titleFlag}
+            accessibilityRole="button"
+            accessibilityState={{ selected: !!recipe.isToTry }}
+            accessibilityLabel={
+              recipe.isToTry ? 'Remove from to-try' : 'Mark to try'
+            }>
+            <Glyph
+              name={recipe.isToTry ? 'toTry' : 'toTryOff'}
+              size={22}
+              color={recipe.isToTry ? 'accent' : 'textFaint'}
+            />
+          </Pressable>
           <Pressable
             onPress={() => void toggleFavorite(recipe.id)}
             hitSlop={10}
@@ -804,6 +820,7 @@ const styles = StyleSheet.create({
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   lastNote: { gap: 4 },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  titleFlag: { paddingTop: 5 },
   title: { fontSize: 26, lineHeight: 32, paddingTop: 6 },
   metaRow: {
     flexDirection: 'row',

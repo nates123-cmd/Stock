@@ -40,6 +40,7 @@ export default function RecipesLibrary() {
   const router = useRouter();
   const recipes = useRecipeStore((s) => s.recipes);
   const toggleFavorite = useRecipeStore((s) => s.toggleFavorite);
+  const toggleToTry = useRecipeStore((s) => s.toggleToTry);
   /** The + sheet: recipe or idea (or a cook plan, in plans mode). */
   const [addOpen, setAddOpen] = useState(false);
   const cookPlans = useCookPlanStore((s) => s.plans);
@@ -102,12 +103,17 @@ export default function RecipesLibrary() {
     [filtered, segment],
   );
 
-  // Ideas bin = the Pipeline ideas, still-active (unpromoted), newest first.
-  const toTry = useMemo(() => {
+  // "To Try" holds TWO things now: half-baked idea entries (Pipeline ideas,
+  // still-active) AND full recipes you've flagged to-try. Both newest-first.
+  const toTryIdeas = useMemo(() => {
     const byNew = (a: PipelineIdea, b: PipelineIdea) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     return ideas.filter((i) => i.status !== 'promoted').sort(byNew);
   }, [ideas]);
+  const toTryRecipes = useMemo(
+    () => recipes.filter((r) => r.isToTry).slice().sort(byNewest),
+    [recipes],
+  );
 
   const favoriteCount = useMemo(
     () => recipes.filter((r) => r.isFavorite).length,
@@ -115,7 +121,7 @@ export default function RecipesLibrary() {
   );
 
   const segments = [
-    { key: 'totry', label: 'Ideas', count: toTry.length },
+    { key: 'totry', label: 'To Try', count: toTryIdeas.length + toTryRecipes.length },
     { key: 'all', label: 'All' },
     { key: 'favorites', label: 'Favorites', count: favoriteCount },
   ];
@@ -154,7 +160,28 @@ export default function RecipesLibrary() {
 
         {segment === 'totry' ? (
           <View style={styles.list}>
-            {toTry.map((idea) => (
+            {/* Full recipes you've flagged to-try — real cards, tap through to
+                the recipe. The flag toggles right here so you can un-try one. */}
+            {toTryRecipes.length > 0 ? (
+              <View style={styles.sectionBody}>
+                {toTryRecipes.map((r) => (
+                  <View key={r.id} style={styles.cardCell}>
+                    <RecipeCard
+                      recipe={r}
+                      onPress={() =>
+                        router.push({ pathname: '/recipes/[id]', params: { id: r.id } })
+                      }
+                      toTry={r.isToTry}
+                      onToggleToTry={() => toggleToTry(r.id)}
+                    />
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {/* Half-baked entries: an idea, an ingredient, a link — tap to flesh
+                it out (notes, links, attach a recipe). */}
+            {toTryIdeas.map((idea) => (
               <Pressable
                 key={idea.id}
                 onPress={() =>
@@ -174,10 +201,12 @@ export default function RecipesLibrary() {
                 ) : null}
               </Pressable>
             ))}
-            {toTry.length === 0 ? (
+            {toTryIdeas.length === 0 && toTryRecipes.length === 0 ? (
               <View style={styles.empty}>
-                <Text color="textMuted">No ideas yet.</Text>
-                <Text color="textFaint">Capture an idea, ingredient or link.</Text>
+                <Text color="textMuted">Nothing to try yet.</Text>
+                <Text color="textFaint">
+                  Flag a recipe to-try (the ⚐), or tap + to capture an idea, ingredient or link.
+                </Text>
               </View>
             ) : null}
           </View>
@@ -261,6 +290,8 @@ export default function RecipesLibrary() {
                           }
                           favorite={r.isFavorite}
                           onToggleFavorite={() => toggleFavorite(r.id)}
+                          toTry={r.isToTry}
+                          onToggleToTry={() => toggleToTry(r.id)}
                         />
                       </View>
                     ))}
@@ -314,7 +345,7 @@ export default function RecipesLibrary() {
             }}>
             <Text variant="bodyStrong">Idea</Text>
             <Text color="textFaint">
-              Something to try — a dish, an ingredient, a link. Lands in Ideas.
+              A half-baked idea — a dish, an ingredient, a link. Lands in To Try.
             </Text>
           </Pressable>
           {/* Cook plans are a third thing: a whole-meal production. Only offered
