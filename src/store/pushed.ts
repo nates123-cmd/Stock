@@ -5,15 +5,19 @@ import { matchKey } from '@/lib/pantry';
 
 /**
  * "Pushed" list (Apple Reminders-style). When you select rows and push them to
- * Wegmans or Reminders, they leave the active shopping list and land here —
- * a collapsed record of what went out, in case an order isn't fully covered.
- * Entries self-expire after 24h so the list keeps itself clean.
+ * Wegmans / Reminders / Amazon / Costco, they leave the active shopping list and
+ * land here — a collapsed record of what went out.
+ *
+ * Pushed is PERMANENT: an item stays pushed until you explicitly restore it (or
+ * Clear the section). It used to self-expire on a wall-clock timer (24h), which
+ * meant everything you pushed FLOODED BACK onto Active a day later — the "why
+ * are groceries I already ordered back on my list" bug. Gone means gone; the
+ * clock plays no part. Same principle as the permanent check-off in have.ts.
  *
  * Web (the PWA) persists via IndexedDB, which round-trips Date objects; native
  * gets a session-only copy (fine — Stock is web-first).
  */
 const NATIVE = Platform.OS !== 'web';
-const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24h
 
 export type PushDest = 'wegmans' | 'reminders' | 'amazon' | 'costco';
 export type PushedEntry = {
@@ -24,10 +28,6 @@ export type PushedEntry = {
   dest: PushDest;
 };
 
-function fresh(items: PushedEntry[], now = Date.now()): PushedEntry[] {
-  return items.filter((e) => now - new Date(e.pushedAt).getTime() < EXPIRY_MS);
-}
-
 type PushedState = {
   items: PushedEntry[];
   hydrated: boolean;
@@ -36,8 +36,8 @@ type PushedState = {
   push: (names: string[], dest: PushDest, at?: Date) => void;
   /** Pull a name back out (matchKey) — it returns to the active list. */
   restore: (key: string) => void;
-  /** Drop everything past the expiry window. */
-  prune: () => void;
+  /** Empty the pushed list (start a fresh shopping cycle). */
+  clear: () => void;
 };
 
 export const usePushedStore = create<PushedState>((set, get) => ({
@@ -47,7 +47,7 @@ export const usePushedStore = create<PushedState>((set, get) => ({
   hydrate: async () => {
     if (get().hydrated) return;
     const saved = (await webPersist.load<PushedEntry[]>('pushed')) ?? [];
-    set({ items: fresh(saved), hydrated: true });
+    set({ items: saved, hydrated: true });
   },
 
   push: (names, dest, at = new Date()) => {
@@ -58,13 +58,13 @@ export const usePushedStore = create<PushedState>((set, get) => ({
         if (!k) continue;
         byKey.set(k, { key: k, name, pushedAt: at, dest });
       }
-      return { items: fresh([...byKey.values()], at.getTime()) };
+      return { items: [...byKey.values()] };
     });
   },
 
   restore: (key) => set((s) => ({ items: s.items.filter((e) => e.key !== key) })),
 
-  prune: () => set((s) => ({ items: fresh(s.items) })),
+  clear: () => set({ items: [] }),
 }));
 
 if (!NATIVE) {
