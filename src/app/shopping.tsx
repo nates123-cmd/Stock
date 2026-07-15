@@ -57,6 +57,7 @@ import {
   jobStatus,
   INSTACART_AVAILABLE,
   type JobStatus,
+  type Retailer,
 } from '@/lib/instacart';
 import type { Recipe, ShoppingCategory } from '@/types';
 
@@ -224,6 +225,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     /** Exactly the rows we handed the agent — so we can settle up against them
      *  when it's done, without trying to reverse-map Wegmans product names. */
     rows: FlatRow[];
+    /** Which storefront this job targets (drives the result wording). */
+    retailer: Retailer;
   } | null>(null);
   const [jobResult, setJobResult] = useState<{
     ok: boolean;
@@ -317,7 +320,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       if (gotRows.length > 0) {
         pushToPushed(
           gotRows.map((row) => row.baseName),
-          'wegmans',
+          job.retailer,
         );
       }
 
@@ -1290,11 +1293,91 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       // Rows only leave the list once the agent confirms it added them (see the
       // poll effect); whatever it can't get STAYS, so it doesn't get silently
       // dropped and never bought.
-      setJob({ id, status: 'queued', rows });
+      setJob({ id, status: 'queued', rows, retailer: 'wegmans' });
       setHint('Filling your Wegmans cart… this takes a minute.');
       clearSelection();
     } catch (e) {
       setHint(`Couldn't push: ${(e as Error).message}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ── Staples-section pushes (Amazon + Costco) ───────────────────────────────
+
+  /**
+   * Push to Amazon: open an Amazon search for each selected staple. Multiple
+   * items → multiple tabs (Nate's ask). Fully client-side — no agent, no queue.
+   * The window.open calls run synchronously inside this click handler, which is
+   * what lets the browser open more than one tab (async opens get blocked).
+   */
+  const pushToAmazon = () => {
+    const rows = selectedRows;
+    if (rows.length === 0) {
+      setHint('Select some staples first.');
+      return;
+    }
+    const urls = rows.map(
+      (r) => `https://www.amazon.com/s?k=${encodeURIComponent(r.name)}`,
+    );
+    const n = urls.length;
+    if (Platform.OS === 'web') {
+      let blocked = 0;
+      for (const u of urls) {
+        const w = window.open(u, '_blank', 'noopener');
+        if (!w) blocked++;
+      }
+      setHint(
+        blocked
+          ? `Opened ${n - blocked} of ${n} — allow pop-ups for this site to open the rest.`
+          : `Opened ${n} Amazon search${n === 1 ? '' : 'es'} in new tabs.`,
+      );
+    } else {
+      urls.forEach((u) => void Linking.openURL(u));
+      setHint(`Opened ${n} Amazon search${n === 1 ? '' : 'es'}.`);
+    }
+    pushToPushed(rows.map((r) => r.baseName), 'amazon');
+    clearSelection();
+  };
+
+  /**
+   * Push to Costco: same Instacart auto-fill pipeline as Wegmans, retailer
+   * switched to Costco. The app side is complete; it needs the backend to honor
+   * the `retailer` field — a `retailer` column on `instacart_jobs` AND the
+   * Beelink instacart-agent taught to drive the Costco storefront. Until then
+   * this errors cleanly (see sendToInstacart) rather than filling a Wegmans cart.
+   */
+  const pushToCostco = async () => {
+    const rows = selectedRows;
+    if (rows.length === 0) return;
+    if (!INSTACART_AVAILABLE()) {
+      setHint('Sign in to push to Costco.');
+      return;
+    }
+    try {
+      setSending(true);
+      setJobResult(null);
+      setHint('Pushing to your Costco cart…');
+      const id = await sendToInstacart(
+        toJobItems(
+          rows.map((r) => ({
+            name: r.name,
+            category: categorizeIngredient(r.name),
+            buy: r.qty,
+            math: '',
+            sources: [],
+            confidence: 'summed' as const,
+          })),
+        ),
+        'costco',
+      );
+      setJob({ id, status: 'queued', rows, retailer: 'costco' });
+      setHint('Filling your Costco cart… this takes a minute.');
+      clearSelection();
+    } catch (e) {
+      setHint(
+        `Couldn't push to Costco: ${(e as Error).message}. (Costco needs the backend retailer setup — the Wegmans push is unaffected.)`,
+      );
     } finally {
       setSending(false);
     }
@@ -1917,25 +2000,53 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
               </Pressable>
             </View>
           }>
-          <Button
-            label={`Push to Reminders · ${selectedRows.length}`}
-            variant="secondary"
-            flex
-            onPress={pushToReminders}
-          />
-          <Button
-            label={
-              filling
-                ? 'Filling cart…'
-                : sending
-                  ? 'Pushing…'
-                  : `Push to Wegmans · ${selectedRows.length}`
-            }
-            glyph="next"
-            flex
-            disabled={sending || filling}
-            onPress={pushToWegmans}
-          />
+          {listView === 'staples' ? (
+            <>
+              {/* Staples go to the bulk stores. Amazon = per-item search tabs;
+                  Costco = the same Instacart auto-fill as Wegmans. */}
+              <Button
+                label={`Push to Amazon · ${selectedRows.length}`}
+                variant="secondary"
+                flex
+                onPress={pushToAmazon}
+              />
+              <Button
+                label={
+                  filling
+                    ? 'Filling cart…'
+                    : sending
+                      ? 'Pushing…'
+                      : `Push to Costco · ${selectedRows.length}`
+                }
+                glyph="next"
+                flex
+                disabled={sending || filling}
+                onPress={pushToCostco}
+              />
+            </>
+          ) : (
+            <>
+              <Button
+                label={`Push to Reminders · ${selectedRows.length}`}
+                variant="secondary"
+                flex
+                onPress={pushToReminders}
+              />
+              <Button
+                label={
+                  filling
+                    ? 'Filling cart…'
+                    : sending
+                      ? 'Pushing…'
+                      : `Push to Wegmans · ${selectedRows.length}`
+                }
+                glyph="next"
+                flex
+                disabled={sending || filling}
+                onPress={pushToWegmans}
+              />
+            </>
+          )}
         </BottomActionBar>
       ) : null}
     </SafeAreaView>
