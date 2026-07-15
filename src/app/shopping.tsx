@@ -1142,15 +1142,24 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     setAddQty('');
   };
 
-  /** Delete every checked row. Routes each one the same way a single-row swipe
-   *  delete does: on Staples it un-pins (back to Active) rather than destroying;
-   *  extras go for good, restock rows drop for the run, plan rows suppress so
-   *  they stay gone across regen. */
   /** Delete ONE row. A merged row deletes every row folded into it, or you'd
-   *  delete the visible line and its members would pop straight back out. */
+   *  delete the visible line and its members would pop straight back out.
+   *  On Staples, "delete" means "don't need to buy now" (clears the low/out
+   *  flag, stays a staple); extras go for good, restock rows drop for the run,
+   *  plan rows suppress so they stay gone across regen. */
   const deleteRow = (row: FlatRow) => {
     if (listView === 'staples') {
-      pinStaple(row.baseName, false);
+      // Deleting off the STAPLES shopping list means "handled it / don't need to
+      // buy now" — NOT "stop being a staple". A staple only appears here when
+      // it's low/out, so clear that flag: it leaves the buy list and stays a
+      // pantry staple (off Active, because inHave keeps staples off Active).
+      //
+      // This used to call pinStaple(false), which un-pinned the item — and an
+      // un-pinned item the week's recipes still need bounced straight back onto
+      // Active. That was the "I delete it from Staples and it reappears in
+      // Active" loop. To genuinely un-staple something, use "Remove always have"
+      // in the long-press menu.
+      void clearLowOut(row.baseName);
       return;
     }
     if (row.members) {
