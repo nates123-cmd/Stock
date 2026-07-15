@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { colors, layout } from '@/design';
 import { Glyph } from './Glyph';
 
@@ -38,34 +38,49 @@ export function Overlay({
   }, [visible, onClose]);
 
   if (!visible) return null;
+  // Render through a Modal so the sheet is anchored to the SCREEN, not to
+  // whatever it happens to be nested under. It used to be a bare absoluteFill,
+  // which positions relative to the nearest positioned ancestor — fine when the
+  // overlay sat at the screen root, but when it lives inside a ScrollView (e.g.
+  // the cook screen's bench tools) absoluteFill anchors to the scroll CONTENT,
+  // so on a tall recipe the sheet overlapped the page and its panel scrolled
+  // out of reach. `transparent` keeps our own dim backdrop.
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityLabel="Close overlay"
-        accessibilityRole="button"
-      />
-      <View
-        style={[styles.panelWrap, anchor === 'center' && styles.center]}
-        // The wrapper's empty area (above the bottom-anchored panel) must
-        // pass touches through to the backdrop, or the dismiss tap is dead
-        // on web above the panel. Root cause of "can't exit the scaler".
-        pointerEvents="box-none">
-        <View style={[styles.panel, anchor === 'center' && styles.panelCenter]}>
-          <View style={styles.handle} />
-          <Pressable
-            onPress={onClose}
-            style={styles.closeBtn}
-            hitSlop={12}
-            accessibilityLabel="Close"
-            accessibilityRole="button">
-            <Glyph name="close" size={18} color="textMuted" />
-          </Pressable>
-          {children}
+    <Modal
+      visible
+      transparent
+      animationType="none"
+      onRequestClose={onClose}
+      // web: react-native-web portals this to the document root.
+    >
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityLabel="Close overlay"
+          accessibilityRole="button"
+        />
+        <View
+          style={[styles.panelWrap, anchor === 'center' && styles.center]}
+          // The wrapper's empty area (above the bottom-anchored panel) must
+          // pass touches through to the backdrop, or the dismiss tap is dead
+          // on web above the panel. Root cause of "can't exit the scaler".
+          pointerEvents="box-none">
+          <View style={[styles.panel, anchor === 'center' && styles.panelCenter]}>
+            <View style={styles.handle} />
+            <Pressable
+              onPress={onClose}
+              style={styles.closeBtn}
+              hitSlop={12}
+              accessibilityLabel="Close"
+              accessibilityRole="button">
+              <Glyph name="close" size={18} color="textMuted" />
+            </Pressable>
+            {children}
+          </View>
         </View>
       </View>
-    </View>
+    </Modal>
   );
 }
 

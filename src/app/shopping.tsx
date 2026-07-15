@@ -41,6 +41,7 @@ import {
   type StoreId,
 } from '@/lib/shopStores';
 import { dateKey, startOfWeek, weekDays, weekRangeLabel } from '@/lib/week';
+import { webPersist } from '@/lib/db/webStore';
 import {
   consolidateSmart,
   consolidateLocalSmart,
@@ -123,12 +124,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const pushedItems = usePushedStore((s) => s.items);
   const pushToPushed = usePushedStore((s) => s.push);
   const restorePushed = usePushedStore((s) => s.restore);
+  const clearPushed = usePushedStore((s) => s.clear);
   const hydratePushed = usePushedStore((s) => s.hydrate);
-  const prunePushed = usePushedStore((s) => s.prune);
   useEffect(() => {
     void hydratePushed();
-    prunePushed();
-  }, [hydratePushed, prunePushed]);
+  }, [hydratePushed]);
   // Subscribe to have-state so rows re-render on tap (we use the Map directly
   // for derived booleans below, but the selector keeps us reactive).
   const haveChecked = useHaveStore((s) => s.checked);
@@ -430,24 +430,61 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
   // Render the local merge instantly, then upgrade with Claude's fuzzier
   // estimate when it resolves (graceful — consolidateSmart self-falls-back).
+  //
+  // STABILITY: the Claude consolidation is non-deterministic, and the web AI
+  // cache is session-only — so on every reload it re-ran and could RENAME items
+  // ("scallions"→"green onions", split a merged line…). Every exclusion here is
+  // keyed by item NAME (checked / pushed / suppressed), so a rename made handled
+  // items reappear as "new" rows — the "groceries I already ordered are back"
+  // bug. Fix: persist the consolidation keyed by a signature of the plan, and
+  // reuse it while the plan is unchanged, so names stay put across reloads and
+  // exclusions keep matching. A real plan change (new signature) re-consolidates.
   const [items, setItems] = useState<ShoppingLine[]>([]);
   const [refining, setRefining] = useState(false);
+  const planSig = useMemo(
+    () =>
+      weekRecipes
+        .map((r) => `${r.id}:${new Date(r.modifiedAt).getTime()}`)
+        .sort()
+        .join('|'),
+    [weekRecipes],
+  );
   useEffect(() => {
+    let cancelled = false;
     setItems(consolidateLocalSmart(weekRecipes));
     if (weekRecipes.length === 0) {
       setRefining(false);
+      void webPersist.save('shop-consolidation', { sig: planSig, items: [] });
       return;
     }
-    let cancelled = false;
     setRefining(true);
-    consolidateSmart(weekRecipes)
-      .then((r) => !cancelled && setItems(r))
-      .catch(() => {})
-      .finally(() => !cancelled && setRefining(false));
+    void (async () => {
+      // Same plan as last time → reuse the frozen result; do NOT re-run Claude
+      // (that's what churned the names). Only re-consolidate when the plan changed.
+      const cached = await webPersist.load<{ sig: string; items: ShoppingLine[] }>(
+        'shop-consolidation',
+      );
+      if (!cancelled && cached && cached.sig === planSig && cached.items.length) {
+        setItems(cached.items);
+        setRefining(false);
+        return;
+      }
+      try {
+        const r = await consolidateSmart(weekRecipes);
+        if (cancelled) return;
+        setItems(r);
+        void webPersist.save('shop-consolidation', { sig: planSig, items: r });
+      } catch {
+        /* keep the local merge already shown */
+      } finally {
+        if (!cancelled) setRefining(false);
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [weekRecipes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planSig]);
 
   // Cart-combine review (note 5) — DISTINCT from the Cook combine timeline.
   // The consolidation groups the SAME ingredient from several recipes into one
@@ -1695,21 +1732,35 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             Collapsed by default; tap a row to pull it back onto the list. */}
         {listView === 'active' && pushedItems.length > 0 ? (
           <View style={styles.pushedSection}>
-            <Pressable
-              onPress={() => setPushedOpen((v) => !v)}
-              style={styles.pushedHeader}
-              accessibilityRole="button"
-              accessibilityLabel={pushedOpen ? 'Collapse pushed list' : 'Expand pushed list'}>
-              <Text variant="sectionLabel" color="textFaint">
-                Pushed · {pushedItems.length}
-              </Text>
-              <Glyph
-                name="expand"
-                size={13}
-                color="textFaint"
-                style={pushedOpen ? undefined : styles.pushedCaretClosed}
-              />
-            </Pressable>
+            <View style={styles.pushedHeader}>
+              <Pressable
+                onPress={() => setPushedOpen((v) => !v)}
+                style={styles.pushedHeaderMain}
+                accessibilityRole="button"
+                accessibilityLabel={pushedOpen ? 'Collapse pushed list' : 'Expand pushed list'}>
+                <Text variant="sectionLabel" color="textFaint">
+                  Pushed · {pushedItems.length}
+                </Text>
+                <Glyph
+                  name="expand"
+                  size={13}
+                  color="textFaint"
+                  style={pushedOpen ? undefined : styles.pushedCaretClosed}
+                />
+              </Pressable>
+              {/* Clear = start a fresh shopping cycle. Pushed no longer expires
+                  on a timer, so this is how you empty it when you begin a new
+                  shop and want the recurring items back on Active. */}
+              <Pressable
+                onPress={clearPushed}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Clear the pushed list">
+                <Text variant="sectionLabel" color="textFaint">
+                  Clear
+                </Text>
+              </Pressable>
+            </View>
             {pushedOpen
               ? pushedItems.map((e) => (
                   <Pressable
@@ -1722,7 +1773,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                       {e.name}
                     </Text>
                     <Text color="textFaint" style={styles.pushedDest}>
-                      {e.dest === 'wegmans' ? 'Wegmans' : 'Reminders'}
+                      {e.dest === 'wegmans'
+                        ? 'Wegmans'
+                        : e.dest === 'costco'
+                          ? 'Costco'
+                          : e.dest === 'amazon'
+                            ? 'Amazon'
+                            : 'Reminders'}
                     </Text>
                   </Pressable>
                 ))
@@ -2858,9 +2915,10 @@ const styles = StyleSheet.create({
   pushedHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
     paddingVertical: 8,
   },
+  pushedHeaderMain: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   pushedCaretClosed: { transform: [{ rotate: '-90deg' }] },
   pushedRow: {
     flexDirection: 'row',
