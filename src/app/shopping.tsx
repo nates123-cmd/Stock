@@ -827,15 +827,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // An item lives in exactly ONE view.
     const onActive = new Set(activeRows.map((r) => matchKey(r.baseName)));
 
-    // Staples is a SHOPPING list, not a mirror of the pantry. Two sources, and
-    // they earn their place differently:
+    // The Staples shopping list is what you NEED TO BUY, not a mirror of what's
+    // pinned or what's in the pantry.
     //
-    //  - PINNED (always-have, parked from the list): always shown. That's the
-    //    "we need pine nuts, but not soon" pile — the whole point of the view.
-    //  - ANYTHING IN THE PANTRY: shown ONLY when it's low/out. Something you
-    //    have plenty of isn't shopping, it's just in your pantry. And this is
-    //    where pantry restocks land — they used to be dumped on Active, which is
-    //    how chile flakes turned up on the buy list unbidden.
+    //  - Pantry = everything you currently have.
+    //  - "Always have" is a PANTRY property (pinStaple puts it in the pantry as
+    //    a staple). Marking it does NOT put it on this list — you just said you
+    //    have it.
+    //  - A staple lands here ONLY when it runs low/out, i.e. there's actually
+    //    something to buy. Have plenty → it stays in the pantry, off this list.
+    //
+    // Both sources (the always-have pin and the pantry's own isStaple) collapse
+    // to the same rule: show it only when it's low/out.
     const pinnedKeys = new Set(
       Object.keys(alwaysHaveMap).filter((k) => alwaysHaveMap[k]),
     );
@@ -843,10 +846,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const stapleKeys = new Set<string>([...pinnedKeys, ...pantryKeys]);
     for (const key of stapleKeys) {
       if (wasPushed(key) || onActive.has(key)) continue;
-      if (!pinnedKeys.has(key)) {
-        const st = statusFor(key);
-        if (st !== 'low' && st !== 'out') continue; // have plenty → pantry's job
-      }
+      const st = statusFor(key);
+      if (st !== 'low' && st !== 'out') continue; // have plenty → pantry's job
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
       const pan = pantryItems.find((p) => matchKey(p.canonicalName) === key);
