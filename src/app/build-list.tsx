@@ -887,12 +887,12 @@ function RecipeStep({
               style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
               accessibilityRole="button"
               accessibilityLabel={`${ing.canonicalName}. Tap to move; swipe right to always have; swipe left to remove; long-press for options.`}>
-              <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
-                {displayQty}
-              </Numeric>
               <View style={styles.flex}>
                 <Text numberOfLines={1}>{displayName}</Text>
               </View>
+              <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
+                {displayQty}
+              </Numeric>
             </Pressable>
             {badge ? (
               <View style={badge.style}>
@@ -1053,7 +1053,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingLeft: 108, // align under the name (amount column 92 + gaps)
+    paddingLeft: 4, // name is now the left column, so the prompt aligns at left
     paddingRight: 4,
     paddingBottom: 10,
   },
