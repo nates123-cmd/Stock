@@ -49,7 +49,7 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
 
 type Section = 'shop' | 'have';
 /** Per-ingredient decision, keyed within a recipe by ingredient id. */
-type Decision = { section: Section; removed: boolean };
+type Decision = { section: Section; removed: boolean; name?: string; qty?: string };
 
 const DAYS_AHEAD = 14;
 
@@ -123,6 +123,8 @@ export default function BuildListScreen() {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   // decisions[recipeId][ingredientId] = Decision (absent = the default split)
   const [decisions, setDecisions] = useState<Record<string, Record<string, Decision>>>({});
+  // Long-press detail sheet — edit title/qty + Delete / Always have / Already have.
+  const [detail, setDetail] = useState<{ recipe: Recipe; ing: Ingredient } | null>(null);
 
   const selected = plannedRecipes.filter((r) => !excluded.has(r.id));
 
@@ -165,9 +167,11 @@ export default function BuildListScreen() {
       for (const ing of r.ingredients) {
         const dec = decisionFor(r, ing);
         if (dec.removed || dec.section !== 'shop') continue;
-        const k = matchKey(ing.canonicalName);
-        const amt = ing.amount != null ? formatAmount(ing.amount, ing.unit) : '';
-        const g = byKey.get(k) ?? { key: k, name: ing.canonicalName, sources: [] };
+        // Per-ingredient edits from the detail sheet override the name/qty.
+        const name = dec.name ?? ing.canonicalName;
+        const k = matchKey(name);
+        const amt = dec.qty ?? (ing.amount != null ? formatAmount(ing.amount, ing.unit) : '');
+        const g = byKey.get(k) ?? { key: k, name, sources: [] };
         g.sources.push({ recipe: r.title, amt });
         byKey.set(k, g);
       }
@@ -445,11 +449,41 @@ export default function BuildListScreen() {
             void markAlwaysHave(ing.canonicalName);
             setDecision(recipe.id, ing.id, { section: 'have' });
           }}
+          onOpenDetail={(ing) => setDetail({ recipe, ing })}
           onBack={() => setStep((s) => s - 1)}
           onNext={() => setStep((s) => s + 1)}
           isLast={step === total}
         />
       ) : null}
+
+      {/* Long-press detail sheet — full options for one ingredient. */}
+      <Overlay visible={!!detail} onClose={() => setDetail(null)}>
+        {detail ? (
+          <IngredientDetail
+            key={detail.ing.id}
+            ing={detail.ing}
+            decision={decisionFor(detail.recipe, detail.ing)}
+            onSave={(name, qty) => {
+              setDecision(detail.recipe.id, detail.ing.id, { name, qty });
+              setDetail(null);
+            }}
+            onAlreadyHave={() => {
+              setDecision(detail.recipe.id, detail.ing.id, { section: 'have' });
+              setDetail(null);
+            }}
+            onAlwaysHave={() => {
+              void markAlwaysHave(detail.ing.canonicalName);
+              setDecision(detail.recipe.id, detail.ing.id, { section: 'have' });
+              setDetail(null);
+            }}
+            onDelete={() => {
+              setDecision(detail.recipe.id, detail.ing.id, { removed: true });
+              setDetail(null);
+            }}
+            onCancel={() => setDetail(null)}
+          />
+        ) : null}
+      </Overlay>
 
       {/* ---- Step N+1: combine ---- */}
       {onCombine ? (
@@ -615,6 +649,62 @@ function EditCombined({
 }
 
 /* ---------- per-recipe step ---------- */
+/* ---------- long-press ingredient detail sheet ---------- */
+function IngredientDetail({
+  ing,
+  decision,
+  onSave,
+  onAlreadyHave,
+  onAlwaysHave,
+  onDelete,
+  onCancel,
+}: {
+  ing: Ingredient;
+  decision: Decision;
+  onSave: (name: string, qty: string) => void;
+  onAlreadyHave: () => void;
+  onAlwaysHave: () => void;
+  onDelete: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(decision.name ?? ing.canonicalName);
+  const [qty, setQty] = useState(
+    decision.qty ?? (ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''),
+  );
+  return (
+    <View style={styles.editSheet}>
+      <Heading variant="recipeTitle">Item</Heading>
+      <SectionLabel color="textMuted">Name</SectionLabel>
+      <TextInput value={name} onChangeText={setName} style={styles.editInput} />
+      <SectionLabel color="textMuted">Quantity</SectionLabel>
+      <TextInput
+        value={qty}
+        onChangeText={setQty}
+        placeholder="e.g. 2 pints"
+        placeholderTextColor={colors.textFaint}
+        style={styles.editInput}
+      />
+      <Button
+        label="Save"
+        glyph="done"
+        onPress={() => onSave(name.trim() || ing.canonicalName, qty.trim())}
+      />
+      <View style={styles.detailActions}>
+        <Button label="Already have" variant="secondary" flex onPress={onAlreadyHave} />
+        <Button label="Always have" variant="secondary" flex onPress={onAlwaysHave} />
+      </View>
+      <Pressable onPress={onDelete} style={styles.detailDelete} accessibilityRole="button">
+        <Text color="warn" variant="bodyStrong">
+          Delete from list
+        </Text>
+      </Pressable>
+      <Pressable onPress={onCancel} style={styles.detailCancel} accessibilityRole="button">
+        <Text color="textMuted">Cancel</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function RecipeStep({
   recipe,
   decisionFor,
@@ -622,6 +712,7 @@ function RecipeStep({
   onToggleSection,
   onRemove,
   onAlwaysHave,
+  onOpenDetail,
   onBack,
   onNext,
   isLast,
@@ -632,6 +723,7 @@ function RecipeStep({
   onToggleSection: (ing: Ingredient) => void;
   onRemove: (ing: Ingredient) => void;
   onAlwaysHave: (ing: Ingredient) => void;
+  onOpenDetail: (ing: Ingredient) => void;
   onBack: () => void;
   onNext: () => void;
   isLast: boolean;
@@ -691,13 +783,16 @@ function RecipeStep({
             </GHPressable>
           </View>
         )}>
-        {/* The gesture model (no long-press — it never fired reliably on iOS):
-            TAP = move Shop↔Have, SWIPE-RIGHT = always have, SWIPE-LEFT = delete. */}
+        {/* TAP = move Shop↔Have; SWIPE-RIGHT = always have; SWIPE-LEFT = delete;
+            LONG-PRESS = full detail sheet (edit + all actions). */}
         <Pressable
           onPress={() => onToggleSection(ing)}
-          style={styles.ingMain}
+          onLongPress={() => onOpenDetail(ing)}
+          delayLongPress={400}
+          // @ts-expect-error web-only: stop iOS hijacking the long-press
+          style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
           accessibilityRole="button"
-          accessibilityLabel={`${ing.canonicalName}. Tap to move between Shop for and Already have; swipe right to always have; swipe left to remove.`}>
+          accessibilityLabel={`${ing.canonicalName}. Tap to move; swipe right to always have; swipe left to remove; long-press for options.`}>
           <Numeric color="textMuted" style={styles.ingAmt}>
             {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
           </Numeric>
@@ -745,9 +840,9 @@ function RecipeStep({
           have.map((i) => <Row key={i.id} ing={i} section="have" />)
         )}
         <Text color="textFaint" style={styles.tip}>
-          Tap a row to move it between Shop for and Already have. Swipe right to
-          “always have” (adds it to your pantry, a Have for every recipe). Swipe
-          left to remove it from the list.
+          Tap to move between Shop for and Already have. Swipe right to “always
+          have” (adds it to your pantry). Swipe left to remove. Long-press for
+          the full detail sheet (edit name/qty + all options).
         </Text>
       </ScrollView>
       <BottomActionBar>
@@ -864,6 +959,9 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   editButtons: { flexDirection: 'row', gap: 10, paddingTop: 6 },
+  detailActions: { flexDirection: 'row', gap: 10 },
+  detailDelete: { alignItems: 'center', paddingVertical: 12 },
+  detailCancel: { alignItems: 'center', paddingVertical: 6 },
   combineRow: {
     flexDirection: 'row',
     alignItems: 'center',
