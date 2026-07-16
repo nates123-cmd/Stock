@@ -682,30 +682,40 @@ function RecipeStep({
             </GHPressable>
           </View>
         )}>
-        <GHPressable
-          // onPress is required for RNGH to arm onLongPress — without it the
-          // long-press never fired. Tap also toggles the section (a quick
-          // alternative to swipe-right).
-          onPress={() => onToggleSection(ing)}
-          onLongPress={() => onAlwaysHave(ing)}
-          delayLongPress={350}
-          style={styles.ingMain}
-          accessibilityRole="button"
-          accessibilityLabel={`${ing.canonicalName}. Tap to move, long-press to always have, swipe left to remove.`}>
-          <Numeric color="textMuted" style={styles.ingAmt}>
-            {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
-          </Numeric>
-          <Text style={styles.flex} numberOfLines={1}>
-            {ing.canonicalName}
-          </Text>
-          {low ? (
-            <View style={styles.lowPill}>
-              <Text variant="sectionLabel" color="warn">
-                low
-              </Text>
-            </View>
-          ) : null}
-        </GHPressable>
+        <View style={styles.ingMain}>
+          {/* Tap the body to move Shop↔Have. "always" is its own tap target —
+              long-press proved unreliable (iOS steals it with the callout), so
+              always-have is an explicit control that can't fail. */}
+          <Pressable
+            onPress={() => onToggleSection(ing)}
+            style={styles.ingBody}
+            accessibilityRole="button"
+            accessibilityLabel={`${ing.canonicalName}. Tap to move between Shop for and Already have.`}>
+            <Numeric color="textMuted" style={styles.ingAmt}>
+              {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
+            </Numeric>
+            <Text style={styles.flex} numberOfLines={1}>
+              {ing.canonicalName}
+            </Text>
+            {low ? (
+              <View style={styles.lowPill}>
+                <Text variant="sectionLabel" color="warn">
+                  low
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+          <Pressable
+            onPress={() => onAlwaysHave(ing)}
+            hitSlop={8}
+            style={styles.alwaysChip}
+            accessibilityRole="button"
+            accessibilityLabel={`Always have ${ing.canonicalName}`}>
+            <Text variant="sectionLabel" color="accent">
+              always
+            </Text>
+          </Pressable>
+        </View>
       </ReanimatedSwipeable>
     );
   };
@@ -740,8 +750,8 @@ function RecipeStep({
         )}
         <Text color="textFaint" style={styles.tip}>
           Tap (or swipe right) to move a row between Shop for and Already have,
-          swipe left to remove it, long-press to “always have” (keeps it in your
-          pantry so it’s a Have for every recipe).
+          swipe left to remove it, tap “always” to keep it in your pantry so it’s
+          a Have for every recipe.
         </Text>
       </ScrollView>
       <BottomActionBar>
@@ -790,11 +800,25 @@ const styles = StyleSheet.create({
   ingMain: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
+    gap: 8,
+    paddingVertical: 4,
     paddingHorizontal: 4,
     minWidth: 0,
     backgroundColor: colors.bg, // opaque, so the swipe action panels sit behind it
+  },
+  ingBody: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    minWidth: 0,
+  },
+  alwaysChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: colors.bg3,
   },
   ingAmt: { minWidth: 54 },
   haveAction: {
