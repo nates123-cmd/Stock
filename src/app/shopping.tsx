@@ -1751,7 +1751,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             Collapsed by default; tap a row to pull it back onto the list. */}
         {/* Pending — in-flight items (agent filling the cart). They leave Active
             the moment you push, and move to Pushed once the fill completes. */}
-        {listView === 'active' && filling && job && job.rows.length > 0 ? (
+        {filling && job && job.rows.length > 0 ? (
           <View style={styles.pushedSection}>
             <Pressable
               onPress={() => setPendingOpen((v) => !v)}
@@ -1780,7 +1780,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           </View>
         ) : null}
 
-        {listView === 'active' && pushedItems.length > 0 ? (
+        {pushedItems.length > 0 ? (
           <View style={styles.pushedSection}>
             <View style={styles.pushedHeader}>
               <Pressable
