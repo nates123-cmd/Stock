@@ -463,15 +463,23 @@ export default function BuildListScreen() {
           statusFor={statusFor}
           pantryMatchFor={pantryMatchFor}
           isStaple={(name) => stapleKeys.has(matchKey(name))}
-          onConfirmCovered={(ing) =>
+          onConfirmCovered={(ing) => {
+            // Confirming a FUZZY match ("have kosher salt — covered?" → ✓) means
+            // you always have it — pin the MATCHED pantry item as a staple so the
+            // tile flips to "always have" (and it reads as have for future
+            // recipes too). Non-fuzzy (low) confirms just stay Have.
+            const match = pantryMatchFor(ing.canonicalName);
+            if (match && matchKey(match.canonicalName) !== matchKey(ing.canonicalName)) {
+              void markAlwaysHave(match.canonicalName);
+            }
             // Keep it in Already have — pass the RESOLVED section explicitly, else
             // setDecision's fallback (no prior decision) seeds section:'shop' and
             // a ✓ on a default-Have row would flip it to Shop for.
             setDecision(recipe.id, ing.id, {
               section: decisionFor(recipe, ing).section,
               confirmed: true,
-            })
-          }
+            });
+          }}
           onPushToShop={(ing) => setDecision(recipe.id, ing.id, { section: 'shop' })}
           onToggleSection={(ing) =>
             setDecision(recipe.id, ing.id, {
@@ -814,17 +822,20 @@ function RecipeStep({
       match && matchKey(match.canonicalName) !== matchKey(ing.canonicalName)
     );
     const staple = section === 'have' && isStaple(ing.canonicalName);
+    // Confirming a fuzzy match turns it into "always have" — so a confirmed fuzzy
+    // row reads ALWAYS HAVE, not FUZZY MATCH.
+    const confirmedAlways = fuzzy && !!dec.confirmed;
     // Right-side badge — most-actionable first. LOW / FUZZY MATCH are the
-    // assumptions to eyeball; ALWAYS HAVE = a pantry staple; HAVE = you tapped it
-    // in (have it for this meal, not a standing staple).
+    // assumptions to eyeball; ALWAYS HAVE = a pantry staple (or a confirmed fuzzy
+    // match); HAVE = you tapped it in (have it for this meal, not a staple).
     const badge =
       section !== 'have'
         ? null
-        : low
+        : low && !dec.confirmed
           ? { label: 'LOW', style: styles.badgeLow, color: 'bg' as const }
-          : fuzzy
+          : fuzzy && !dec.confirmed
             ? { label: 'FUZZY MATCH', style: styles.badgeFuzzy, color: 'bg' as const }
-            : staple
+            : staple || confirmedAlways
               ? { label: 'ALWAYS HAVE', style: styles.alwaysPill, color: 'textMuted' as const }
               : { label: 'HAVE', style: styles.havePill, color: 'textMuted' as const };
     // Answerable assumption: a LOW or FUZZY Have row asks "covered?" — ✓ keeps it
