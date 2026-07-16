@@ -459,7 +459,15 @@ export default function BuildListScreen() {
           statusFor={statusFor}
           pantryMatchFor={pantryMatchFor}
           isStaple={(name) => stapleKeys.has(matchKey(name))}
-          onConfirmCovered={(ing) => setDecision(recipe.id, ing.id, { confirmed: true })}
+          onConfirmCovered={(ing) =>
+            // Keep it in Already have — pass the RESOLVED section explicitly, else
+            // setDecision's fallback (no prior decision) seeds section:'shop' and
+            // a ✓ on a default-Have row would flip it to Shop for.
+            setDecision(recipe.id, ing.id, {
+              section: decisionFor(recipe, ing).section,
+              confirmed: true,
+            })
+          }
           onPushToShop={(ing) => setDecision(recipe.id, ing.id, { section: 'shop' })}
           onToggleSection={(ing) =>
             setDecision(recipe.id, ing.id, {
