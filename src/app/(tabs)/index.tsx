@@ -78,10 +78,10 @@ export default function PlanScreen() {
 
   const [daysAhead, setDaysAhead] = useState(6); // today + next 5
   const [manage, setManage] = useState<{ meal: Meal; dish: Dish } | null>(null);
-  // Redesign: Plan tab hosts three segments, Shop leading (shopping is the
-  // front door — you live in the list, plan + pantry feed it). Shop and Pantry
-  // ("Have") embed the real screens; Plan is the meal model below.
-  const [segment, setSegment] = useState<'shop' | 'plan' | 'pantry'>('shop');
+  // The Plan tab hosts three segments in order Plan · Shop · Pantry, opening on
+  // Plan (Nate's call — the plan leads). Shop and Pantry embed the real screens;
+  // Plan is the meal model below.
+  const [segment, setSegment] = useState<'shop' | 'plan' | 'pantry'>('plan');
   // Plan has two layouts; the choice persists (spec Phase B).
   const [planView, setPlanView] = useState<PlanView>(loadPlanView);
   const setView = (v: PlanView) => {
@@ -295,8 +295,8 @@ export default function PlanScreen() {
       <View style={styles.segments}>
         <SegmentedControl
           segments={[
-            { key: 'shop', label: 'Shop' },
             { key: 'plan', label: 'Plan' },
+            { key: 'shop', label: 'Shop' },
             { key: 'pantry', label: 'Pantry' },
           ]}
           value={segment}
@@ -425,16 +425,11 @@ export default function PlanScreen() {
               </View>
             }>
             <Button
-              label="Shopping list"
+              label="Build shopping list"
               glyph="next"
               flex
               disabled={plannedRecipes.length === 0}
-              onPress={() =>
-                router.push({
-                  pathname: '/shopping-confirm',
-                  params: { days: String(daysAhead) },
-                })
-              }
+              onPress={() => router.push('/build-list')}
             />
           </BottomActionBar>
         </>
