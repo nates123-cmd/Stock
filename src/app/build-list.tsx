@@ -774,6 +774,11 @@ function RecipeStep({
   // SWIPE-RIGHT = "have it" (move between Shop for / Already have this build),
   // SWIPE-LEFT reveals Remove (off the list — you have it, don't always-have it).
   const Row = ({ ing, section }: { ing: Ingredient; section: Section }) => {
+    // Show the EDITED name/qty (from the long-press detail sheet), not the raw
+    // recipe ingredient — otherwise an edit looks like it did nothing here.
+    const dec = decisionFor(recipe, ing);
+    const displayName = dec.name ?? ing.canonicalName;
+    const displayQty = dec.qty ?? (ing.amount != null ? formatAmount(ing.amount, ing.unit) : '');
     const low = statusFor(ing.canonicalName) === 'low';
     // Assumption flag: this row is in "Have" because a DIFFERENTLY-named pantry
     // item fuzzy-matched it (recipe "salt" → your "kosher salt"). Surface it so
@@ -833,11 +838,11 @@ function RecipeStep({
           style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
           accessibilityRole="button"
           accessibilityLabel={`${ing.canonicalName}. Tap to move; swipe right to always have; swipe left to remove; long-press for options.`}>
-          <Numeric color="textMuted" style={styles.ingAmt}>
-            {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
+          <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
+            {displayQty}
           </Numeric>
           <View style={styles.flex}>
-            <Text numberOfLines={1}>{ing.canonicalName}</Text>
+            <Text numberOfLines={1}>{displayName}</Text>
             {/* Unified "— covered?" assumptions (accent): a fuzzy pantry match,
                 and running-low. Both let you veto by tapping the row to Shop for. */}
             {fuzzy && match ? (
@@ -944,9 +949,9 @@ const styles = StyleSheet.create({
   sectionEmpty: { fontStyle: 'italic', paddingVertical: 6 },
   ingMain: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
+    alignItems: 'flex-start', // top-align so the amount lines up with the name
+    gap: 12,
+    paddingVertical: 10,
     paddingHorizontal: 4,
     minWidth: 0,
     backgroundColor: colors.bg, // opaque, so the swipe action panels sit behind it
@@ -965,7 +970,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: colors.bg3,
   },
-  ingAmt: { minWidth: 54 },
+  ingAmt: { width: 92, textAlign: 'right', paddingTop: 1 },
   haveAction: {
     justifyContent: 'center',
     alignItems: 'flex-start',
