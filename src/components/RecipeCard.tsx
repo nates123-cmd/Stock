@@ -16,6 +16,7 @@ export function RecipeCard({
   onToggleFavorite,
   toTry,
   onToggleToTry,
+  onAdd,
 }: {
   recipe: Recipe;
   onPress?: () => void;
@@ -25,6 +26,9 @@ export function RecipeCard({
   /** Current "to try" state. Omit `onToggleToTry` to hide the flag entirely. */
   toTry?: boolean;
   onToggleToTry?: () => void;
+  /** Add affordance — when set, a red "+" button shows in the header (used by
+   *  the plan picker to add a recipe to the week instead of opening it). */
+  onAdd?: () => void;
 }) {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
@@ -80,9 +84,19 @@ export function RecipeCard({
                 color={favorite ? 'accent' : 'textFaint'}
               />
             </Pressable>
-          ) : (
+          ) : null}
+          {onAdd ? (
+            <Pressable
+              onPress={onAdd}
+              hitSlop={8}
+              style={styles.addBtn}
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${recipe.title}`}>
+              <Glyph name="add" size={20} color="bg" />
+            </Pressable>
+          ) : !onToggleFavorite ? (
             <Glyph name="next" size={16} color="textFaint" />
-          )}
+          ) : null}
         </View>
 
         <View style={styles.metaRow}>
@@ -139,6 +153,15 @@ const styles = StyleSheet.create({
   },
   title: { flex: 1 },
   fav: { paddingLeft: 4, paddingTop: 1 },
+  addBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 4,
+  },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   statRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   tagRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 },
