@@ -1,5 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import ReanimatedSwipeable, {
+  type SwipeableMethods,
+} from 'react-native-gesture-handler/ReanimatedSwipeable';
+import { Pressable as GHPressable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Text, Heading, Numeric, SectionLabel, Glyph, Button, BottomActionBar } from '@/components';
@@ -340,25 +344,57 @@ function RecipeStep({
     .filter((i) => decisionFor(recipe, i).section === 'have')
     .sort((a, b) => rankLow(a) - rankLow(b) || a.canonicalName.localeCompare(b.canonicalName));
 
+  // Same interaction model as the shopping list: LONG-PRESS = always have,
+  // SWIPE-RIGHT = "have it" (move between Shop for / Already have this build),
+  // SWIPE-LEFT reveals Remove (off the list — you have it, don't always-have it).
   const Row = ({ ing, section }: { ing: Ingredient; section: Section }) => {
     const low = statusFor(ing.canonicalName) === 'low';
+    const swipeRef = useRef<SwipeableMethods | null>(null);
+    const onOpen = (dir: 'left' | 'right') => {
+      if (dir === 'right') {
+        swipeRef.current?.close();
+        onToggleSection(ing);
+      }
+      // left → Remove panel revealed; tap the button.
+    };
     return (
-      <View style={styles.ingRow}>
-        <Pressable
-          onPress={() => onToggleSection(ing)}
+      <ReanimatedSwipeable
+        ref={swipeRef}
+        friction={1.5}
+        leftThreshold={48}
+        rightThreshold={48}
+        overshootLeft={false}
+        overshootRight={false}
+        onSwipeableOpen={onOpen}
+        renderLeftActions={() => (
+          <View style={styles.haveAction}>
+            <Text color="bg" variant="bodyStrong">
+              {section === 'shop' ? 'Have' : 'To shop'}
+            </Text>
+          </View>
+        )}
+        renderRightActions={() => (
+          <View style={styles.rightActions}>
+            <GHPressable
+              onPress={() => {
+                swipeRef.current?.close();
+                onRemove(ing);
+              }}
+              style={styles.deleteAction}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${ing.canonicalName} from the list`}>
+              <Text color="bg" variant="bodyStrong">
+                Remove
+              </Text>
+            </GHPressable>
+          </View>
+        )}>
+        <GHPressable
+          onLongPress={() => onAlwaysHave(ing)}
+          delayLongPress={350}
           style={styles.ingMain}
-          hitSlop={4}
           accessibilityRole="button"
-          accessibilityLabel={
-            section === 'shop'
-              ? `Move ${ing.canonicalName} to Already have`
-              : `Move ${ing.canonicalName} to Shop for`
-          }>
-          <Glyph
-            name={section === 'shop' ? 'next' : 'back'}
-            size={13}
-            color="textFaint"
-          />
+          accessibilityLabel={`${ing.canonicalName}. Long-press to always have. Swipe to move or remove.`}>
           <Numeric color="textMuted" style={styles.ingAmt}>
             {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
           </Numeric>
@@ -372,19 +408,8 @@ function RecipeStep({
               </Text>
             </View>
           ) : null}
-        </Pressable>
-        {section === 'have' ? (
-          <Pressable onPress={() => onAlwaysHave(ing)} hitSlop={6} style={styles.ingSide}>
-            <Text variant="sectionLabel" color="textFaint">
-              always
-            </Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={() => onRemove(ing)} hitSlop={6} style={styles.ingSide}>
-            <Glyph name="close" size={13} color="textFaint" />
-          </Pressable>
-        )}
-      </View>
+        </GHPressable>
+      </ReanimatedSwipeable>
     );
   };
 
@@ -417,8 +442,9 @@ function RecipeStep({
           have.map((i) => <Row key={i.id} ing={i} section="have" />)
         )}
         <Text color="textFaint" style={styles.tip}>
-          Tap a row to move it between Shop for and Already have. “always” keeps it
-          in your pantry so it stays a Have for every recipe.
+          Swipe right to move a row between Shop for and Already have, swipe left
+          to remove it, long-press to “always have” (keeps it in your pantry so
+          it’s a Have for every recipe).
         </Text>
       </ScrollView>
       <BottomActionBar>
@@ -464,16 +490,29 @@ const styles = StyleSheet.create({
   recipeTitle: { fontSize: 20, paddingBottom: 4 },
   section: { paddingTop: 14, paddingBottom: 2 },
   sectionEmpty: { fontStyle: 'italic', paddingVertical: 6 },
-  ingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ingMain: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     minWidth: 0,
+    backgroundColor: colors.bg, // opaque, so the swipe action panels sit behind it
   },
   ingAmt: { minWidth: 54 },
+  haveAction: {
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: 18,
+    backgroundColor: colors.ok,
+  },
+  rightActions: { flexDirection: 'row' },
+  deleteAction: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    backgroundColor: colors.accent,
+  },
   lowPill: {
     backgroundColor: colors.bg3,
     paddingHorizontal: 8,
