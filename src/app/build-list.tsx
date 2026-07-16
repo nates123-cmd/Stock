@@ -832,20 +832,21 @@ function RecipeStep({
           </Numeric>
           <View style={styles.flex}>
             <Text numberOfLines={1}>{ing.canonicalName}</Text>
+            {/* Unified "— covered?" assumptions (accent): a fuzzy pantry match,
+                and running-low. Both let you veto by tapping the row to Shop for. */}
             {fuzzy && match ? (
               <Text variant="sectionLabel" color="accent" numberOfLines={1}>
                 have “{match.canonicalName}” — covered?
               </Text>
             ) : null}
-          </View>
-          {/* Have-section badges: LOW (red) for running-low, else "always have". */}
-          {low ? (
-            <View style={styles.lowPill}>
-              <Text variant="sectionLabel" color="warn">
-                low
+            {low ? (
+              <Text variant="sectionLabel" color="accent" numberOfLines={1}>
+                marked low — covered?
               </Text>
-            </View>
-          ) : section === 'have' ? (
+            ) : null}
+          </View>
+          {/* Plain pantry staples (not low, not a fuzzy match) get the badge. */}
+          {section === 'have' && !low && !fuzzy ? (
             <View style={styles.alwaysPill}>
               <Text variant="sectionLabel" color="textMuted">
                 always have
