@@ -22,6 +22,7 @@ import {
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
 import { useCookStore } from '@/store/cooks';
+import { usePlanStore } from '@/store/plan';
 import { useCookTimers } from '@/lib/useCookTimers';
 import { tokenizeStep } from '@/lib/cookText';
 import { formatMinutes } from '@/lib/format';
@@ -58,6 +59,8 @@ export default function CookScreen() {
   const recipe = useRecipeStore((s) => s.recipes.find((r) => r.id === id));
   const saveRecipe = useRecipeStore((s) => s.save);
   const recordCook = useCookStore((s) => s.record);
+  const planMeals = usePlanStore((s) => s.meals);
+  const setMealStatus = usePlanStore((s) => s.setStatus);
   // Most recent prior cook note for this recipe — surfaced in Glance so you
   // see "what I learned last time" before cooking again. cooks are newest-first.
   const lastNote = useCookStore(
@@ -195,6 +198,29 @@ export default function CookScreen() {
       isToTry: false,
       modifiedAt: finishedAt,
     });
+    // Mark the planned meal you just cooked as `cooked` so it drops off the plan
+    // window and the Build-shopping-list wizard — you don't shop for a meal
+    // you've already made. Pick the nearest still-planned meal that uses this
+    // recipe (today/past first, else the soonest upcoming), so cooking one
+    // occurrence doesn't clear a future re-plan of the same dish.
+    const candidates = planMeals
+      .filter(
+        (m) =>
+          (m.status ?? 'planned') === 'planned' &&
+          m.dishes.some((d) => d.recipeId === recipe.id),
+      )
+      .sort((a, b) => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const at = new Date(a.date).getTime();
+        const bt = new Date(b.date).getTime();
+        const t0 = today.getTime();
+        // today/past before future; within each, nearest to today.
+        const ap = at <= t0 ? 0 : 1;
+        const bp = bt <= t0 ? 0 : 1;
+        return ap - bp || Math.abs(at - t0) - Math.abs(bt - t0);
+      });
+    if (candidates[0]) await setMealStatus(candidates[0].id, 'cooked');
     // Tide calorie push — fire-and-forget so a failed network call never
     // blocks the save. Has its own no-op paths for no-nutrition / signed-out.
     void pushCookToTide(cook, recipe, effectiveServings);
