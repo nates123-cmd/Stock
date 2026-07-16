@@ -924,13 +924,19 @@ function RecipeStep({
                 {displayQty}
               </Numeric>
             </Pressable>
-            {badge ? (
-              <View style={badge.style}>
-                <Text variant="sectionLabel" color={badge.color}>
-                  {badge.label}
-                </Text>
-              </View>
-            ) : null}
+            {/* Fixed-width badge slot (always rendered, even empty) so the amount
+                column ends at the SAME x on every row — otherwise each amount
+                right-aligns against its own badge and a HAVE row's amount sits
+                further right than an ALWAYS HAVE row's. */}
+            <View style={styles.badgeSlot}>
+              {badge ? (
+                <View style={badge.style}>
+                  <Text variant="sectionLabel" color={badge.color}>
+                    {badge.label}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </View>
           {showPrompt ? (
             <View style={styles.coveredRow}>
@@ -1078,6 +1084,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
+  },
+  // Fixed slot so every badge occupies the same width — keeps the amount column
+  // (which sits to its left) aligned across HAVE / ALWAYS HAVE / no-badge rows.
+  // Wide enough for "ALWAYS HAVE"; badges hug the right edge.
+  badgeSlot: {
+    width: 116,
+    alignItems: 'flex-end',
+    paddingTop: 1,
   },
   coveredRow: {
     flexDirection: 'row',
