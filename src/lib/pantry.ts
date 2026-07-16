@@ -210,3 +210,21 @@ export function formatCycle(days?: number): string | null {
 export function shortDate(date: Date): string {
   return `${monthShort(date)} ${date.getDate()}`;
 }
+
+/**
+ * Do two shopping/ingredient names refer to the same thing? Loose but guarded —
+ * shared by the shopping-list combine and the build wizard's combine step:
+ *  - prefix either way → "shallot"/"shallots", "basil"/"basil leaves",
+ *    "halloumi"/"halloumi cheese"
+ *  - same head-noun when one side is a single word → "chickpeas"/"cooked
+ *    chickpeas". The single-word guard stops "olive oil" merging "sesame oil".
+ */
+export function looksLikeSameItem(a: string, b: string): boolean {
+  const ka = matchKey(a);
+  const kb = matchKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  if (ka.startsWith(kb) || kb.startsWith(ka)) return true;
+  const oneIsPlain = ka.split(' ').length === 1 || kb.split(' ').length === 1;
+  return oneIsPlain && baseIngredient(a) === baseIngredient(b);
+}

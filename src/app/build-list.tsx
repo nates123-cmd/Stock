@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import ReanimatedSwipeable, {
   type SwipeableMethods,
@@ -14,9 +14,10 @@ import { usePantryStore } from '@/store/pantry';
 import { useHaveStore } from '@/store/have';
 import { useExtrasStore } from '@/store/extras';
 import { dateKey } from '@/lib/week';
-import { matchKey } from '@/lib/pantry';
+import { matchKey, looksLikeSameItem } from '@/lib/pantry';
 import { formatAmount } from '@/lib/format';
 import { sumQtyStrings, parseQty, isMixedUnits } from '@/lib/qty';
+import { reconcileQty } from '@/lib/qtyReconcile';
 import type { Ingredient, PantryStatus, Recipe } from '@/types';
 
 /**
@@ -144,9 +145,13 @@ export default function BuildListScreen() {
 
   /* ---------- final combined shop-for list ---------- */
   // Combine step: user edits + unmerges.
-  const [unmerged, setUnmerged] = useState<Set<string>>(new Set());
   const [edits, setEdits] = useState<Record<string, { name?: string; qty?: string }>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  // AI cross-unit reconcile: groupKey → single buy quantity ("2 pints"), and the
+  // set currently being reconciled (for the "reconciling…" hint).
+  const [aiQty, setAiQty] = useState<Record<string, string>>({});
+  const [reconciling, setReconciling] = useState<Set<string>>(new Set());
+  const aiTried = useRef<Set<string>>(new Set());
 
   // Every "Shop for" ingredient, grouped by matchKey, carrying WHICH recipes it
   // came from — so the combine step can show its work.
@@ -167,53 +172,150 @@ export default function BuildListScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, decisions, statusByKey, stapleKeys]);
 
+  // effGroups folds `groups` into merged clusters. Two ways to merge:
+  //  - AUTO: look-alikes via looksLikeSameItem — the SAME logic the shopping
+  //    list uses (catches "halloumi"/"halloumi cheese", "chickpeas"/"cooked
+  //    chickpeas"), unless you've split that group off (keepSeparate).
+  //  - MANUAL: check two rows and Merge (mergeOverride) for anything auto misses.
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [mergeOverride, setMergeOverride] = useState<Record<string, string>>({});
+  const [keepSeparate, setKeepSeparate] = useState<Set<string>>(new Set());
+  const effGroups = useMemo(() => {
+    // Union-find over group keys.
+    const parent = new Map(groups.map((g) => [g.key, g.key]));
+    const find = (k: string): string => {
+      let r = k;
+      while (parent.get(r) !== r) r = parent.get(r)!;
+      return r;
+    };
+    const union = (a: string, b: string) => {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent.set(ra, rb);
+    };
+    // Auto: merge look-alikes not explicitly kept separate.
+    for (let i = 0; i < groups.length; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        const a = groups[i]!;
+        const b = groups[j]!;
+        if (keepSeparate.has(a.key) || keepSeparate.has(b.key)) continue;
+        if (looksLikeSameItem(a.name, b.name)) union(a.key, b.key);
+      }
+    }
+    // Manual overrides win regardless.
+    for (const [k, canon] of Object.entries(mergeOverride)) if (parent.has(k)) union(k, canon);
+    // Collect clusters by root.
+    const byRoot = new Map<
+      string,
+      { key: string; name: string; sources: { recipe: string; amt: string }[]; members: string[] }
+    >();
+    for (const g of groups) {
+      const root = find(g.key);
+      const e = byRoot.get(root) ?? { key: root, name: g.name, sources: [], members: [] };
+      e.sources.push(...g.sources);
+      e.members.push(g.key);
+      if (g.name.length < e.name.length) e.name = g.name; // simplest name wins
+      byRoot.set(root, e);
+    }
+    return [...byRoot.values()];
+  }, [groups, mergeOverride, keepSeparate]);
+
+  const mergeChecked = () => {
+    const picked = effGroups.filter((g) => checked.has(g.key));
+    if (picked.length < 2) return;
+    const canon = picked.reduce((a, b) => (b.name.length < a.name.length ? b : a)).key;
+    setMergeOverride((prev) => {
+      const next = { ...prev };
+      for (const g of picked) for (const m of g.members) next[m] = canon;
+      return next;
+    });
+    // Merging overrides any keep-separate on these members.
+    setKeepSeparate((prev) => {
+      const next = new Set(prev);
+      for (const g of picked) for (const m of g.members) next.delete(m);
+      return next;
+    });
+    setChecked(new Set());
+  };
+
   type CombineRow = {
     id: string;
     groupKey: string;
     name: string;
     qty: string;
     recipes: string[];
-    merged: boolean; // came from >1 recipe and still combined
-    split: boolean; // a broken-out line from an unmerged group
+    merged: boolean; // combined from >1 source (multiple recipes and/or merge)
   };
   const combineRows = useMemo<CombineRow[]>(() => {
-    const rows: CombineRow[] = [];
-    for (const g of groups) {
-      const multi = g.sources.length > 1;
-      if (multi && unmerged.has(g.key)) {
-        g.sources.forEach((s, i) =>
-          rows.push({
-            id: `${g.key}:${i}`,
-            groupKey: g.key,
-            name: g.name,
-            qty: s.amt,
-            recipes: [s.recipe],
-            merged: false,
-            split: true,
-          }),
-        );
-      } else {
-        const e = edits[g.key];
-        rows.push({
-          id: g.key,
-          groupKey: g.key,
-          // Finalize the amount: same units add, different units stay
-          // side-by-side ("300 g + 1 pint") for you to reconcile.
-          name: e?.name ?? g.name,
-          qty: e?.qty ?? sumQtyStrings(g.sources.map((s) => s.amt)),
-          recipes: [...new Set(g.sources.map((s) => s.recipe))],
-          merged: multi,
-          split: false,
-        });
-      }
-    }
+    const rows: CombineRow[] = effGroups.map((g) => {
+      const e = edits[g.key];
+      // Amount precedence: your edit > AI cross-unit reconcile > local sum.
+      // The AI turns mixed units into ONE shoppable total ("2 cup + 600 g" →
+      // "3 pints"); same units just add.
+      return {
+        id: g.key,
+        groupKey: g.key,
+        name: e?.name ?? g.name,
+        qty: e?.qty ?? aiQty[g.key] ?? sumQtyStrings(g.sources.map((s) => s.amt)),
+        recipes: [...new Set(g.sources.map((s) => s.recipe))],
+        merged: g.sources.length > 1,
+      };
+    });
     // Merged (your combined duplicates) first — that's the work to eyeball.
     return rows.sort(
       (a, b) => (b.merged ? 1 : 0) - (a.merged ? 1 : 0) || a.name.localeCompare(b.name),
     );
-  }, [groups, unmerged, edits]);
+  }, [effGroups, edits, aiQty]);
 
-  const editingGroup = groups.find((g) => g.key === editingKey) ?? null;
+  /** Break a cluster back into its member groups — clear any manual overrides
+   *  AND mark the members keep-separate so the auto look-alike merge doesn't
+   *  immediately re-combine them. */
+  const splitCluster = (canon: string) => {
+    const cluster = effGroups.find((g) => g.key === canon);
+    const members = cluster?.members ?? [canon];
+    setMergeOverride((prev) => {
+      const next = { ...prev };
+      for (const m of members) delete next[m];
+      return next;
+    });
+    setKeepSeparate((prev) => {
+      const next = new Set(prev);
+      for (const m of members) next.add(m);
+      return next;
+    });
+  };
+
+  const editingGroup = effGroups.find((g) => g.key === editingKey) ?? null;
+
+  // AI cross-unit reconcile: when a merged group mixes units ("300 g + 1 pint"),
+  // ask Claude for the single buy quantity. Runs once per group when you reach
+  // the combine step; falls back to the side-by-side sum if Claude is offline.
+  useEffect(() => {
+    if (step !== selected.length + 1) return;
+    for (const g of effGroups) {
+      if (g.sources.length < 2) continue;
+      const summed = sumQtyStrings(g.sources.map((s) => s.amt));
+      if (!isMixedUnits(summed)) continue; // same-unit sum is already exact
+      // Re-run when the cluster's membership changes (manual merge), keyed on
+      // the member set — so merging two look-alikes triggers a fresh total.
+      const sig = `${g.key}|${g.members.slice().sort().join(',')}`;
+      if (aiTried.current.has(sig)) continue;
+      aiTried.current.add(sig);
+      setReconciling((p) => new Set(p).add(g.key));
+      void reconcileQty(g.name, g.sources.map((s) => s.amt))
+        .then((r) => {
+          if (r) setAiQty((p) => ({ ...p, [g.key]: r }));
+        })
+        .finally(() =>
+          setReconciling((p) => {
+            const n = new Set(p);
+            n.delete(g.key);
+            return n;
+          }),
+        );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, selected.length, effGroups]);
 
   const finish = () => {
     // Phase-1 hand-off: add the combined shop-for items to the shopping list as
@@ -352,10 +454,25 @@ export default function BuildListScreen() {
             </SectionLabel>
             {combineRows.map((row) => {
               const mixed = isMixedUnits(row.qty);
+              const isChecked = checked.has(row.groupKey);
               return (
-                <View
-                  key={row.id}
-                  style={[styles.combineRow, row.split && styles.splitRow]}>
+                <View key={row.id} style={styles.combineRow}>
+                  {/* Check two look-alikes → Merge (for anything the auto merge
+                      missed). */}
+                  <Pressable
+                    onPress={() =>
+                      setChecked((p) => {
+                        const n = new Set(p);
+                        if (n.has(row.groupKey)) n.delete(row.groupKey);
+                        else n.add(row.groupKey);
+                        return n;
+                      })
+                    }
+                    hitSlop={8}>
+                    <View style={[styles.checkSm, isChecked && styles.boxOn]}>
+                      {isChecked ? <Glyph name="done" size={11} color="bg" /> : null}
+                    </View>
+                  </Pressable>
                   <View style={styles.flex}>
                     <Text variant="bodyStrong" numberOfLines={1}>
                       {row.name.charAt(0).toUpperCase() + row.name.slice(1)}
@@ -363,47 +480,34 @@ export default function BuildListScreen() {
                     </Text>
                     {row.recipes.length > 0 ? (
                       <Text color="textFaint" variant="sectionLabel">
-                        {row.merged ? 'merged from ' : row.split ? 'from ' : 'for '}
+                        {row.merged ? 'merged from ' : 'for '}
                         {row.recipes.join(' · ')}
                       </Text>
                     ) : null}
-                    {mixed ? (
+                    {reconciling.has(row.groupKey) ? (
+                      <Text color="textFaint" variant="sectionLabel">
+                        reconciling units…
+                      </Text>
+                    ) : aiQty[row.groupKey] && !edits[row.groupKey] ? (
+                      <Text color="ok" variant="sectionLabel">
+                        reconciled to a shoppable total — tap Edit to adjust
+                      </Text>
+                    ) : mixed ? (
                       <Text color="warn" variant="sectionLabel">
                         mixed units — edit to set a single total
                       </Text>
                     ) : null}
                   </View>
                   <View style={styles.combineActions}>
-                    {!row.split ? (
-                      <Pressable onPress={() => setEditingKey(row.groupKey)} hitSlop={6}>
-                        <Text color="accent" variant="sectionLabel">
-                          Edit
-                        </Text>
-                      </Pressable>
-                    ) : null}
+                    <Pressable onPress={() => setEditingKey(row.groupKey)} hitSlop={6}>
+                      <Text color="accent" variant="sectionLabel">
+                        Edit
+                      </Text>
+                    </Pressable>
                     {row.merged ? (
-                      <Pressable
-                        onPress={() =>
-                          setUnmerged((p) => new Set(p).add(row.groupKey))
-                        }
-                        hitSlop={6}>
+                      <Pressable onPress={() => splitCluster(row.groupKey)} hitSlop={6}>
                         <Text color="textMuted" variant="sectionLabel">
                           Unmerge
-                        </Text>
-                      </Pressable>
-                    ) : null}
-                    {row.split ? (
-                      <Pressable
-                        onPress={() =>
-                          setUnmerged((p) => {
-                            const n = new Set(p);
-                            n.delete(row.groupKey);
-                            return n;
-                          })
-                        }
-                        hitSlop={6}>
-                        <Text color="ok" variant="sectionLabel">
-                          Re-merge
                         </Text>
                       </Pressable>
                     ) : null}
@@ -417,7 +521,18 @@ export default function BuildListScreen() {
               </Text>
             ) : null}
           </ScrollView>
-          <BottomActionBar>
+          <BottomActionBar
+            meta={
+              checked.size >= 2 ? (
+                <Pressable onPress={mergeChecked} hitSlop={6} accessibilityRole="button">
+                  <Text color="ok" variant="bodyStrong">
+                    Merge · {checked.size}
+                  </Text>
+                </Pressable>
+              ) : checked.size === 1 ? (
+                <Text color="textFaint">Check one more to merge</Text>
+              ) : undefined
+            }>
             <Button
               label="Back"
               variant="secondary"
@@ -436,6 +551,7 @@ export default function BuildListScreen() {
             initialName={edits[editingGroup.key]?.name ?? editingGroup.name}
             initialQty={
               edits[editingGroup.key]?.qty ??
+              aiQty[editingGroup.key] ??
               sumQtyStrings(editingGroup.sources.map((s) => s.amt))
             }
             sources={editingGroup.sources}
@@ -567,11 +683,15 @@ function RecipeStep({
           </View>
         )}>
         <GHPressable
+          // onPress is required for RNGH to arm onLongPress — without it the
+          // long-press never fired. Tap also toggles the section (a quick
+          // alternative to swipe-right).
+          onPress={() => onToggleSection(ing)}
           onLongPress={() => onAlwaysHave(ing)}
           delayLongPress={350}
           style={styles.ingMain}
           accessibilityRole="button"
-          accessibilityLabel={`${ing.canonicalName}. Long-press to always have. Swipe to move or remove.`}>
+          accessibilityLabel={`${ing.canonicalName}. Tap to move, long-press to always have, swipe left to remove.`}>
           <Numeric color="textMuted" style={styles.ingAmt}>
             {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
           </Numeric>
@@ -619,9 +739,9 @@ function RecipeStep({
           have.map((i) => <Row key={i.id} ing={i} section="have" />)
         )}
         <Text color="textFaint" style={styles.tip}>
-          Swipe right to move a row between Shop for and Already have, swipe left
-          to remove it, long-press to “always have” (keeps it in your pantry so
-          it’s a Have for every recipe).
+          Tap (or swipe right) to move a row between Shop for and Already have,
+          swipe left to remove it, long-press to “always have” (keeps it in your
+          pantry so it’s a Have for every recipe).
         </Text>
       </ScrollView>
       <BottomActionBar>
@@ -700,6 +820,15 @@ const styles = StyleSheet.create({
   tip: { fontStyle: 'italic', lineHeight: 18, paddingTop: 16 },
   combineHint: { paddingBottom: 8, lineHeight: 18 },
   combineActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  checkSm: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: colors.textFaint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   splitRow: { paddingLeft: 16, opacity: 0.9 },
   editSheet: { gap: 10 },
   editHint: { fontStyle: 'italic', lineHeight: 18 },
