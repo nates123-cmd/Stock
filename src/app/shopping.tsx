@@ -723,26 +723,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     members?: FlatRow[];
   };
   const allRows = useMemo<FlatRow[]>(() => {
+    // MATERIALIZED LIST (PLAN-SHOP-FLOW.md phase 4). Active is no longer
+    // live-derived from the week's planned recipes — that was the source of the
+    // whole "items reappear / delete doesn't stick" class (a name-keyed
+    // suppression fighting a re-derivation that renamed items). The list is now
+    // just the EXTRAS store: concrete rows with stable ids, written by the
+    // "Build shopping list" wizard (its combined shop-for items) and by manual
+    // "+ Add". Delete removes a row by id (removeExtra) — nothing regenerates it.
+    //
+    // Pantry restocks still surface in STAPLES (stapleRows), unchanged. The push
+    // surface reads from these rows, so it's unaffected.
     const rows: FlatRow[] = [];
-    const ov = (base: string, qty: string) => {
-      const o = overrides[matchKey(base)];
-      return { name: o?.name || base, qty: o?.qty ?? qty };
-    };
     const gone = (base: string) => inHave(base) || wasPushed(base);
-    for (const i of visibleItems) {
-      if (gone(i.name)) continue;
-      const e = ov(i.name, i.buy);
-      rows.push({
-        key: `r:${i.name}`,
-        name: e.name,
-        baseName: i.name,
-        qty: e.qty,
-        extraId: null,
-        pantryStatus: statusFor(i.name),
-        kind: 'recipe',
-        recipes: dedupeRecipes(i.sources),
-      });
-    }
     for (const ex of extras) {
       // A staple pin hides the row from Active — that IS "Move to Staples", and
       // it has to apply to manual adds too, or the row lives in both views at
@@ -760,19 +752,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         kind: 'extra',
       });
     }
-    // NOTE: pantry restock lines are deliberately NOT here.
-    //
-    // Flagging anything in the pantry low/out used to push it straight onto
-    // Active, so things Nate never called staples — chile flakes — appeared on
-    // his buy list out of nowhere. Anything in the PANTRY is "stuff you have":
-    // when it runs low it restocks in STAPLES (see stapleRows). Active is for
-    // what the week's recipes need, plus what you add by hand.
-    //
-    // A pantry item that IS in a recipe still shows on Active via visibleItems
-    // above — the recipe needs it, so it belongs on the buy list.
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems, extras, dismissed, overrides, pushedSet, haveChecked, alwaysHaveMap, statusByKey, shopMetaMap]);
+  }, [extras, overrides, pushedSet, haveChecked, alwaysHaveMap, statusByKey, shopMetaMap]);
 
   /** Active = the dominant "get this now" list, with manual merges folded in. */
   const activeRows = useMemo(() => {
