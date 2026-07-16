@@ -49,7 +49,7 @@ export function ErrorBoundary({ error, retry }: { error: Error; retry: () => voi
 
 type Section = 'shop' | 'have';
 /** Per-ingredient decision, keyed within a recipe by ingredient id. */
-type Decision = { section: Section; removed: boolean; name?: string; qty?: string };
+type Decision = { section: Section; removed: boolean; name?: string; qty?: string; confirmed?: boolean };
 
 const DAYS_AHEAD = 14;
 
@@ -61,7 +61,6 @@ export default function BuildListScreen() {
   const applyPaste = usePantryStore((s) => s.applyPaste);
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
   const setAlways = useHaveStore((s) => s.setAlways);
-  const alwaysHaveMap = useHaveStore((s) => s.alwaysHave);
   const addExtras = useExtrasStore((s) => s.add);
 
   // Planned recipes in the rolling window, DEDUPED (a recipe planned twice is
@@ -125,8 +124,12 @@ export default function BuildListScreen() {
   };
   const defaultSection = (name: string): Section => {
     const k = matchKey(name);
-    // always-have map is keyed by lowercase-trim (have.ts), not matchKey.
-    if (stapleKeys.has(k) || alwaysHaveMap[name.toLowerCase().trim()]) return 'have';
+    // PANTRY is the source of truth for "always have" — a staple item that
+    // actually exists in the pantry. The old code also OR'd in a separate
+    // always-have map (have.ts) that never got cleared when you removed the item
+    // from the pantry, so a deleted staple (e.g. chives) kept reading as Have.
+    // stapleKeys is derived live from pantryItems, so removal clears it.
+    if (stapleKeys.has(k)) return 'have';
     const st = statusByKey.get(k);
     if (st === 'fine' || st === 'low') return 'have';
     // Loose: anything the pantry covers (fuzzy) and isn't out → you have it.
@@ -455,6 +458,9 @@ export default function BuildListScreen() {
           decisionFor={decisionFor}
           statusFor={statusFor}
           pantryMatchFor={pantryMatchFor}
+          isStaple={(name) => stapleKeys.has(matchKey(name))}
+          onConfirmCovered={(ing) => setDecision(recipe.id, ing.id, { confirmed: true })}
+          onPushToShop={(ing) => setDecision(recipe.id, ing.id, { section: 'shop' })}
           onToggleSection={(ing) =>
             setDecision(recipe.id, ing.id, {
               section: decisionFor(recipe, ing).section === 'shop' ? 'have' : 'shop',
@@ -740,6 +746,9 @@ function RecipeStep({
   onAlwaysHave,
   onOpenDetail,
   pantryMatchFor,
+  isStaple,
+  onConfirmCovered,
+  onPushToShop,
   onBack,
   onNext,
   isLast,
@@ -752,6 +761,9 @@ function RecipeStep({
   onAlwaysHave: (ing: Ingredient) => void;
   onOpenDetail: (ing: Ingredient) => void;
   pantryMatchFor: (name: string) => { canonicalName: string } | null | undefined;
+  isStaple: (name: string) => boolean;
+  onConfirmCovered: (ing: Ingredient) => void;
+  onPushToShop: (ing: Ingredient) => void;
   onBack: () => void;
   onNext: () => void;
   isLast: boolean;
@@ -764,11 +776,13 @@ function RecipeStep({
     const m = pantryMatchFor(i.canonicalName);
     return !!m && matchKey(m.canonicalName) !== matchKey(i.canonicalName);
   };
-  const flagged = (i: Ingredient) =>
-    statusFor(i.canonicalName) === 'low' || isFuzzy(i) ? 0 : 1;
+  // Order within Already-have: LOW first (you might still need to buy), then
+  // FUZZY matches (the assumptions to eyeball), then everything else.
+  const rank = (i: Ingredient) =>
+    statusFor(i.canonicalName) === 'low' ? 0 : isFuzzy(i) ? 1 : 2;
   const have = active
     .filter((i) => decisionFor(recipe, i).section === 'have')
-    .sort((a, b) => flagged(a) - flagged(b) || a.canonicalName.localeCompare(b.canonicalName));
+    .sort((a, b) => rank(a) - rank(b) || a.canonicalName.localeCompare(b.canonicalName));
 
   // Same interaction model as the shopping list: LONG-PRESS = always have,
   // SWIPE-RIGHT = "have it" (move between Shop for / Already have this build),
@@ -784,8 +798,26 @@ function RecipeStep({
     // item fuzzy-matched it (recipe "salt" → your "kosher salt"). Surface it so
     // you can veto (tap to move it to Shop for).
     const match = section === 'have' ? pantryMatchFor(ing.canonicalName) : null;
-    const fuzzy =
-      match && matchKey(match.canonicalName) !== matchKey(ing.canonicalName);
+    const fuzzy = !!(
+      match && matchKey(match.canonicalName) !== matchKey(ing.canonicalName)
+    );
+    const staple = section === 'have' && isStaple(ing.canonicalName);
+    // Right-side badge — most-actionable first. LOW / FUZZY MATCH are the
+    // assumptions to eyeball; ALWAYS HAVE = a pantry staple; HAVE = you tapped it
+    // in (have it for this meal, not a standing staple).
+    const badge =
+      section !== 'have'
+        ? null
+        : low
+          ? { label: 'LOW', style: styles.badgeLow, color: 'bg' as const }
+          : fuzzy
+            ? { label: 'FUZZY MATCH', style: styles.badgeFuzzy, color: 'bg' as const }
+            : staple
+              ? { label: 'ALWAYS HAVE', style: styles.alwaysPill, color: 'textMuted' as const }
+              : { label: 'HAVE', style: styles.havePill, color: 'textMuted' as const };
+    // Answerable assumption: a LOW or FUZZY Have row asks "covered?" — ✓ keeps it
+    // here (and stops asking), ✗ pushes it to Shop for. Confirmed rows go quiet.
+    const showPrompt = section === 'have' && (low || fuzzy) && !dec.confirmed;
     const swipeRef = useRef<SwipeableMethods | null>(null);
     const onOpen = (dir: 'left' | 'right') => {
       if (dir === 'right') {
@@ -828,43 +860,64 @@ function RecipeStep({
             </GHPressable>
           </View>
         )}>
-        {/* TAP = move Shop↔Have; SWIPE-RIGHT = always have; SWIPE-LEFT = delete;
-            LONG-PRESS = full detail sheet (edit + all actions). */}
-        <Pressable
-          onPress={() => onToggleSection(ing)}
-          onLongPress={() => onOpenDetail(ing)}
-          delayLongPress={400}
-          // @ts-expect-error web-only: stop iOS hijacking the long-press
-          style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
-          accessibilityRole="button"
-          accessibilityLabel={`${ing.canonicalName}. Tap to move; swipe right to always have; swipe left to remove; long-press for options.`}>
-          <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
-            {displayQty}
-          </Numeric>
-          <View style={styles.flex}>
-            <Text numberOfLines={1}>{displayName}</Text>
-            {/* Unified "— covered?" assumptions (accent): a fuzzy pantry match,
-                and running-low. Both let you veto by tapping the row to Shop for. */}
-            {fuzzy && match ? (
-              <Text variant="sectionLabel" color="accent" numberOfLines={1}>
-                have “{match.canonicalName}” — covered?
-              </Text>
-            ) : null}
-            {low ? (
-              <Text variant="sectionLabel" color="accent" numberOfLines={1}>
-                marked low — covered?
-              </Text>
+        {/* Column: the tappable ingredient row on top, the answerable "covered?"
+            prompt (if any) below it — the ✓/✗ live OUTSIDE the Pressable so
+            tapping them doesn't also toggle the row's section. */}
+        <View style={styles.ingRow}>
+          <View style={styles.ingTop}>
+            {/* TAP = move Shop↔Have; SWIPE-RIGHT = always have; SWIPE-LEFT =
+                delete; LONG-PRESS = full detail sheet (edit + all actions). */}
+            <Pressable
+              onPress={() => onToggleSection(ing)}
+              onLongPress={() => onOpenDetail(ing)}
+              delayLongPress={400}
+              // @ts-expect-error web-only: stop iOS hijacking the long-press
+              style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
+              accessibilityRole="button"
+              accessibilityLabel={`${ing.canonicalName}. Tap to move; swipe right to always have; swipe left to remove; long-press for options.`}>
+              <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
+                {displayQty}
+              </Numeric>
+              <View style={styles.flex}>
+                <Text numberOfLines={1}>{displayName}</Text>
+              </View>
+            </Pressable>
+            {badge ? (
+              <View style={badge.style}>
+                <Text variant="sectionLabel" color={badge.color}>
+                  {badge.label}
+                </Text>
+              </View>
             ) : null}
           </View>
-          {/* Plain pantry staples (not low, not a fuzzy match) get the badge. */}
-          {section === 'have' && !low && !fuzzy ? (
-            <View style={styles.alwaysPill}>
-              <Text variant="sectionLabel" color="textMuted">
-                always have
+          {showPrompt ? (
+            <View style={styles.coveredRow}>
+              <Text variant="sectionLabel" color="accent" numberOfLines={1} style={styles.flex}>
+                {fuzzy && match
+                  ? `have “${match.canonicalName}” — covered?`
+                  : 'marked low — still have enough?'}
               </Text>
+              <GHPressable
+                onPress={() => onConfirmCovered(ing)}
+                style={[styles.answerBtn, styles.answerYes]}
+                accessibilityRole="button"
+                accessibilityLabel={`Yes — ${ing.canonicalName} is covered, keep in Already have`}>
+                <Text color="bg" variant="bodyStrong">
+                  ✓
+                </Text>
+              </GHPressable>
+              <GHPressable
+                onPress={() => onPushToShop(ing)}
+                style={[styles.answerBtn, styles.answerNo]}
+                accessibilityRole="button"
+                accessibilityLabel={`No — move ${ing.canonicalName} to Shop for`}>
+                <Text color="bg" variant="bodyStrong">
+                  ✕
+                </Text>
+              </GHPressable>
             </View>
           ) : null}
-        </Pressable>
+        </View>
       </ReanimatedSwipeable>
     );
   };
@@ -947,7 +1000,17 @@ const styles = StyleSheet.create({
   recipeTitle: { fontSize: 20, paddingBottom: 4 },
   section: { paddingTop: 14, paddingBottom: 2 },
   sectionEmpty: { fontStyle: 'italic', paddingVertical: 6 },
+  ingRow: {
+    backgroundColor: colors.bg, // opaque, so the swipe action panels sit behind it
+  },
+  ingTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 4,
+  },
   ingMain: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-start', // top-align so the amount lines up with the name
     gap: 12,
@@ -956,6 +1019,41 @@ const styles = StyleSheet.create({
     minWidth: 0,
     backgroundColor: colors.bg, // opaque, so the swipe action panels sit behind it
   },
+  badgeLow: {
+    backgroundColor: colors.warn,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  badgeFuzzy: {
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  havePill: {
+    backgroundColor: colors.bg3,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  coveredRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 108, // align under the name (amount column 92 + gaps)
+    paddingRight: 4,
+    paddingBottom: 10,
+  },
+  answerBtn: {
+    width: 30,
+    height: 26,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  answerYes: { backgroundColor: colors.ok },
+  answerNo: { backgroundColor: colors.accent },
   ingBody: {
     flex: 1,
     flexDirection: 'row',
