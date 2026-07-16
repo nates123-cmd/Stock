@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -395,6 +395,9 @@ export default function BuildListScreen() {
                     <View style={[styles.box, on && styles.boxOn]}>
                       {on ? <Glyph name="done" size={12} color="bg" /> : null}
                     </View>
+                    {r.imageUrl ? (
+                      <Image source={{ uri: r.imageUrl }} style={styles.pickThumb} resizeMode="cover" />
+                    ) : null}
                     <View style={styles.flex}>
                       <Text variant="bodyStrong" numberOfLines={1}>
                         {r.title}
@@ -645,8 +648,10 @@ function RecipeStep({
     const swipeRef = useRef<SwipeableMethods | null>(null);
     const onOpen = (dir: 'left' | 'right') => {
       if (dir === 'right') {
+        // Swipe right → always have (commit-on-open). Reliable path that doesn't
+        // depend on long-press firing.
         swipeRef.current?.close();
-        onToggleSection(ing);
+        onAlwaysHave(ing);
       }
       // left → Remove panel revealed; tap the button.
     };
@@ -662,7 +667,7 @@ function RecipeStep({
         renderLeftActions={() => (
           <View style={styles.haveAction}>
             <Text color="bg" variant="bodyStrong">
-              {section === 'shop' ? 'Have' : 'To shop'}
+              Always have
             </Text>
           </View>
         )}
@@ -682,40 +687,31 @@ function RecipeStep({
             </GHPressable>
           </View>
         )}>
-        <View style={styles.ingMain}>
-          {/* Tap the body to move Shop↔Have. "always" is its own tap target —
-              long-press proved unreliable (iOS steals it with the callout), so
-              always-have is an explicit control that can't fail. */}
-          <Pressable
-            onPress={() => onToggleSection(ing)}
-            style={styles.ingBody}
-            accessibilityRole="button"
-            accessibilityLabel={`${ing.canonicalName}. Tap to move between Shop for and Already have.`}>
-            <Numeric color="textMuted" style={styles.ingAmt}>
-              {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
-            </Numeric>
-            <Text style={styles.flex} numberOfLines={1}>
-              {ing.canonicalName}
-            </Text>
-            {low ? (
-              <View style={styles.lowPill}>
-                <Text variant="sectionLabel" color="warn">
-                  low
-                </Text>
-              </View>
-            ) : null}
-          </Pressable>
-          <Pressable
-            onPress={() => onAlwaysHave(ing)}
-            hitSlop={8}
-            style={styles.alwaysChip}
-            accessibilityRole="button"
-            accessibilityLabel={`Always have ${ing.canonicalName}`}>
-            <Text variant="sectionLabel" color="accent">
-              always
-            </Text>
-          </Pressable>
-        </View>
+        {/* Tap moves Shop↔Have; LONG-PRESS = always have. RN Pressable (not the
+            gesture-handler one) with the iOS callout suppressed, so the long
+            press actually fires on the phone. */}
+        <Pressable
+          onPress={() => onToggleSection(ing)}
+          onLongPress={() => onAlwaysHave(ing)}
+          delayLongPress={400}
+          // @ts-expect-error web-only: stop iOS from hijacking the long-press
+          style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
+          accessibilityRole="button"
+          accessibilityLabel={`${ing.canonicalName}. Tap to move between Shop for and Already have, long-press to always have.`}>
+          <Numeric color="textMuted" style={styles.ingAmt}>
+            {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
+          </Numeric>
+          <Text style={styles.flex} numberOfLines={1}>
+            {ing.canonicalName}
+          </Text>
+          {low ? (
+            <View style={styles.lowPill}>
+              <Text variant="sectionLabel" color="warn">
+                low
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
       </ReanimatedSwipeable>
     );
   };
@@ -749,9 +745,9 @@ function RecipeStep({
           have.map((i) => <Row key={i.id} ing={i} section="have" />)
         )}
         <Text color="textFaint" style={styles.tip}>
-          Tap (or swipe right) to move a row between Shop for and Already have,
-          swipe left to remove it, tap “always” to keep it in your pantry so it’s
-          a Have for every recipe.
+          Tap a row to move it between Shop for and Already have, swipe left to
+          remove it, swipe right (or long-press) to “always have” — keeps it in
+          your pantry so it’s a Have for every recipe.
         </Text>
       </ScrollView>
       <BottomActionBar>
@@ -794,6 +790,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   boxOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  pickThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: colors.bg3 },
   recipeTitle: { fontSize: 20, paddingBottom: 4 },
   section: { paddingTop: 14, paddingBottom: 2 },
   sectionEmpty: { fontStyle: 'italic', paddingVertical: 6 },

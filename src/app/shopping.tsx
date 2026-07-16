@@ -193,6 +193,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     Record<string, { name: string; qty: string }>
   >({});
   const [pushedOpen, setPushedOpen] = useState(false);
+  const [pendingOpen, setPendingOpen] = useState(false);
   // Active is the default view. Staples = the tucked-away pile ("we need it,
   // but not soon") you toggle to when you want it.
   const [listView, setListView] = useState<'active' | 'staples'>('active');
@@ -346,6 +347,12 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     };
   }, [job?.id, job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
   const filling = job?.status === 'queued' || job?.status === 'running';
+  // Keys currently being filled — off Active, in the "Pending" folder, until the
+  // job completes (then they settle into Pushed, or return if unavailable).
+  const pendingKeys = useMemo(
+    () => new Set(filling && job ? job.rows.map((r) => matchKey(r.baseName)) : []),
+    [filling, job],
+  );
   /** Buy-confirm sheet (the buy loop). Checking a row off opens this to place
    *  the item into the pantry (location + qty) before it leaves the list. */
   const [buying, setBuying] = useState<{ name: string; qty: string } | null>(null);
@@ -736,6 +743,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const rows: FlatRow[] = [];
     const gone = (base: string) => inHave(base) || wasPushed(base);
     for (const ex of extras) {
+      // In-flight items (pushed to Wegmans/Costco, agent still filling) leave
+      // Active immediately for the collapsed "Pending" folder — they only land
+      // in "Pushed" once the fill completes.
+      if (pendingKeys.has(matchKey(ex.canonicalName))) continue;
       // Plan-wizard items ALWAYS live on Active, never Staples — even if the
       // item is a pantry staple. You put it on your shopping list on purpose;
       // it only leaves once you buy it or push it. (Nate: "anything generated
@@ -761,7 +772,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extras, overrides, pushedSet, haveChecked, alwaysHaveMap, statusByKey, shopMetaMap]);
+  }, [extras, overrides, pushedSet, pendingKeys, haveChecked, alwaysHaveMap, statusByKey, shopMetaMap]);
 
   /** Active = the dominant "get this now" list, with manual merges folded in. */
   const activeRows = useMemo(() => {
@@ -1738,6 +1749,37 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
         {/* Pushed: what went out to Wegmans/Reminders in the last 24h.
             Collapsed by default; tap a row to pull it back onto the list. */}
+        {/* Pending — in-flight items (agent filling the cart). They leave Active
+            the moment you push, and move to Pushed once the fill completes. */}
+        {listView === 'active' && filling && job && job.rows.length > 0 ? (
+          <View style={styles.pushedSection}>
+            <Pressable
+              onPress={() => setPendingOpen((v) => !v)}
+              style={styles.pushedHeaderMain}
+              accessibilityRole="button"
+              accessibilityLabel={pendingOpen ? 'Collapse pending list' : 'Expand pending list'}>
+              <Text variant="sectionLabel" color="accent">
+                Pending · {job.rows.length} · filling {job.retailer === 'costco' ? 'Costco' : 'Wegmans'} cart…
+              </Text>
+              <Glyph
+                name="expand"
+                size={13}
+                color="accent"
+                style={pendingOpen ? undefined : styles.pushedCaretClosed}
+              />
+            </Pressable>
+            {pendingOpen
+              ? job.rows.map((r) => (
+                  <View key={`pending:${r.key}`} style={styles.pushedRow}>
+                    <Text color="textFaint" style={styles.pushedName} numberOfLines={1}>
+                      {r.name}
+                    </Text>
+                  </View>
+                ))
+              : null}
+          </View>
+        ) : null}
+
         {listView === 'active' && pushedItems.length > 0 ? (
           <View style={styles.pushedSection}>
             <View style={styles.pushedHeader}>
