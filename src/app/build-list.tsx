@@ -758,11 +758,17 @@ function RecipeStep({
 }) {
   const active = recipe.ingredients.filter((i) => !decisionFor(recipe, i).removed);
   const shop = active.filter((i) => decisionFor(recipe, i).section === 'shop');
-  // Have section: running-LOW floated to the top (you've got it, but barely).
-  const rankLow = (i: Ingredient) => (statusFor(i.canonicalName) === 'low' ? 0 : 1);
+  // Have section: FLAGGED items (running-low OR a fuzzy pantry match) float to
+  // the top — those are the assumptions you'll want to eyeball / veto.
+  const isFuzzy = (i: Ingredient) => {
+    const m = pantryMatchFor(i.canonicalName);
+    return !!m && matchKey(m.canonicalName) !== matchKey(i.canonicalName);
+  };
+  const flagged = (i: Ingredient) =>
+    statusFor(i.canonicalName) === 'low' || isFuzzy(i) ? 0 : 1;
   const have = active
     .filter((i) => decisionFor(recipe, i).section === 'have')
-    .sort((a, b) => rankLow(a) - rankLow(b) || a.canonicalName.localeCompare(b.canonicalName));
+    .sort((a, b) => flagged(a) - flagged(b) || a.canonicalName.localeCompare(b.canonicalName));
 
   // Same interaction model as the shopping list: LONG-PRESS = always have,
   // SWIPE-RIGHT = "have it" (move between Shop for / Already have this build),
