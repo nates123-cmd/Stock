@@ -736,11 +736,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const rows: FlatRow[] = [];
     const gone = (base: string) => inHave(base) || wasPushed(base);
     for (const ex of extras) {
-      // A staple pin hides the row from Active — that IS "Move to Staples", and
-      // it has to apply to manual adds too, or the row lives in both views at
-      // once. Adding a name on Active that's currently pinned un-pins it (see
-      // submitAdd), so an explicit "I want this now" still lands here.
-      if (gone(ex.canonicalName)) continue;
+      // Plan-wizard items ALWAYS live on Active, never Staples — even if the
+      // item is a pantry staple. You put it on your shopping list on purpose;
+      // it only leaves once you buy it or push it. (Nate: "anything generated
+      // from the plan wizard needs to end up in Active. Never Staples.")
+      const fromWizard = ex.originId === 'plan-wizard';
+      const drop = fromWizard
+        ? wasPushed(ex.canonicalName) || isMarked(haveChecked, ex.canonicalName)
+        : gone(ex.canonicalName);
+      // A staple pin hides a NON-wizard row from Active — that IS "Move to
+      // Staples", and it applies to manual adds too, or the row lives in both
+      // views. Adding a name on Active that's currently pinned un-pins it.
+      if (drop) continue;
       rows.push({
         key: `e:${ex.id}`,
         name: ex.canonicalName,
@@ -869,8 +876,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // even if it isn't pinned/in the pantry, so a hand-added staple is never
     // dropped for lack of a pin.
     const extraKeys = extras.map((e) => matchKey(e.canonicalName));
+    // Plan-wizard items never belong on Staples — they're forced onto Active.
+    const wizardKeys = new Set(
+      extras.filter((e) => e.originId === 'plan-wizard').map((e) => matchKey(e.canonicalName)),
+    );
     const stapleKeys = new Set<string>([...pinnedKeys, ...pantryKeys, ...extraKeys]);
     for (const key of stapleKeys) {
+      if (wizardKeys.has(key)) continue;
       if (wasPushed(key) || onActive.has(key)) continue;
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
