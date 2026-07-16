@@ -482,7 +482,15 @@ export default function BuildListScreen() {
             ing={detail.ing}
             decision={decisionFor(detail.recipe, detail.ing)}
             onSave={(name, qty) => {
-              setDecision(detail.recipe.id, detail.ing.id, { name, qty });
+              // Preserve the item's current section so editing name/qty keeps a
+              // Shop-for item ON the shopping list (it was dropping out).
+              const cur = decisionFor(detail.recipe, detail.ing);
+              setDecision(detail.recipe.id, detail.ing.id, {
+                section: cur.section,
+                removed: false,
+                name,
+                qty,
+              });
               setDetail(null);
             }}
             onAlreadyHave={() => {
@@ -830,10 +838,17 @@ function RecipeStep({
               </Text>
             ) : null}
           </View>
+          {/* Have-section badges: LOW (red) for running-low, else "always have". */}
           {low ? (
             <View style={styles.lowPill}>
               <Text variant="sectionLabel" color="warn">
                 low
+              </Text>
+            </View>
+          ) : section === 'have' ? (
+            <View style={styles.alwaysPill}>
+              <Text variant="sectionLabel" color="textMuted">
+                always have
               </Text>
             </View>
           ) : null}
@@ -958,6 +973,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   lowPill: {
+    backgroundColor: colors.bg3,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  alwaysPill: {
     backgroundColor: colors.bg3,
     paddingHorizontal: 8,
     paddingVertical: 2,
