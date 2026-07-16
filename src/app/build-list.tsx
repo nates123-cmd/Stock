@@ -59,6 +59,7 @@ export default function BuildListScreen() {
   const recipes = useRecipeStore((s) => s.recipes);
   const pantryItems = usePantryStore((s) => s.items);
   const applyPaste = usePantryStore((s) => s.applyPaste);
+  const toggleStaple = usePantryStore((s) => s.toggleStaple);
   const setAlways = useHaveStore((s) => s.setAlways);
   const alwaysHaveMap = useHaveStore((s) => s.alwaysHave);
   const addExtras = useExtrasStore((s) => s.add);
@@ -137,9 +138,12 @@ export default function BuildListScreen() {
     });
 
   const markAlwaysHave = async (name: string) => {
-    // Global pantry staple — reads as Have for every recipe from now on.
+    // Always-have = a PANTRY STAPLE. Create the pantry item if it's not there
+    // (so it shows up in Pantry), or flip an existing item to staple; and set
+    // the always-have pin so it reads as Have for every recipe from now on.
     const existing = pantryItems.find((p) => matchKey(p.canonicalName) === matchKey(name));
     if (!existing) await applyPaste([{ canonicalName: name, isStaple: true }]);
+    else if (!existing.isStaple) await toggleStaple(existing.id);
     setAlways(name, true);
   };
 
@@ -687,17 +691,13 @@ function RecipeStep({
             </GHPressable>
           </View>
         )}>
-        {/* Tap moves Shop↔Have; LONG-PRESS = always have. RN Pressable (not the
-            gesture-handler one) with the iOS callout suppressed, so the long
-            press actually fires on the phone. */}
+        {/* The gesture model (no long-press — it never fired reliably on iOS):
+            TAP = move Shop↔Have, SWIPE-RIGHT = always have, SWIPE-LEFT = delete. */}
         <Pressable
           onPress={() => onToggleSection(ing)}
-          onLongPress={() => onAlwaysHave(ing)}
-          delayLongPress={400}
-          // @ts-expect-error web-only: stop iOS from hijacking the long-press
-          style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
+          style={styles.ingMain}
           accessibilityRole="button"
-          accessibilityLabel={`${ing.canonicalName}. Tap to move between Shop for and Already have, long-press to always have.`}>
+          accessibilityLabel={`${ing.canonicalName}. Tap to move between Shop for and Already have; swipe right to always have; swipe left to remove.`}>
           <Numeric color="textMuted" style={styles.ingAmt}>
             {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
           </Numeric>
@@ -745,9 +745,9 @@ function RecipeStep({
           have.map((i) => <Row key={i.id} ing={i} section="have" />)
         )}
         <Text color="textFaint" style={styles.tip}>
-          Tap a row to move it between Shop for and Already have, swipe left to
-          remove it, swipe right (or long-press) to “always have” — keeps it in
-          your pantry so it’s a Have for every recipe.
+          Tap a row to move it between Shop for and Already have. Swipe right to
+          “always have” (adds it to your pantry, a Have for every recipe). Swipe
+          left to remove it from the list.
         </Text>
       </ScrollView>
       <BottomActionBar>
