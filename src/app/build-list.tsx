@@ -1,8 +1,12 @@
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import ReanimatedSwipeable, {
+  type SwipeableMethods,
+} from 'react-native-gesture-handler/ReanimatedSwipeable';
+import { Pressable as GHPressable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Text, Heading, Numeric, SectionLabel, Glyph, Button, BottomActionBar } from '@/components';
+import { Text, Heading, Numeric, SectionLabel, Glyph, Button, BottomActionBar, Overlay } from '@/components';
 import { colors, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
@@ -12,6 +16,7 @@ import { useExtrasStore } from '@/store/extras';
 import { dateKey } from '@/lib/week';
 import { matchKey } from '@/lib/pantry';
 import { formatAmount } from '@/lib/format';
+import { sumQtyStrings, parseQty, isMixedUnits } from '@/lib/qty';
 import type { Ingredient, PantryStatus, Recipe } from '@/types';
 
 /**
@@ -54,6 +59,7 @@ export default function BuildListScreen() {
   const pantryItems = usePantryStore((s) => s.items);
   const applyPaste = usePantryStore((s) => s.applyPaste);
   const setAlways = useHaveStore((s) => s.setAlways);
+  const alwaysHaveMap = useHaveStore((s) => s.alwaysHave);
   const addExtras = useExtrasStore((s) => s.add);
 
   // Planned recipes in the rolling window, DEDUPED (a recipe planned twice is
@@ -96,12 +102,16 @@ export default function BuildListScreen() {
     [pantryItems],
   );
   const statusFor = (name: string): PantryStatus | undefined => statusByKey.get(matchKey(name));
-  /** Default section: you HAVE it if it's in the pantry and not out (fine/low),
-   *  or it's a staple. Otherwise you shop for it. */
+  /** Default section: you HAVE it if it's a staple / always-have, or it's in the
+   *  pantry and not out (fine/low). Otherwise you shop for it. Checking the
+   *  always-have pin (not just pantry isStaple) is what makes marking an
+   *  ingredient always-have in recipe 1 reflect in recipes 2/3/4 — later steps
+   *  read the default, which now sees the fresh pin. */
   const defaultSection = (name: string): Section => {
     const k = matchKey(name);
+    // always-have map is keyed by lowercase-trim (have.ts), not matchKey.
+    if (stapleKeys.has(k) || alwaysHaveMap[name.toLowerCase().trim()]) return 'have';
     const st = statusByKey.get(k);
-    if (stapleKeys.has(k)) return 'have';
     if (st === 'fine' || st === 'low') return 'have';
     return 'shop';
   };
@@ -133,39 +143,100 @@ export default function BuildListScreen() {
   };
 
   /* ---------- final combined shop-for list ---------- */
-  const combined = useMemo(() => {
-    // Every ingredient the user kept in "Shop for", grouped by matchKey.
-    const byKey = new Map<string, { name: string; parts: string[] }>();
+  // Combine step: user edits + unmerges.
+  const [unmerged, setUnmerged] = useState<Set<string>>(new Set());
+  const [edits, setEdits] = useState<Record<string, { name?: string; qty?: string }>>({});
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+
+  // Every "Shop for" ingredient, grouped by matchKey, carrying WHICH recipes it
+  // came from — so the combine step can show its work.
+  const groups = useMemo(() => {
+    const byKey = new Map<string, { key: string; name: string; sources: { recipe: string; amt: string }[] }>();
     for (const r of selected) {
       for (const ing of r.ingredients) {
         const dec = decisionFor(r, ing);
         if (dec.removed || dec.section !== 'shop') continue;
         const k = matchKey(ing.canonicalName);
         const amt = ing.amount != null ? formatAmount(ing.amount, ing.unit) : '';
-        const g = byKey.get(k);
-        if (g) {
-          if (amt) g.parts.push(amt);
-        } else {
-          byKey.set(k, { name: ing.canonicalName, parts: amt ? [amt] : [] });
-        }
+        const g = byKey.get(k) ?? { key: k, name: ing.canonicalName, sources: [] };
+        g.sources.push({ recipe: r.title, amt });
+        byKey.set(k, g);
       }
     }
-    return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return [...byKey.values()];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, decisions, statusByKey, stapleKeys]);
 
+  type CombineRow = {
+    id: string;
+    groupKey: string;
+    name: string;
+    qty: string;
+    recipes: string[];
+    merged: boolean; // came from >1 recipe and still combined
+    split: boolean; // a broken-out line from an unmerged group
+  };
+  const combineRows = useMemo<CombineRow[]>(() => {
+    const rows: CombineRow[] = [];
+    for (const g of groups) {
+      const multi = g.sources.length > 1;
+      if (multi && unmerged.has(g.key)) {
+        g.sources.forEach((s, i) =>
+          rows.push({
+            id: `${g.key}:${i}`,
+            groupKey: g.key,
+            name: g.name,
+            qty: s.amt,
+            recipes: [s.recipe],
+            merged: false,
+            split: true,
+          }),
+        );
+      } else {
+        const e = edits[g.key];
+        rows.push({
+          id: g.key,
+          groupKey: g.key,
+          // Finalize the amount: same units add, different units stay
+          // side-by-side ("300 g + 1 pint") for you to reconcile.
+          name: e?.name ?? g.name,
+          qty: e?.qty ?? sumQtyStrings(g.sources.map((s) => s.amt)),
+          recipes: [...new Set(g.sources.map((s) => s.recipe))],
+          merged: multi,
+          split: false,
+        });
+      }
+    }
+    // Merged (your combined duplicates) first — that's the work to eyeball.
+    return rows.sort(
+      (a, b) => (b.merged ? 1 : 0) - (a.merged ? 1 : 0) || a.name.localeCompare(b.name),
+    );
+  }, [groups, unmerged, edits]);
+
+  const editingGroup = groups.find((g) => g.key === editingKey) ?? null;
+
   const finish = () => {
-    // Phase-1 hand-off: add the combined shop-for items to the shopping list.
-    // (Phase 4 will materialize a committed list + retire the live derive.)
-    if (combined.length > 0) {
+    // Phase-1 hand-off: add the combined shop-for items to the shopping list as
+    // extras (the materialized store). Split rows land as separate items.
+    if (combineRows.length > 0) {
       addExtras(
-        combined.map((c) => ({
-          canonicalName: c.name,
-          amount: null,
-          unit: null,
-          originLabel: 'from your plan',
-          originId: null,
-        })),
+        combineRows.map((c) => {
+          // Carry the finalized amount through to the shopping list. A clean
+          // single-unit total parses to amount+unit; a mixed one ("300 g +
+          // 1 pint") can't, so keep it as the unit text so nothing is lost.
+          const p = parseQty(c.qty);
+          return {
+            canonicalName: c.name,
+            amount: p.amount,
+            unit: p.amount != null ? p.unit : c.qty || null,
+            // Show WHICH recipe(s) it's for on the shopping list — that's the
+            // useful context, not a generic "from your plan".
+            originLabel: c.recipes.length ? `for ${c.recipes.join(' · ')}` : 'added by you',
+            // Sentinel so the shopping list keeps plan-wizard items on ACTIVE and
+            // never routes them to Staples, even if the item is also a staple.
+            originId: 'plan-wizard',
+          };
+        }),
       );
     }
     router.replace('/shopping');
@@ -276,20 +347,71 @@ export default function BuildListScreen() {
         <>
           <ScrollView contentContainerStyle={styles.list}>
             <SectionLabel color="textMuted" style={styles.combineHint}>
-              {combined.length} item{combined.length === 1 ? '' : 's'} to shop for — duplicates
-              across recipes are merged.
+              {combineRows.length} item{combineRows.length === 1 ? '' : 's'} to shop for.
+              Duplicates across recipes are merged — shown first, so you can see the work.
             </SectionLabel>
-            {combined.map((c) => (
-              <View key={c.name} style={styles.combineRow}>
-                <Text variant="bodyStrong" style={styles.flex} numberOfLines={1}>
-                  {c.name.charAt(0).toUpperCase() + c.name.slice(1)}
-                </Text>
-                {c.parts.length > 0 ? (
-                  <Numeric color="textMuted">{c.parts.join(' + ')}</Numeric>
-                ) : null}
-              </View>
-            ))}
-            {combined.length === 0 ? (
+            {combineRows.map((row) => {
+              const mixed = isMixedUnits(row.qty);
+              return (
+                <View
+                  key={row.id}
+                  style={[styles.combineRow, row.split && styles.splitRow]}>
+                  <View style={styles.flex}>
+                    <Text variant="bodyStrong" numberOfLines={1}>
+                      {row.name.charAt(0).toUpperCase() + row.name.slice(1)}
+                      {row.qty ? <Text color="textMuted">  ·  {row.qty}</Text> : null}
+                    </Text>
+                    {row.recipes.length > 0 ? (
+                      <Text color="textFaint" variant="sectionLabel">
+                        {row.merged ? 'merged from ' : row.split ? 'from ' : 'for '}
+                        {row.recipes.join(' · ')}
+                      </Text>
+                    ) : null}
+                    {mixed ? (
+                      <Text color="warn" variant="sectionLabel">
+                        mixed units — edit to set a single total
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.combineActions}>
+                    {!row.split ? (
+                      <Pressable onPress={() => setEditingKey(row.groupKey)} hitSlop={6}>
+                        <Text color="accent" variant="sectionLabel">
+                          Edit
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    {row.merged ? (
+                      <Pressable
+                        onPress={() =>
+                          setUnmerged((p) => new Set(p).add(row.groupKey))
+                        }
+                        hitSlop={6}>
+                        <Text color="textMuted" variant="sectionLabel">
+                          Unmerge
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    {row.split ? (
+                      <Pressable
+                        onPress={() =>
+                          setUnmerged((p) => {
+                            const n = new Set(p);
+                            n.delete(row.groupKey);
+                            return n;
+                          })
+                        }
+                        hitSlop={6}>
+                        <Text color="ok" variant="sectionLabel">
+                          Re-merge
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
+              );
+            })}
+            {combineRows.length === 0 ? (
               <Text color="textMuted" style={styles.empty}>
                 Nothing to shop for — you have everything.
               </Text>
@@ -306,7 +428,66 @@ export default function BuildListScreen() {
           </BottomActionBar>
         </>
       ) : null}
+
+      {/* Edit a combined item's name / total. */}
+      <Overlay visible={!!editingGroup} onClose={() => setEditingKey(null)}>
+        {editingGroup ? (
+          <EditCombined
+            initialName={edits[editingGroup.key]?.name ?? editingGroup.name}
+            initialQty={
+              edits[editingGroup.key]?.qty ??
+              sumQtyStrings(editingGroup.sources.map((s) => s.amt))
+            }
+            sources={editingGroup.sources}
+            onSave={(name, qty) => {
+              setEdits((p) => ({ ...p, [editingGroup.key]: { name, qty } }));
+              setEditingKey(null);
+            }}
+            onCancel={() => setEditingKey(null)}
+          />
+        ) : null}
+      </Overlay>
     </SafeAreaView>
+  );
+}
+
+/* ---------- edit a combined item ---------- */
+function EditCombined({
+  initialName,
+  initialQty,
+  sources,
+  onSave,
+  onCancel,
+}: {
+  initialName: string;
+  initialQty: string;
+  sources: { recipe: string; amt: string }[];
+  onSave: (name: string, qty: string) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [qty, setQty] = useState(initialQty);
+  return (
+    <View style={styles.editSheet}>
+      <Heading variant="recipeTitle">Edit item</Heading>
+      <Text color="textFaint" style={styles.editHint}>
+        {sources.map((s) => `${s.amt || '—'} (${s.recipe})`).join('   +   ')}
+      </Text>
+      <SectionLabel color="textMuted">Name</SectionLabel>
+      <TextInput value={name} onChangeText={setName} style={styles.editInput} />
+      <SectionLabel color="textMuted">Total to buy</SectionLabel>
+      <TextInput
+        value={qty}
+        onChangeText={setQty}
+        placeholder="e.g. 2 pints"
+        placeholderTextColor={colors.textFaint}
+        style={styles.editInput}
+      />
+      <View style={styles.editButtons}>
+        <Button label="Cancel" variant="secondary" flex onPress={onCancel} />
+        <Button label="Save" glyph="done" flex onPress={() => onSave(name.trim() || initialName, qty.trim())} />
+      </View>
+    </View>
   );
 }
 
@@ -340,25 +521,57 @@ function RecipeStep({
     .filter((i) => decisionFor(recipe, i).section === 'have')
     .sort((a, b) => rankLow(a) - rankLow(b) || a.canonicalName.localeCompare(b.canonicalName));
 
+  // Same interaction model as the shopping list: LONG-PRESS = always have,
+  // SWIPE-RIGHT = "have it" (move between Shop for / Already have this build),
+  // SWIPE-LEFT reveals Remove (off the list — you have it, don't always-have it).
   const Row = ({ ing, section }: { ing: Ingredient; section: Section }) => {
     const low = statusFor(ing.canonicalName) === 'low';
+    const swipeRef = useRef<SwipeableMethods | null>(null);
+    const onOpen = (dir: 'left' | 'right') => {
+      if (dir === 'right') {
+        swipeRef.current?.close();
+        onToggleSection(ing);
+      }
+      // left → Remove panel revealed; tap the button.
+    };
     return (
-      <View style={styles.ingRow}>
-        <Pressable
-          onPress={() => onToggleSection(ing)}
+      <ReanimatedSwipeable
+        ref={swipeRef}
+        friction={1.5}
+        leftThreshold={48}
+        rightThreshold={48}
+        overshootLeft={false}
+        overshootRight={false}
+        onSwipeableOpen={onOpen}
+        renderLeftActions={() => (
+          <View style={styles.haveAction}>
+            <Text color="bg" variant="bodyStrong">
+              {section === 'shop' ? 'Have' : 'To shop'}
+            </Text>
+          </View>
+        )}
+        renderRightActions={() => (
+          <View style={styles.rightActions}>
+            <GHPressable
+              onPress={() => {
+                swipeRef.current?.close();
+                onRemove(ing);
+              }}
+              style={styles.deleteAction}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${ing.canonicalName} from the list`}>
+              <Text color="bg" variant="bodyStrong">
+                Remove
+              </Text>
+            </GHPressable>
+          </View>
+        )}>
+        <GHPressable
+          onLongPress={() => onAlwaysHave(ing)}
+          delayLongPress={350}
           style={styles.ingMain}
-          hitSlop={4}
           accessibilityRole="button"
-          accessibilityLabel={
-            section === 'shop'
-              ? `Move ${ing.canonicalName} to Already have`
-              : `Move ${ing.canonicalName} to Shop for`
-          }>
-          <Glyph
-            name={section === 'shop' ? 'next' : 'back'}
-            size={13}
-            color="textFaint"
-          />
+          accessibilityLabel={`${ing.canonicalName}. Long-press to always have. Swipe to move or remove.`}>
           <Numeric color="textMuted" style={styles.ingAmt}>
             {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
           </Numeric>
@@ -372,19 +585,8 @@ function RecipeStep({
               </Text>
             </View>
           ) : null}
-        </Pressable>
-        {section === 'have' ? (
-          <Pressable onPress={() => onAlwaysHave(ing)} hitSlop={6} style={styles.ingSide}>
-            <Text variant="sectionLabel" color="textFaint">
-              always
-            </Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={() => onRemove(ing)} hitSlop={6} style={styles.ingSide}>
-            <Glyph name="close" size={13} color="textFaint" />
-          </Pressable>
-        )}
-      </View>
+        </GHPressable>
+      </ReanimatedSwipeable>
     );
   };
 
@@ -417,8 +619,9 @@ function RecipeStep({
           have.map((i) => <Row key={i.id} ing={i} section="have" />)
         )}
         <Text color="textFaint" style={styles.tip}>
-          Tap a row to move it between Shop for and Already have. “always” keeps it
-          in your pantry so it stays a Have for every recipe.
+          Swipe right to move a row between Shop for and Already have, swipe left
+          to remove it, long-press to “always have” (keeps it in your pantry so
+          it’s a Have for every recipe).
         </Text>
       </ScrollView>
       <BottomActionBar>
@@ -464,16 +667,29 @@ const styles = StyleSheet.create({
   recipeTitle: { fontSize: 20, paddingBottom: 4 },
   section: { paddingTop: 14, paddingBottom: 2 },
   sectionEmpty: { fontStyle: 'italic', paddingVertical: 6 },
-  ingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ingMain: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     minWidth: 0,
+    backgroundColor: colors.bg, // opaque, so the swipe action panels sit behind it
   },
   ingAmt: { minWidth: 54 },
+  haveAction: {
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: 18,
+    backgroundColor: colors.ok,
+  },
+  rightActions: { flexDirection: 'row' },
+  deleteAction: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    backgroundColor: colors.accent,
+  },
   lowPill: {
     backgroundColor: colors.bg3,
     paddingHorizontal: 8,
@@ -483,9 +699,25 @@ const styles = StyleSheet.create({
   ingSide: { paddingHorizontal: 6, paddingVertical: 8 },
   tip: { fontStyle: 'italic', lineHeight: 18, paddingTop: 16 },
   combineHint: { paddingBottom: 8, lineHeight: 18 },
+  combineActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  splitRow: { paddingLeft: 16, opacity: 0.9 },
+  editSheet: { gap: 10 },
+  editHint: { fontStyle: 'italic', lineHeight: 18 },
+  editInput: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
+    backgroundColor: colors.bg2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.text,
+  },
+  editButtons: { flexDirection: 'row', gap: 10, paddingTop: 6 },
   combineRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 12,
     paddingVertical: 11,
     borderBottomWidth: StyleSheet.hairlineWidth,

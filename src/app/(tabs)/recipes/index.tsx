@@ -75,7 +75,14 @@ export default function RecipesLibrary() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return recipes.filter((r) => {
-      if (q && !r.title.toLowerCase().includes(q) && !r.tags.some((t) => t.includes(q)))
+      // Search matches title, tags, OR any ingredient — so "lemon" finds every
+      // recipe that uses lemon, not just ones with it in the name.
+      if (
+        q &&
+        !r.title.toLowerCase().includes(q) &&
+        !r.tags.some((t) => t.includes(q)) &&
+        !r.ingredients.some((i) => i.canonicalName.toLowerCase().includes(q))
+      )
         return false;
       if (filter === 'Modified' && !isModified(r)) return false;
       if (filter === 'Have it' && !canMakeNow(recipeCoverage(r.ingredients, pantry)))
