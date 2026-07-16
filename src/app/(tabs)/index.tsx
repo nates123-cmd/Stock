@@ -10,7 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -82,6 +82,29 @@ export default function PlanScreen() {
   // Plan (Nate's call — the plan leads). Shop and Pantry embed the real screens;
   // Plan is the meal model below.
   const [segment, setSegment] = useState<'shop' | 'plan' | 'pantry'>('plan');
+  // Deep-link the segment: the "Build shopping list" wizard finishes by routing
+  // here with ?segment=shop so it lands ON the real Shop tab (with tab chrome),
+  // not the standalone /shopping stack screen (which showed a "Done" header).
+  // Consume the param after applying it so manual segment switches still stick.
+  const params = useLocalSearchParams<{ segment?: string }>();
+  useEffect(() => {
+    const s = params.segment;
+    if (s === 'shop' || s === 'plan' || s === 'pantry') {
+      setSegment(s);
+      // Clear the param AFTER mount — calling router.setParams during the first
+      // render of a cold deep-link (a refresh on /?segment=shop) throws
+      // "navigate before mounting the Root Layout". Deferring + try/catch keeps
+      // the app rendering; the segment state is already applied above.
+      const t = setTimeout(() => {
+        try {
+          router.setParams({ segment: undefined });
+        } catch {
+          /* router not ready yet — harmless, the param just stays in the URL */
+        }
+      }, 0);
+      return () => clearTimeout(t);
+    }
+  }, [params.segment, router]);
   // Plan has two layouts; the choice persists (spec Phase B).
   const [planView, setPlanView] = useState<PlanView>(loadPlanView);
   const setView = (v: PlanView) => {

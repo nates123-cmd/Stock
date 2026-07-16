@@ -23,6 +23,10 @@ export type ExtraItem = {
   originLabel: string | null;
   /** Optional grouping key — used to add/remove a whole batch from one origin. */
   originId: string | null;
+  /** Recipe titles this item is for (plan-wizard items). Drives the BY RECIPE
+   *  grouping: one title → that recipe's group, several → "Multiple", none →
+   *  "Added by me". */
+  recipes?: string[];
   addedAt: Date;
 };
 

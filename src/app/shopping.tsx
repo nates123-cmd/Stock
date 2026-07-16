@@ -729,6 +729,20 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
      *  removes them all; the long-press sheet offers to split them back out. */
     members?: FlatRow[];
   };
+  /** Recipe titles an extra is for. New plan-wizard items carry a structured
+   *  `recipes` array; older ones only have the "for A · B" origin label, so parse
+   *  that as a fallback. Manual / pipeline adds have neither → no recipes. */
+  const recipesForExtra = (ex: {
+    recipes?: string[];
+    originLabel: string | null;
+  }): string[] => {
+    if (ex.recipes?.length) return ex.recipes;
+    const l = ex.originLabel ?? '';
+    if (l.startsWith('for ')) {
+      return l.slice(4).split(' · ').map((s) => s.trim()).filter(Boolean);
+    }
+    return [];
+  };
   const allRows = useMemo<FlatRow[]>(() => {
     // MATERIALIZED LIST (PLAN-SHOP-FLOW.md phase 4). Active is no longer
     // live-derived from the week's planned recipes — that was the source of the
@@ -768,6 +782,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         origin: ex.originLabel,
         pantryStatus: statusFor(ex.canonicalName),
         kind: 'extra',
+        recipes: recipesForExtra(ex),
       });
     }
     return rows;
@@ -932,33 +947,36 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const currentRows = listView === 'active' ? activeRows : stapleRows;
 
   /**
-   * Rows bucketed by the recipe that asked for them — "what do I need for the
-   * chicken?". An ingredient two recipes want shows under BOTH, on purpose: the
-   * question this view answers is per-recipe. Selection is keyed by item, so
-   * checking it in one group checks it everywhere, which is the honest behaviour
-   * (you're buying it once). Anything you added by hand has no recipe, so it
-   * gets its own group at the end.
+   * Rows bucketed by the recipe (from the plan) that asked for them — "what do I
+   * need for the tofu?". Three kinds of bucket, in order:
+   *   - one bucket per recipe, for items exactly ONE recipe needs (alpha order);
+   *   - a single "Multiple" bucket for items 2+ recipes share (lemon, broccoli)
+   *     — they buy once, so listing them under every recipe was noise;
+   *   - "Added by me" for one-off manual/pipeline adds (no recipe).
+   * Selection is keyed by item, so checking anywhere checks everywhere.
    */
   const recipeGroups = useMemo(() => {
     if (groupBy !== 'recipe' || listView !== 'active') return null;
     const byRecipe = new Map<string, FlatRow[]>();
+    const multiple: FlatRow[] = [];
     const loose: FlatRow[] = [];
     for (const r of currentRows) {
       const names = r.recipes ?? [];
-      if (names.length === 0) {
-        loose.push(r);
-        continue;
-      }
-      for (const n of names) {
+      if (names.length === 0) loose.push(r);
+      else if (names.length === 1) {
+        const n = names[0]!;
         const g = byRecipe.get(n);
         if (g) g.push(r);
         else byRecipe.set(n, [r]);
+      } else {
+        multiple.push(r);
       }
     }
     const out = [...byRecipe.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([label, rows]) => ({ label, rows }));
-    if (loose.length > 0) out.push({ label: 'Added by you', rows: loose });
+    if (multiple.length > 0) out.push({ label: 'Multiple', rows: multiple });
+    if (loose.length > 0) out.push({ label: 'Added by me', rows: loose });
     return out;
   }, [groupBy, listView, currentRows]);
 
@@ -1882,7 +1900,20 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             }}
             onSetField={(patch) => setShopMeta(menu.baseName, patch)}
             onToggleAlways={() => {
-              pinStaple(menu.baseName, !isAlwaysHave(menu.baseName, alwaysHaveMap));
+              const turningOn = !isAlwaysHave(menu.baseName, alwaysHaveMap);
+              pinStaple(menu.baseName, turningOn);
+              // The materialized list keeps plan-wizard extras on Active even
+              // once they're staples (you put them there on purpose). But marking
+              // "always have" is the explicit "this is a standing staple, not
+              // this week's buy" — so drop the concrete row off Active. pinStaple
+              // has already put it in the pantry.
+              if (turningOn) {
+                if (menu.members) {
+                  for (const m of menu.members) if (m.extraId) removeExtra(m.extraId);
+                } else if (menu.extraId) {
+                  removeExtra(menu.extraId);
+                }
+              }
               setMenu(null);
             }}
             // Only offered on a merged row — undoes the combine.

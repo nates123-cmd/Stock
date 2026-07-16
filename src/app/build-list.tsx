@@ -365,11 +365,15 @@ export default function BuildListScreen() {
             // Sentinel so the shopping list keeps plan-wizard items on ACTIVE and
             // never routes them to Staples, even if the item is also a staple.
             originId: 'plan-wizard',
+            // Structured recipe titles drive the BY RECIPE grouping (one / Multiple).
+            recipes: c.recipes,
           };
         }),
       );
     }
-    router.replace('/shopping');
+    // Land on the real Shop TAB (with tab chrome), not the standalone /shopping
+    // stack screen (which showed a "Done" header — an extra step).
+    router.replace({ pathname: '/', params: { segment: 'shop' } });
   };
 
   /* ---------- render ---------- */
