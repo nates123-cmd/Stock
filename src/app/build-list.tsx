@@ -109,12 +109,29 @@ export default function BuildListScreen() {
    *  always-have pin (not just pantry isStaple) is what makes marking an
    *  ingredient always-have in recipe 1 reflect in recipes 2/3/4 — later steps
    *  read the default, which now sees the fresh pin. */
+  // FUZZY pantry match. A recipe's "salt" should match kosher/sea/flaky salt in
+  // the pantry; "Parmesan or Pecorino Romano" matches parmesan. Uses the shopping
+  // list's looksLikeSameItem (single-word + same base-noun catches salt→kosher
+  // salt; prefix catches parmesan→grated parmesan), and splits "X or Y" so
+  // either alternative can match. Returns the matched pantry item (to show the
+  // assumption) or null.
+  const pantryMatchFor = (name: string) => {
+    const alts = name.split(/\s+or\s+/i).map((a) => a.trim()).filter(Boolean);
+    for (const alt of alts.length ? alts : [name]) {
+      const hit = pantryItems.find((p) => looksLikeSameItem(alt, p.canonicalName));
+      if (hit) return hit;
+    }
+    return null;
+  };
   const defaultSection = (name: string): Section => {
     const k = matchKey(name);
     // always-have map is keyed by lowercase-trim (have.ts), not matchKey.
     if (stapleKeys.has(k) || alwaysHaveMap[name.toLowerCase().trim()]) return 'have';
     const st = statusByKey.get(k);
     if (st === 'fine' || st === 'low') return 'have';
+    // Loose: anything the pantry covers (fuzzy) and isn't out → you have it.
+    const hit = pantryMatchFor(name);
+    if (hit && (hit.status ?? 'fine') !== 'out') return 'have';
     return 'shop';
   };
 
@@ -437,6 +454,7 @@ export default function BuildListScreen() {
           recipe={recipe}
           decisionFor={decisionFor}
           statusFor={statusFor}
+          pantryMatchFor={pantryMatchFor}
           onToggleSection={(ing) =>
             setDecision(recipe.id, ing.id, {
               section: decisionFor(recipe, ing).section === 'shop' ? 'have' : 'shop',
@@ -713,6 +731,7 @@ function RecipeStep({
   onRemove,
   onAlwaysHave,
   onOpenDetail,
+  pantryMatchFor,
   onBack,
   onNext,
   isLast,
@@ -724,6 +743,7 @@ function RecipeStep({
   onRemove: (ing: Ingredient) => void;
   onAlwaysHave: (ing: Ingredient) => void;
   onOpenDetail: (ing: Ingredient) => void;
+  pantryMatchFor: (name: string) => { canonicalName: string } | null | undefined;
   onBack: () => void;
   onNext: () => void;
   isLast: boolean;
@@ -741,6 +761,12 @@ function RecipeStep({
   // SWIPE-LEFT reveals Remove (off the list — you have it, don't always-have it).
   const Row = ({ ing, section }: { ing: Ingredient; section: Section }) => {
     const low = statusFor(ing.canonicalName) === 'low';
+    // Assumption flag: this row is in "Have" because a DIFFERENTLY-named pantry
+    // item fuzzy-matched it (recipe "salt" → your "kosher salt"). Surface it so
+    // you can veto (tap to move it to Shop for).
+    const match = section === 'have' ? pantryMatchFor(ing.canonicalName) : null;
+    const fuzzy =
+      match && matchKey(match.canonicalName) !== matchKey(ing.canonicalName);
     const swipeRef = useRef<SwipeableMethods | null>(null);
     const onOpen = (dir: 'left' | 'right') => {
       if (dir === 'right') {
@@ -796,9 +822,14 @@ function RecipeStep({
           <Numeric color="textMuted" style={styles.ingAmt}>
             {ing.amount != null ? formatAmount(ing.amount, ing.unit) : ''}
           </Numeric>
-          <Text style={styles.flex} numberOfLines={1}>
-            {ing.canonicalName}
-          </Text>
+          <View style={styles.flex}>
+            <Text numberOfLines={1}>{ing.canonicalName}</Text>
+            {fuzzy && match ? (
+              <Text variant="sectionLabel" color="accent" numberOfLines={1}>
+                have “{match.canonicalName}” — covered?
+              </Text>
+            ) : null}
+          </View>
           {low ? (
             <View style={styles.lowPill}>
               <Text variant="sectionLabel" color="warn">
