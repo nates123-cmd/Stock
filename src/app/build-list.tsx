@@ -365,11 +365,15 @@ export default function BuildListScreen() {
             // Sentinel so the shopping list keeps plan-wizard items on ACTIVE and
             // never routes them to Staples, even if the item is also a staple.
             originId: 'plan-wizard',
+            // Structured recipe titles drive the BY RECIPE grouping (one / Multiple).
+            recipes: c.recipes,
           };
         }),
       );
     }
-    router.replace('/shopping');
+    // Land on the real Shop TAB (with tab chrome), not the standalone /shopping
+    // stack screen (which showed a "Done" header — an extra step).
+    router.replace({ pathname: '/', params: { segment: 'shop' } });
   };
 
   /* ---------- render ---------- */
@@ -459,7 +463,15 @@ export default function BuildListScreen() {
           statusFor={statusFor}
           pantryMatchFor={pantryMatchFor}
           isStaple={(name) => stapleKeys.has(matchKey(name))}
-          onConfirmCovered={(ing) => setDecision(recipe.id, ing.id, { confirmed: true })}
+          onConfirmCovered={(ing) =>
+            // Keep it in Already have — pass the RESOLVED section explicitly, else
+            // setDecision's fallback (no prior decision) seeds section:'shop' and
+            // a ✓ on a default-Have row would flip it to Shop for.
+            setDecision(recipe.id, ing.id, {
+              section: decisionFor(recipe, ing).section,
+              confirmed: true,
+            })
+          }
           onPushToShop={(ing) => setDecision(recipe.id, ing.id, { section: 'shop' })}
           onToggleSection={(ing) =>
             setDecision(recipe.id, ing.id, {
@@ -875,12 +887,12 @@ function RecipeStep({
               style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
               accessibilityRole="button"
               accessibilityLabel={`${ing.canonicalName}. Tap to move; swipe right to always have; swipe left to remove; long-press for options.`}>
-              <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
-                {displayQty}
-              </Numeric>
               <View style={styles.flex}>
                 <Text numberOfLines={1}>{displayName}</Text>
               </View>
+              <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
+                {displayQty}
+              </Numeric>
             </Pressable>
             {badge ? (
               <View style={badge.style}>
@@ -1041,7 +1053,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingLeft: 108, // align under the name (amount column 92 + gaps)
+    paddingLeft: 4, // name is now the left column, so the prompt aligns at left
     paddingRight: 4,
     paddingBottom: 10,
   },
