@@ -35,7 +35,22 @@ export function isAlwaysHave(
   if (alwaysMap[raw]) return true;
   const base = baseIngredient(name);
   for (const pinned of Object.keys(alwaysMap)) {
-    if (baseIngredient(pinned) === base) return true;
+    if (alwaysMap[pinned] && baseIngredient(pinned) === base) return true;
   }
   return false;
+}
+
+/**
+ * STRICT variant: is THIS exact name pinned always-have? Only the exact /
+ * legacy-raw key — NOT the loose base-noun match. Used for the detail-sheet
+ * toggle, whose label + action operate on this one item: a base-noun collision
+ * (another "…vinegar" pinned) must not make an un-pinned "white wine vinegar"
+ * read as "Remove always have".
+ */
+export function isExactAlwaysHave(
+  name: string,
+  alwaysMap: Record<string, unknown>,
+): boolean {
+  if (alwaysMap[alwaysHaveKey(name)]) return true;
+  return !!alwaysMap[name.toLowerCase().trim()];
 }

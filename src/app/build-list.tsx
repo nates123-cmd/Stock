@@ -13,6 +13,7 @@ import { useRecipeStore } from '@/store/recipes';
 import { usePantryStore } from '@/store/pantry';
 import { useHaveStore } from '@/store/have';
 import { useExtrasStore } from '@/store/extras';
+import { useSynonymsStore } from '@/store/synonyms';
 import { dateKey } from '@/lib/week';
 import { matchKey, looksLikeSameItem } from '@/lib/pantry';
 import { formatAmount } from '@/lib/format';
@@ -62,6 +63,8 @@ export default function BuildListScreen() {
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
   const setAlways = useHaveStore((s) => s.setAlways);
   const addExtras = useExtrasStore((s) => s.add);
+  const learnSynonym = useSynonymsStore((s) => s.learn);
+  const declineMatch = useSynonymsStore((s) => s.decline);
 
   // Planned recipes in the rolling window, DEDUPED (a recipe planned twice is
   // one shopping decision). Order = plan date.
@@ -251,7 +254,14 @@ export default function BuildListScreen() {
   const mergeChecked = () => {
     const picked = effGroups.filter((g) => checked.has(g.key));
     if (picked.length < 2) return;
-    const canon = picked.reduce((a, b) => (b.name.length < a.name.length ? b : a)).key;
+    const canonGroup = picked.reduce((a, b) => (b.name.length < a.name.length ? b : a));
+    const canon = canonGroup.key;
+    // LEARN this merge so we don't ask again: link every other picked name to the
+    // canonical one ("cherry tomatoes" = "Cherry or grape tomatoes"). From now on
+    // looksLikeSameItem treats them as the same everywhere.
+    for (const g of picked) {
+      if (g.key !== canon) learnSynonym(canonGroup.name, g.name);
+    }
     setMergeOverride((prev) => {
       const next = { ...prev };
       for (const g of picked) for (const m of g.members) next[m] = canon;
@@ -480,7 +490,16 @@ export default function BuildListScreen() {
               confirmed: true,
             });
           }}
-          onPushToShop={(ing) => setDecision(recipe.id, ing.id, { section: 'shop' })}
+          onPushToShop={(ing) => {
+            // Declining a fuzzy match teaches the app these two are NOT the same,
+            // so the shop item won't inherit the pantry item's low/out tag (or get
+            // re-matched) again — "apple cider" ≠ your low "apple cider vinegar".
+            const match = pantryMatchFor(ing.canonicalName);
+            if (match && matchKey(match.canonicalName) !== matchKey(ing.canonicalName)) {
+              declineMatch(ing.canonicalName, match.canonicalName);
+            }
+            setDecision(recipe.id, ing.id, { section: 'shop' });
+          }}
           onToggleSection={(ing) =>
             setDecision(recipe.id, ing.id, {
               section: decisionFor(recipe, ing).section === 'shop' ? 'have' : 'shop',

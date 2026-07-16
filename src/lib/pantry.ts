@@ -9,6 +9,7 @@
  */
 import type { Ingredient, PantryItem, ShoppingCategory } from '@/types';
 import { monthShort } from '@/lib/format';
+import { areApart, areSynonyms } from '@/lib/synonyms';
 
 const DAY = 86_400_000;
 
@@ -223,7 +224,12 @@ export function looksLikeSameItem(a: string, b: string): boolean {
   const ka = matchKey(a);
   const kb = matchKey(b);
   if (!ka || !kb) return false;
+  // A pair the user declined ("apple cider" is NOT "apple cider vinegar") — never
+  // the same, even if the prefix/base rules below would match. Negative wins.
+  if (areApart(a, b)) return false;
   if (ka === kb) return true;
+  // A pair the user manually merged before — learned, so we don't ask again.
+  if (areSynonyms(a, b)) return true;
   if (ka.startsWith(kb) || kb.startsWith(ka)) return true;
   const oneIsPlain = ka.split(' ').length === 1 || kb.split(' ').length === 1;
   return oneIsPlain && baseIngredient(a) === baseIngredient(b);

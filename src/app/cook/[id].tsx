@@ -591,7 +591,7 @@ function FocusedBody({
           <Glyph name="back" size={20} color="text" />
         </Pressable>
         <Button
-          label={stepIndex >= steps.length - 1 ? 'Done · finish' : 'Done · next'}
+          label={stepIndex >= steps.length - 1 ? 'Done' : 'Next'}
           glyph="next"
           flex
           onPress={onNext}

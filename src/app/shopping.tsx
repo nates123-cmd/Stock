@@ -30,8 +30,9 @@ import { usePantryStore } from '@/store/pantry';
 import { useShopMetaStore } from '@/store/shopMeta';
 import { usePushedStore } from '@/store/pushed';
 import type { PantryLocation, PantryStatus } from '@/types';
-import { baseIngredient, matchKey } from '@/lib/pantry';
-import { alwaysHaveKey, isAlwaysHave } from '@/lib/alwaysHave';
+import { baseIngredient, matchKey, looksLikeSameItem } from '@/lib/pantry';
+import { areApart } from '@/lib/synonyms';
+import { alwaysHaveKey, isAlwaysHave, isExactAlwaysHave } from '@/lib/alwaysHave';
 import {
   STORES,
   storeLabel,
@@ -157,21 +158,23 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
   const setPantryStatus = usePantryStore((s) => s.setStatus);
   const statusByKey = useMemo(() => {
-    const m = new Map<string, PantryStatus>();
+    const m = new Map<string, { status: PantryStatus; name: string }>();
     for (const p of pantryItems) {
       const s = p.status ?? 'fine';
       if (s === 'fine') continue; // skip the default; only flag interesting states
-      m.set(matchKey(p.canonicalName), s);
+      m.set(matchKey(p.canonicalName), { status: s, name: p.canonicalName });
     }
     return m;
   }, [pantryItems]);
   const statusFor = (name: string): PantryStatus | undefined => {
     const k = matchKey(name);
-    if (statusByKey.has(k)) return statusByKey.get(k);
-    // Allow loose match: pantry record's key is a substring of the shopping
-    // canonical (or vice versa). Mirrors the applyPaste/restock logic.
-    for (const [pk, s] of statusByKey) {
-      if (pk.startsWith(k) || k.startsWith(pk)) return s;
+    if (statusByKey.has(k)) return statusByKey.get(k)!.status;
+    // Allow loose match: pantry record's key is a prefix of the shopping
+    // canonical (or vice versa). Mirrors the applyPaste/restock logic — but skip
+    // a pair the user DECLINED as a fuzzy match, so "apple cider" doesn't inherit
+    // the low/out tag from "apple cider vinegar".
+    for (const [pk, v] of statusByKey) {
+      if ((pk.startsWith(k) || k.startsWith(pk)) && !areApart(name, v.name)) return v.status;
     }
     return undefined;
   };
@@ -1886,7 +1889,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             qty={menu.qty === 'as needed' ? '' : menu.qty}
             extraId={menu.extraId}
             meta={metaFor(menu.baseName)}
-            isAlways={isAlwaysHave(menu.baseName, alwaysHaveMap)}
+            isAlways={isExactAlwaysHave(menu.baseName, alwaysHaveMap)}
             // Edit the item itself, through the same path as the single-tap
             // quick edit — the two can't drift apart.
             onSaveEdit={(name, qty) => {
@@ -1900,7 +1903,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             }}
             onSetField={(patch) => setShopMeta(menu.baseName, patch)}
             onToggleAlways={() => {
-              const turningOn = !isAlwaysHave(menu.baseName, alwaysHaveMap);
+              const turningOn = !isExactAlwaysHave(menu.baseName, alwaysHaveMap);
               pinStaple(menu.baseName, turningOn);
               // The materialized list keeps plan-wizard extras on Active even
               // once they're staples (you put them there on purpose). But marking
@@ -2443,23 +2446,6 @@ function extraQty(ex: ExtraItem): string {
   return formatAmount(ex.amount, ex.unit) || 'some';
 }
 
-/**
- * Do these two shopping-list names refer to the same ingredient? Deliberately
- * loose but not reckless:
- *  - prefix either way  → "shallot"/"shallots", "basil"/"basil leaves"
- *  - same head-noun, but only when one side is a single word → "tomatoes"/"ripe
- *    tomatoes". The single-word guard is what stops "olive oil" from being
- *    suggested as a merge with "sesame oil".
- */
-function looksLikeSameItem(a: string, b: string): boolean {
-  const ka = matchKey(a);
-  const kb = matchKey(b);
-  if (!ka || !kb) return false;
-  if (ka === kb) return true;
-  if (ka.startsWith(kb) || kb.startsWith(ka)) return true;
-  const oneIsPlain = ka.split(' ').length === 1 || kb.split(' ').length === 1;
-  return oneIsPlain && baseIngredient(a) === baseIngredient(b);
-}
 
 /** The cleanest shopping name in a group — fewest words, then shortest. */
 function simplestRow<T extends { name: string; baseName: string }>(rows: T[]): T {

@@ -227,7 +227,7 @@ export default function MealCookScreen() {
             <Button label="Meal ready · done" glyph="done" flex onPress={() => router.back()} />
           ) : (
             <Button
-              label={stepIndex >= steps.length - 1 ? 'Done · finish' : 'Done · next step'}
+              label={stepIndex >= steps.length - 1 ? 'Done' : 'Next'}
               glyph="next"
               flex
               onPress={advance}
