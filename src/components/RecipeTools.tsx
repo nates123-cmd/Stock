@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -16,7 +16,6 @@ import { FilterChip, ChipRow } from './Chip';
 import { colors } from '@/design';
 import { convertToGrams } from '@/lib/parsing';
 import { formatAmount } from '@/lib/format';
-import { usePrefsStore } from '@/store/prefs';
 import type { Ingredient, Recipe } from '@/types';
 
 /**
@@ -50,8 +49,9 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
   const [convertPreview, setConvertPreview] = useState<
     Array<{ ing: Ingredient; grams: number }> | null
   >(null);
-  /** ids the user has unchecked in the preview (default = all on). */
-  const [convertOff, setConvertOff] = useState<Set<string>>(new Set());
+  /** ids the user has CHECKED to convert (opt-in — default none, so opening the
+   *  tool asks what to convert instead of converting everything). */
+  const [convertOn, setConvertOn] = useState<Set<string>>(new Set());
   /** Non-null while the Scale overlay is open; carries the proposed serves. */
   const [scalingTo, setScalingTo] = useState<number | null>(null);
   /** Scale overlay mode: by servings (×N) or pinned to one ingredient's amount. */
@@ -60,45 +60,9 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
   const [pivotId, setPivotId] = useState<string | null>(null);
   const [pivotTarget, setPivotTarget] = useState('');
 
-  // Sticky "to grams". Once you apply a conversion, `preferGrams` turns on and
-  // every recipe auto-converts the first time it's opened — so you never press
-  // the button again. See [[store/prefs]].
-  const preferGrams = usePrefsStore((s) => s.preferGrams);
-  const setPreferGrams = usePrefsStore((s) => s.setPreferGrams);
-  // Guard: don't re-attempt auto-convert for the same recipe every render.
-  const autoTried = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!preferGrams) return;
-    if (autoTried.current.has(recipe.id)) return;
-    // Anything non-gram with a real amount + unit is convertible.
-    const hasConvertible = recipe.ingredients.some(
-      (i) => i.amount != null && i.amount > 0 && i.unit && !/^(g|kg|mg)$/i.test(i.unit.trim()),
-    );
-    if (!hasConvertible) return;
-    autoTried.current.add(recipe.id);
-    let alive = true;
-    void (async () => {
-      try {
-        const results = await convertToGrams(recipe.ingredients);
-        if (!alive || results.length === 0) return;
-        const byId = new Map(results.map((r) => [r.id, r.grams]));
-        const updated = recipe.ingredients.map((ing) => {
-          const grams = byId.get(ing.id);
-          return grams == null ? ing : { ...ing, amount: grams, unit: 'g' };
-        });
-        await onSave({ ...recipe, ingredients: updated, modifiedAt: new Date() });
-      } catch {
-        // Offline / no Claude / parse fail — leave the recipe as-is, silently.
-        // Allow a later retry for this recipe.
-        autoTried.current.delete(recipe.id);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preferGrams, recipe.id]);
+  // "To grams" always PROMPTS now (opt-in checklist below) — no silent sticky
+  // auto-convert. Nate: converting everything on open, without asking, was wrong;
+  // he wants to pick what to convert each time.
 
   const previewConvertToGrams = async () => {
     setConverting(true);
@@ -116,7 +80,7 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
         .filter((i) => byId.has(i.id))
         .map((ing) => ({ ing, grams: byId.get(ing.id) as number }));
       setConvertPreview(candidates);
-      setConvertOff(new Set());
+      setConvertOn(new Set()); // opt-in: nothing pre-selected — you pick.
     } catch (e) {
       onHint(e instanceof Error ? e.message : 'Conversion failed.');
     } finally {
@@ -126,7 +90,8 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
 
   const applyConversionPreview = async () => {
     if (!convertPreview) return;
-    const toApply = convertPreview.filter((c) => !convertOff.has(c.ing.id));
+    // Opt-in: convert ONLY the ones you checked.
+    const toApply = convertPreview.filter((c) => convertOn.has(c.ing.id));
     if (toApply.length === 0) {
       setConvertPreview(null);
       return;
@@ -140,20 +105,25 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
       return { ...ing, amount: grams, unit: 'g' };
     });
     await onSave({ ...recipe, ingredients: updated, modifiedAt: new Date() });
-    // Make it sticky: from now on, new recipes auto-convert to grams on open.
-    if (!preferGrams) setPreferGrams(true);
     onHint(
-      `Converted ${toApply.length} ${toApply.length === 1 ? 'ingredient' : 'ingredients'} to grams. New recipes will convert automatically.`,
+      `Converted ${toApply.length} ${toApply.length === 1 ? 'ingredient' : 'ingredients'} to grams.`,
     );
     setConvertPreview(null);
   };
 
   const toggleConvertCandidate = (id: string) =>
-    setConvertOff((prev) => {
+    setConvertOn((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
+    });
+
+  /** Toggle every candidate on/off at once. */
+  const toggleAllCandidates = () =>
+    setConvertOn((prev) => {
+      const all = convertPreview ?? [];
+      return prev.size === all.length ? new Set() : new Set(all.map((c) => c.ing.id));
     });
 
   const applyScale = async () => {
@@ -368,13 +338,20 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
       <Overlay visible={convertPreview != null} onClose={() => setConvertPreview(null)}>
         {convertPreview ? (
           <View style={styles.convertSheet}>
-            <Text variant="recipeTitle">Convert to grams</Text>
+            <View style={styles.convertHead}>
+              <Text variant="recipeTitle">Convert to grams</Text>
+              <Pressable onPress={toggleAllCandidates} hitSlop={8}>
+                <Text variant="sectionLabel" color="accent">
+                  {convertOn.size === convertPreview.length ? 'None' : 'All'}
+                </Text>
+              </Pressable>
+            </View>
             <Text color="textFaint" style={styles.convertHint}>
-              Uncheck anything you'd rather keep in its original units.
+              Check the ingredients you want converted to grams.
             </Text>
             <ScrollView style={styles.convertList}>
               {convertPreview.map(({ ing, grams }) => {
-                const on = !convertOff.has(ing.id);
+                const on = convertOn.has(ing.id);
                 return (
                   <Pressable
                     key={ing.id}
@@ -399,10 +376,10 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
                 onPress={() => setConvertPreview(null)}
               />
               <Button
-                label={`Convert ${convertPreview.length - convertOff.size}`}
+                label={convertOn.size > 0 ? `Convert ${convertOn.size}` : 'Convert'}
                 glyph="done"
                 flex
-                disabled={convertPreview.length - convertOff.size === 0}
+                disabled={convertOn.size === 0}
                 onPress={applyConversionPreview}
               />
             </View>
@@ -456,6 +433,11 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   convertSheet: { gap: 12 },
+  convertHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   convertHint: { fontStyle: 'italic', lineHeight: 18 },
   convertList: { maxHeight: 320 },
   convertRow: {
