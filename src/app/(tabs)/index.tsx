@@ -425,16 +425,11 @@ export default function PlanScreen() {
               </View>
             }>
             <Button
-              label="Shopping list"
+              label="Build shopping list"
               glyph="next"
               flex
               disabled={plannedRecipes.length === 0}
-              onPress={() =>
-                router.push({
-                  pathname: '/shopping-confirm',
-                  params: { days: String(daysAhead) },
-                })
-              }
+              onPress={() => router.push('/build-list')}
             />
           </BottomActionBar>
         </>
