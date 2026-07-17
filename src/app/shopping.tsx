@@ -1544,9 +1544,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         <Pressable
           onPress={() => commitEdit(row)}
           hitSlop={8}
-          style={styles.editDelete}
+          style={styles.editSave}
+          accessibilityRole="button"
           accessibilityLabel={`Save ${row.name}`}>
-          <Glyph name="done" size={18} color="ok" />
+          <Glyph name="done" size={20} color="bg" />
         </Pressable>
       </View>
     ) : (
@@ -2970,6 +2971,16 @@ const styles = StyleSheet.create({
   editName: { flex: 2 },
   editQtyInput: { flex: 1 },
   editDelete: { padding: 6 },
+  // Prominent save button — a filled green check, so it's obvious the edit needs
+  // committing (tapping another row abandons it).
+  editSave: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: colors.ok,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   rowSurface: { backgroundColor: colors.bg },
   addRow: {
     flexDirection: 'row',
