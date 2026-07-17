@@ -29,6 +29,7 @@ import { useExtrasStore, type ExtraItem } from '@/store/extras';
 import { usePantryStore } from '@/store/pantry';
 import { useShopMetaStore } from '@/store/shopMeta';
 import { usePushedStore } from '@/store/pushed';
+import { useCartFillStore } from '@/store/cartFill';
 import type { PantryLocation, PantryStatus } from '@/types';
 import { baseIngredient, matchKey, looksLikeSameItem } from '@/lib/pantry';
 import { areApart } from '@/lib/synonyms';
@@ -127,6 +128,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const restorePushed = usePushedStore((s) => s.restore);
   const clearPushed = usePushedStore((s) => s.clear);
   const hydratePushed = usePushedStore((s) => s.hydrate);
+  const startCartFill = useCartFillStore((s) => s.start);
   useEffect(() => {
     void hydratePushed();
   }, [hydratePushed]);
@@ -1388,6 +1390,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       // poll effect); whatever it can't get STAYS, so it doesn't get silently
       // dropped and never bought.
       setJob({ id, status: 'queued', rows, retailer: 'wegmans' });
+      // Background status banner (visible from any tab).
+      startCartFill({ jobId: id, retailer: 'wegmans', total: rows.length, startedAtMs: Date.now() });
       setHint('Filling your Wegmans cart… this takes a minute.');
       clearSelection();
     } catch (e) {
@@ -1466,6 +1470,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         'costco',
       );
       setJob({ id, status: 'queued', rows, retailer: 'costco' });
+      startCartFill({ jobId: id, retailer: 'costco', total: rows.length, startedAtMs: Date.now() });
       setHint('Filling your Costco cart… this takes a minute.');
       clearSelection();
     } catch (e) {
