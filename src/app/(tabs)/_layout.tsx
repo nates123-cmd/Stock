@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/haptic-tab';
-import { Glyph, CartFillBanner } from '@/components';
+import { Glyph } from '@/components';
 import { colors, fonts, type GlyphName } from '@/design';
 
 /**
@@ -76,8 +76,6 @@ export default function TabLayout() {
         <Tabs.Screen name="bench" options={{ href: null }} />
         <Tabs.Screen name="pantry" options={{ href: null }} />
       </Tabs>
-      {/* Background cart-fill status — floats over every tab, above the bar. */}
-      <CartFillBanner bottomOffset={bottomInset + 52} />
     </>
   );
 }
