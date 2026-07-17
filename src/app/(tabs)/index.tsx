@@ -610,11 +610,7 @@ function DayMeals({
         </Numeric>
       </View>
 
-      {empty ? (
-        <Text color="textFaint" style={styles.dayEmpty}>
-          Nothing planned.
-        </Text>
-      ) : (
+      {empty ? null : (
         meals.map((meal) =>
           meal.dishes.length === 0 ? null : (
             <View key={meal.id} style={styles.meal}>
@@ -1042,7 +1038,6 @@ const styles = StyleSheet.create({
   },
   dayHead: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   dayHeadNum: { fontSize: 19 },
-  dayEmpty: { fontStyle: 'italic', paddingVertical: 2 },
   meal: { gap: 6 },
   mealType: { textTransform: 'capitalize' },
   dish: {
