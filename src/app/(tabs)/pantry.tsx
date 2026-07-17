@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
 import {
   Screen,
   Heading,
@@ -88,7 +87,6 @@ function sortByStatus(items: PantryItem[]): PantryItem[] {
  * arrived and roughly how long it lasts.
  */
 export default function PantryScreen() {
-  const router = useRouter();
   const items = usePantryStore((s) => s.items);
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
   const cycleStatus = usePantryStore((s) => s.cycleStatus);
@@ -176,17 +174,6 @@ export default function PantryScreen() {
     setTimeout(() => setPushedToShop(null), 4000);
   };
 
-  const last = useMemo(() => {
-    if (items.length === 0) return null;
-    const latest = items.reduce(
-      (m, i) => (i.acquiredAt.getTime() > m.getTime() ? i.acquiredAt : m),
-      items[0]!.acquiredAt,
-    );
-    const day = latest.toDateString();
-    const count = items.filter((i) => i.acquiredAt.toDateString() === day).length;
-    return { date: latest, count };
-  }, [items]);
-
   /**
    * Everything that ISN'T already surfaced in Running-low at the top, grouped by
    * shelf category. Two deliberate changes:
@@ -237,30 +224,6 @@ export default function PantryScreen() {
             {addToast}
           </Text>
         ) : null}
-
-        <Card style={styles.lastCard}>
-          <View style={styles.flex}>
-            <SectionLabel color="textMuted">Last Instacart</SectionLabel>
-            <View style={styles.lastMeta}>
-              {last ? (
-                <>
-                  <Text variant="recipeTitle">{shortDate(last.date)}</Text>
-                  <Numeric color="textMuted">
-                    {' '}
-                    · {last.count} item{last.count === 1 ? '' : 's'}
-                  </Numeric>
-                </>
-              ) : (
-                <Text color="textMuted">No orders yet</Text>
-              )}
-            </View>
-          </View>
-          <Button
-            label="Paste order"
-            glyph="add"
-            onPress={() => router.push('/pantry-paste')}
-          />
-        </Card>
 
         {lowOrOut.length > 0 ? (
           <View style={styles.section}>
@@ -315,7 +278,7 @@ export default function PantryScreen() {
         {items.length === 0 ? (
           <View style={styles.empty}>
             <Text color="textMuted">Nothing tracked yet.</Text>
-            <Text color="textFaint">Paste an order or add an item to fill the pantry.</Text>
+            <Text color="textFaint">Add an item to fill the pantry.</Text>
             <View style={styles.emptyActions}>
               <Button label="Add item" glyph="add" onPress={openAdd} />
             </View>
@@ -688,12 +651,6 @@ const styles = StyleSheet.create({
     gap: 16,
     paddingTop: 6,
   },
-  lastCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  lastMeta: { flexDirection: 'row', alignItems: 'baseline', paddingTop: 4 },
   section: { paddingTop: 18 },
   sectionLabel: { paddingBottom: 8 },
   sectionCard: { padding: 4, gap: 0 },
