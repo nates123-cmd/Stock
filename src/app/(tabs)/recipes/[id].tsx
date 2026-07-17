@@ -111,8 +111,14 @@ export default function RecipeDetail() {
       note: (latest.note ?? '').trim(),
       at: new Date(latest.finishedAt ?? latest.startedAt),
       olderCount: withNotes.length - 1,
+      // Every cook note, newest-first, for the "See full history" view.
+      history: withNotes.map((c) => ({
+        note: (c.note ?? '').trim(),
+        at: new Date(c.finishedAt ?? c.startedAt),
+      })),
     };
   }, [cooks, id]);
+  const [showNoteHistory, setShowNoteHistory] = useState(false);
 
   // Always land on the Recipes library — the back button is literally
   // labeled "Recipes", and following history dropped users back into Plan
@@ -283,11 +289,24 @@ export default function RecipeDetail() {
             </SectionLabel>
             <Text variant="bodyStrong">{lastCookNote.note}</Text>
             {lastCookNote.olderCount > 0 ? (
-              <Text color="textFaint">
-                {lastCookNote.olderCount} earlier note
-                {lastCookNote.olderCount === 1 ? '' : 's'}
-              </Text>
+              <Pressable onPress={() => setShowNoteHistory((v) => !v)} hitSlop={6}>
+                <Text variant="sectionLabel" color="accent">
+                  {showNoteHistory
+                    ? 'Hide history'
+                    : `See full history · ${lastCookNote.olderCount} earlier note${
+                        lastCookNote.olderCount === 1 ? '' : 's'
+                      }`}
+                </Text>
+              </Pressable>
             ) : null}
+            {showNoteHistory
+              ? lastCookNote.history.slice(1).map((h, i) => (
+                  <View key={i} style={styles.noteHistItem}>
+                    <SectionLabel color="textFaint">{shortDate(h.at)}</SectionLabel>
+                    <Text>{h.note}</Text>
+                  </View>
+                ))
+              : null}
           </Card>
         ) : null}
 
@@ -819,6 +838,13 @@ const styles = StyleSheet.create({
   content: { padding: layout.screenPadding, paddingBottom: 48, gap: 4 },
   missing: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   lastNote: { gap: 4 },
+  noteHistItem: {
+    gap: 2,
+    paddingTop: 8,
+    marginTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   titleFlag: { paddingTop: 5 },
   title: { fontSize: 26, lineHeight: 32, paddingTop: 6 },
