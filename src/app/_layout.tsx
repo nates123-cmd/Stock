@@ -10,6 +10,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { colors } from '@/design';
+import { CartFillBanner } from '@/components';
 import { useRecipeStore } from '@/store/recipes';
 import { usePlanStore } from '@/store/plan';
 import { usePantryStore } from '@/store/pantry';
@@ -161,6 +162,9 @@ export default function RootLayout() {
               options={{ headerShown: false, presentation: 'modal' }}
             />
           </Stack>
+          {/* Cart-fill status — mounted at the ROOT so the progress bar + result
+              float over EVERY screen (tabs and modals), not just the tab bar. */}
+          <CartFillBanner />
           <StatusBar style="dark" />
         </ThemeProvider>
       </SafeAreaProvider>

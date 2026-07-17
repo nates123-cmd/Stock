@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Text } from './Text';
 import { colors } from '@/design';
@@ -17,13 +18,18 @@ import { useCartFillStore } from '@/store/cartFill';
  */
 const EST_FILL_MS = 35_000;
 
-export function CartFillBanner({ bottomOffset = 12 }: { bottomOffset?: number }) {
+export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // Mounted at the ROOT so it floats over every screen (tabs AND modals). Default
+  // sits above where the tab bar would be; callers can override.
+  const offset = bottomOffset ?? Math.max(insets.bottom, 40) + 52;
   const jobId = useCartFillStore((s) => s.jobId);
   const status = useCartFillStore((s) => s.status);
   const retailer = useCartFillStore((s) => s.retailer);
   const total = useCartFillStore((s) => s.total);
   const added = useCartFillStore((s) => s.added);
+  const unavailable = useCartFillStore((s) => s.unavailable);
   const startedAtMs = useCartFillStore((s) => s.startedAtMs);
   const update = useCartFillStore((s) => s.update);
   const clear = useCartFillStore((s) => s.clear);
@@ -39,8 +45,12 @@ export function CartFillBanner({ bottomOffset = 12 }: { bottomOffset?: number })
       const s = await jobStatus(jobId);
       if (!alive || !s) return;
       if (s.status === 'done') {
-        const r = s.result as { added?: unknown[] } | null;
-        update({ status: 'done', added: Array.isArray(r?.added) ? r!.added!.length : null });
+        const r = s.result as { added?: unknown[]; unavailable?: unknown[] } | null;
+        update({
+          status: 'done',
+          added: Array.isArray(r?.added) ? r!.added!.length : null,
+          unavailable: Array.isArray(r?.unavailable) ? r!.unavailable!.length : null,
+        });
       } else if (s.status === 'error') {
         update({ status: 'error' });
       } else if (s.status !== status) {
@@ -78,13 +88,15 @@ export function CartFillBanner({ bottomOffset = 12 }: { bottomOffset?: number })
     status === 'error'
       ? `${store} cart fill hit a problem`
       : status === 'done'
-        ? `${store} cart filled${added != null ? ` · ${added} added` : ''}`
+        ? `${store} cart filled${added != null ? ` · ${added} added` : ''}${
+            unavailable ? ` · ${unavailable} unavailable` : ''
+          }`
         : `Filling ${store} cart… ${total} item${total === 1 ? '' : 's'}`;
 
   return (
     <Pressable
       onPress={() => router.push({ pathname: '/', params: { segment: 'shop' } })}
-      style={[styles.wrap, { bottom: bottomOffset }]}
+      style={[styles.wrap, { bottom: offset }]}
       accessibilityRole="button"
       accessibilityLabel={`${label}. Tap to open the shopping list.`}>
       <View style={styles.row}>
@@ -119,6 +131,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     right: 12,
+    zIndex: 1000, // float over screen content + modals
     backgroundColor: colors.accentDeep,
     borderRadius: 12,
     paddingHorizontal: 14,
