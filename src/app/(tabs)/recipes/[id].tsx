@@ -43,6 +43,8 @@ export default function RecipeDetail() {
   const save = useRecipeStore((s) => s.save);
   const toggleFavorite = useRecipeStore((s) => s.toggleFavorite);
   const toggleToTry = useRecipeStore((s) => s.toggleToTry);
+  const removeRecipe = useRecipeStore((s) => s.remove);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // Autocomplete source for the tag editor — every tag used anywhere in the
   // library, deduped case-insensitively (spec §6 tag editor).
   const allTagsAcrossLibrary = useMemo(() => {
@@ -433,7 +435,43 @@ export default function RecipeDetail() {
         {!clean ? (
           <SourceLink source={recipe.source} />
         ) : null}
+
+        {!clean ? (
+          <Pressable
+            onPress={() => setConfirmDelete(true)}
+            style={styles.deleteRecipe}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${recipe.title}`}>
+            <Text color="accent" variant="bodyStrong">
+              Delete recipe
+            </Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
+
+      <Overlay visible={confirmDelete} onClose={() => setConfirmDelete(false)}>
+        <View style={styles.deleteSheet}>
+          <Text variant="recipeTitle">Delete “{recipe.title}”?</Text>
+          <Text color="textMuted">This removes the recipe for good. Can’t be undone.</Text>
+          <View style={styles.deleteButtons}>
+            <Button
+              label="Cancel"
+              variant="secondary"
+              flex
+              onPress={() => setConfirmDelete(false)}
+            />
+            <Button
+              label="Delete"
+              flex
+              onPress={async () => {
+                setConfirmDelete(false);
+                await removeRecipe(recipe.id);
+                router.replace('/recipes');
+              }}
+            />
+          </View>
+        </View>
+      </Overlay>
 
       <Overlay visible={planning} onClose={() => setPlanning(false)}>
         <View style={styles.planSheet}>
@@ -920,6 +958,9 @@ const styles = StyleSheet.create({
   scaleHint: { fontStyle: 'italic', lineHeight: 18 },
   planSheet: { gap: 14 },
   planHint: { fontStyle: 'italic', lineHeight: 18 },
+  deleteRecipe: { alignItems: 'center', paddingVertical: 18, marginTop: 8 },
+  deleteSheet: { gap: 12 },
+  deleteButtons: { flexDirection: 'row', gap: 10, paddingTop: 4 },
   planList: { maxHeight: 320 },
   planRow: {
     flexDirection: 'row',
