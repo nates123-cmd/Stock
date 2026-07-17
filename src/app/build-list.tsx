@@ -940,24 +940,30 @@ function RecipeStep({
                   ? `have “${match.canonicalName}” — covered?`
                   : 'marked low — still have enough?'}
               </Text>
-              <GHPressable
+              {/* Plain RN Pressable (NOT the gesture-handler one): a small RNGH
+                  target nested in a Swipeable loses the tap to the pan gesture, so
+                  ✓ often didn't fire and the next tap hit the row → wrong section.
+                  A real press handler sidesteps the gesture system. */}
+              <Pressable
                 onPress={() => onConfirmCovered(ing)}
+                hitSlop={8}
                 style={[styles.answerBtn, styles.answerYes]}
                 accessibilityRole="button"
                 accessibilityLabel={`Yes — ${ing.canonicalName} is covered, keep in Already have`}>
                 <Text color="bg" variant="bodyStrong">
                   ✓
                 </Text>
-              </GHPressable>
-              <GHPressable
+              </Pressable>
+              <Pressable
                 onPress={() => onPushToShop(ing)}
+                hitSlop={8}
                 style={[styles.answerBtn, styles.answerNo]}
                 accessibilityRole="button"
                 accessibilityLabel={`No — move ${ing.canonicalName} to Shop for`}>
                 <Text color="bg" variant="bodyStrong">
                   ✕
                 </Text>
-              </GHPressable>
+              </Pressable>
             </View>
           ) : null}
         </View>
