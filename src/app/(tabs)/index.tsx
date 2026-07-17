@@ -78,10 +78,10 @@ export default function PlanScreen() {
 
   const [daysAhead, setDaysAhead] = useState(6); // today + next 5
   const [manage, setManage] = useState<{ meal: Meal; dish: Dish } | null>(null);
-  // The Plan tab hosts three segments in order Plan · Shop · Pantry, opening on
-  // Plan (Nate's call — the plan leads). Shop and Pantry embed the real screens;
-  // Plan is the meal model below.
-  const [segment, setSegment] = useState<'shop' | 'plan' | 'pantry'>('plan');
+  // The Plan tab hosts three segments in order Plan · Shop · Pantry. Opens on
+  // SHOP — the shopping list is the app's default landing (Nate's call). Shop and
+  // Pantry embed the real screens; Plan is the meal model below.
+  const [segment, setSegment] = useState<'shop' | 'plan' | 'pantry'>('shop');
   // Deep-link the segment: the "Build shopping list" wizard finishes by routing
   // here with ?segment=shop so it lands ON the real Shop tab (with tab chrome),
   // not the standalone /shopping stack screen (which showed a "Done" header).

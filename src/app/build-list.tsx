@@ -906,38 +906,33 @@ function RecipeStep({
             prompt (if any) below it — the ✓/✗ live OUTSIDE the Pressable so
             tapping them doesn't also toggle the row's section. */}
         <View style={styles.ingRow}>
-          <View style={styles.ingTop}>
-            {/* TAP = move Shop↔Have; SWIPE-RIGHT = always have; SWIPE-LEFT =
-                delete; LONG-PRESS = full detail sheet (edit + all actions). */}
-            <Pressable
-              onPress={() => onToggleSection(ing)}
-              onLongPress={() => onOpenDetail(ing)}
-              delayLongPress={400}
-              // @ts-expect-error web-only: stop iOS hijacking the long-press
-              style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
-              accessibilityRole="button"
-              accessibilityLabel={`${ing.canonicalName}. Tap to move; swipe right to always have; swipe left to remove; long-press for options.`}>
-              <View style={styles.flex}>
-                <Text numberOfLines={1}>{displayName}</Text>
-              </View>
-              <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
-                {displayQty}
-              </Numeric>
-            </Pressable>
-            {/* Fixed-width badge slot (always rendered, even empty) so the amount
-                column ends at the SAME x on every row — otherwise each amount
-                right-aligns against its own badge and a HAVE row's amount sits
-                further right than an ALWAYS HAVE row's. */}
-            <View style={styles.badgeSlot}>
-              {badge ? (
-                <View style={badge.style}>
+          {/* TAP = move Shop↔Have; SWIPE-RIGHT = always have; SWIPE-LEFT =
+              delete; LONG-PRESS = full detail sheet (edit + all actions). */}
+          <Pressable
+            onPress={() => onToggleSection(ing)}
+            onLongPress={() => onOpenDetail(ing)}
+            delayLongPress={400}
+            // @ts-expect-error web-only: stop iOS hijacking the long-press
+            style={[styles.ingMain, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
+            accessibilityRole="button"
+            accessibilityLabel={`${ing.canonicalName}. Tap to move; swipe right to always have; swipe left to remove; long-press for options.`}>
+            <View style={styles.flex}>
+              <Text numberOfLines={1}>{displayName}</Text>
+              {/* Badge sits UNDER the name (not in a right column) so the amount
+                  column stays aligned between Shop for and Already have. Hidden
+                  while a "covered?" prompt is up — resolve that first. */}
+              {badge && !showPrompt ? (
+                <View style={[badge.style, styles.badgeUnder]}>
                   <Text variant="sectionLabel" color={badge.color}>
                     {badge.label}
                   </Text>
                 </View>
               ) : null}
             </View>
-          </View>
+            <Numeric color="textMuted" style={styles.ingAmt} numberOfLines={2}>
+              {displayQty}
+            </Numeric>
+          </Pressable>
           {showPrompt ? (
             <View style={styles.coveredRow}>
               <Text variant="sectionLabel" color="accent" numberOfLines={1} style={styles.flex}>
@@ -998,11 +993,6 @@ function RecipeStep({
         ) : (
           have.map((i) => <Row key={i.id} ing={i} section="have" />)
         )}
-        <Text color="textFaint" style={styles.tip}>
-          Tap to move between Shop for and Already have. Swipe right to “always
-          have” (adds it to your pantry). Swipe left to remove. Long-press for
-          the full detail sheet (edit name/qty + all options).
-        </Text>
       </ScrollView>
       <BottomActionBar>
         <Button label="Back" variant="secondary" flex onPress={onBack} />
@@ -1051,14 +1041,7 @@ const styles = StyleSheet.create({
   ingRow: {
     backgroundColor: colors.bg, // opaque, so the swipe action panels sit behind it
   },
-  ingTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingRight: 4,
-  },
   ingMain: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-start', // top-align so the amount lines up with the name
     gap: 12,
@@ -1067,6 +1050,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     backgroundColor: colors.bg, // opaque, so the swipe action panels sit behind it
   },
+  badgeUnder: { alignSelf: 'flex-start', marginTop: 4 },
   badgeLow: {
     backgroundColor: colors.warn,
     paddingHorizontal: 8,
@@ -1084,14 +1068,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 6,
-  },
-  // Fixed slot so every badge occupies the same width — keeps the amount column
-  // (which sits to its left) aligned across HAVE / ALWAYS HAVE / no-badge rows.
-  // Wide enough for "ALWAYS HAVE"; badges hug the right edge.
-  badgeSlot: {
-    width: 116,
-    alignItems: 'flex-end',
-    paddingTop: 1,
   },
   coveredRow: {
     flexDirection: 'row',
@@ -1151,7 +1127,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   ingSide: { paddingHorizontal: 6, paddingVertical: 8 },
-  tip: { fontStyle: 'italic', lineHeight: 18, paddingTop: 16 },
   combineHint: { paddingBottom: 8, lineHeight: 18 },
   combineActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   checkSm: {

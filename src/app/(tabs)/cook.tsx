@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Screen,
@@ -100,6 +100,14 @@ export default function CookScreen() {
       <SectionLabel style={styles.label}>{isToday ? 'Tonight' : 'Up next'}</SectionLabel>
       {relevant ? (
         <Card bordered style={styles.mealCard}>
+          {/* Thumbnail of tonight's recipe (the first dish's, for a combined meal). */}
+          {relevant.dishes[0]?.recipe.imageUrl ? (
+            <Image
+              source={{ uri: relevant.dishes[0].recipe.imageUrl }}
+              style={styles.heroThumb}
+              resizeMode="cover"
+            />
+          ) : null}
           <View style={styles.mealHead}>
             <Text variant="recipeTitle">
               {relevant.dishes.length > 1
@@ -183,6 +191,7 @@ const styles = StyleSheet.create({
   },
   label: { paddingTop: 8, paddingBottom: 10 },
   mealCard: { gap: 12, borderColor: colors.line },
+  heroThumb: { width: '100%', height: 160, borderRadius: 10, backgroundColor: colors.bg2 },
   mealHead: {
     flexDirection: 'row',
     alignItems: 'baseline',

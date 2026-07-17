@@ -1164,6 +1164,23 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
   };
 
+  // Pushed-row actions. RESTORE just drops the pushed marker so the item returns
+  // to Active (its extra stays). CLEAR = delete it for good — also remove the
+  // underlying extra, else dropping the marker bounces it right back onto Active
+  // (that was the "Clear moved it back to the list" bug).
+  const deletePushedItem = (key: string) => {
+    const ex = extras.find((e) => matchKey(e.canonicalName) === key);
+    if (ex) removeExtra(ex.id);
+    restorePushed(key); // drop the pushed marker (extra already gone)
+  };
+  const clearAllPushed = () => {
+    for (const e of pushedItems) {
+      const ex = extras.find((x) => matchKey(x.canonicalName) === e.key);
+      if (ex) removeExtra(ex.id);
+    }
+    clearPushed();
+  };
+
   /** Dismiss a consolidated row for this run (session-local). */
   const dismissItem = (name: string) =>
     setDismissed((prev) => new Set(prev).add(`item:${name}`));
@@ -1819,27 +1836,21 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                   style={pushedOpen ? undefined : styles.pushedCaretClosed}
                 />
               </Pressable>
-              {/* Clear = start a fresh shopping cycle. Pushed no longer expires
-                  on a timer, so this is how you empty it when you begin a new
-                  shop and want the recurring items back on Active. */}
+              {/* Clear all = delete every pushed item for good (removes their
+                  extras too, so they don't bounce back onto Active). */}
               <Pressable
-                onPress={clearPushed}
+                onPress={clearAllPushed}
                 hitSlop={8}
                 accessibilityRole="button"
-                accessibilityLabel="Clear the pushed list">
-                <Text variant="sectionLabel" color="textFaint">
-                  Clear
+                accessibilityLabel="Delete all pushed items">
+                <Text variant="sectionLabel" color="accent">
+                  Clear all
                 </Text>
               </Pressable>
             </View>
             {pushedOpen
               ? pushedItems.map((e) => (
-                  <Pressable
-                    key={`pushed:${e.key}`}
-                    style={styles.pushedRow}
-                    onPress={() => restorePushed(e.key)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Move ${e.name} back to the list`}>
+                  <View key={`pushed:${e.key}`} style={styles.pushedRow}>
                     <Text color="textFaint" style={styles.pushedName} numberOfLines={1}>
                       {e.name}
                     </Text>
@@ -1852,7 +1863,28 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                             ? 'Amazon'
                             : 'Reminders'}
                     </Text>
-                  </Pressable>
+                    {/* Restore = back to Active. Clear = delete for good. */}
+                    <Pressable
+                      onPress={() => restorePushed(e.key)}
+                      hitSlop={8}
+                      style={styles.pushedAction}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Restore ${e.name} to the active list`}>
+                      <Text variant="sectionLabel" color="textMuted">
+                        Restore
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => deletePushedItem(e.key)}
+                      hitSlop={8}
+                      style={styles.pushedAction}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${e.name}`}>
+                      <Text variant="sectionLabel" color="accent">
+                        Clear
+                      </Text>
+                    </Pressable>
+                  </View>
                 ))
               : null}
           </View>
@@ -2996,6 +3028,7 @@ const styles = StyleSheet.create({
   },
   pushedName: { flex: 1, textDecorationLine: 'line-through' },
   pushedDest: { fontSize: 12 },
+  pushedAction: { paddingHorizontal: 4, paddingVertical: 2 },
   item: {
     flexDirection: 'row',
     alignItems: 'flex-start',
