@@ -37,6 +37,8 @@ type CartFillState = {
   added: number | null;
   /** Items the cart flagged not-available — set on done. */
   unavailable: number | null;
+  /** False when the agent couldn't read the cart back (filled but unconfirmed). */
+  verified: boolean | null;
   hydrated: boolean;
   hydrate: () => Promise<void>;
   start: (a: {
@@ -49,6 +51,7 @@ type CartFillState = {
     status?: CartFillStatus;
     added?: number | null;
     unavailable?: number | null;
+    verified?: boolean | null;
   }) => void;
   clear: () => void;
 };
@@ -61,6 +64,7 @@ export const useCartFillStore = create<CartFillState>((set, get) => ({
   status: null,
   added: null,
   unavailable: null,
+  verified: null,
   hydrated: false,
 
   hydrate: async () => {
@@ -76,13 +80,23 @@ export const useCartFillStore = create<CartFillState>((set, get) => ({
   },
 
   start: ({ jobId, retailer, total, startedAtMs }) =>
-    set({ jobId, retailer, total, startedAtMs, status: 'queued', added: null, unavailable: null }),
+    set({
+      jobId,
+      retailer,
+      total,
+      startedAtMs,
+      status: 'queued',
+      added: null,
+      unavailable: null,
+      verified: null,
+    }),
 
-  update: ({ status, added, unavailable }) =>
+  update: ({ status, added, unavailable, verified }) =>
     set((st) => ({
       status: status ?? st.status,
       added: added === undefined ? st.added : added,
       unavailable: unavailable === undefined ? st.unavailable : unavailable,
+      verified: verified === undefined ? st.verified : verified,
     })),
 
   clear: () =>
@@ -91,6 +105,7 @@ export const useCartFillStore = create<CartFillState>((set, get) => ({
       status: null,
       added: null,
       unavailable: null,
+      verified: null,
       startedAtMs: null,
       total: 0,
     }),

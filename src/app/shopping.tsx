@@ -2033,15 +2033,22 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                 const unavail = (jobResult.unavailable ?? []).some(
                   (n) => matchKey(n) === matchKey(u),
                 );
+                // verified:false = the agent couldn't READ the cart, not that the
+                // add failed — the items likely ARE in the cart. Don't call that
+                // "couldn't be added" (reads as a failure of all 14).
+                const unconfirmed = jobResult.verified === false;
                 return (
                   <View key={`u-${u}-${i}`} style={styles.jobRow}>
-                    <Glyph name="close" size={13} color="warn" />
+                    <Glyph
+                      name={unconfirmed ? 'expand' : 'close'}
+                      size={13}
+                      color={unconfirmed ? 'textMuted' : 'warn'}
+                    />
                     <Text color="textFaint" style={styles.flex} numberOfLines={2}>
                       {u} —{' '}
-                      {unavail
-                        ? 'not available in your area'
-                        : 'couldn’t be added'}
-                      , still on your list
+                      {unconfirmed
+                        ? 'couldn’t auto-confirm, still on your list'
+                        : `${unavail ? 'not available in your area' : 'couldn’t be added'}, still on your list`}
                     </Text>
                   </View>
                 );
