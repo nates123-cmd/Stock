@@ -30,6 +30,7 @@ export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
   const total = useCartFillStore((s) => s.total);
   const added = useCartFillStore((s) => s.added);
   const unavailable = useCartFillStore((s) => s.unavailable);
+  const verified = useCartFillStore((s) => s.verified);
   const startedAtMs = useCartFillStore((s) => s.startedAtMs);
   const update = useCartFillStore((s) => s.update);
   const clear = useCartFillStore((s) => s.clear);
@@ -45,11 +46,14 @@ export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
       const s = await jobStatus(jobId);
       if (!alive || !s) return;
       if (s.status === 'done') {
-        const r = s.result as { added?: unknown[]; unavailable?: unknown[] } | null;
+        const r = s.result as
+          | { added?: unknown[]; unavailable?: unknown[]; verified?: boolean }
+          | null;
         update({
           status: 'done',
           added: Array.isArray(r?.added) ? r!.added!.length : null,
           unavailable: Array.isArray(r?.unavailable) ? r!.unavailable!.length : null,
+          verified: r?.verified !== false, // undefined (old) = treat as verified
         });
       } else if (s.status === 'error') {
         update({ status: 'error' });
@@ -88,9 +92,11 @@ export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
     status === 'error'
       ? `${store} cart fill hit a problem`
       : status === 'done'
-        ? `${store} cart filled${added != null ? ` · ${added} added` : ''}${
-            unavailable ? ` · ${unavailable} unavailable` : ''
-          }`
+        ? verified === false
+          ? `${store} cart filled — couldn’t auto-confirm, check it`
+          : `${store} cart filled${added != null ? ` · ${added} added` : ''}${
+              unavailable ? ` · ${unavailable} unavailable` : ''
+            }`
         : `Filling ${store} cart… ${total} item${total === 1 ? '' : 's'}`;
 
   return (
