@@ -64,6 +64,34 @@ assets/
   fonts/          (Iowan/JetBrains fallbacks — to add)
 ```
 
+## Sharing a kitchen (household)
+
+Two people who live together use **one kitchen from two logins**: same recipes,
+pantry, plan, cook plans, and shopping list, live on both phones. Sign in →
+**Share this kitchen** → enter their email. They sign in with their own email
+and their own code; nothing is shared with anyone you haven't added.
+
+How it works, in one line: the client resolves an **effective owner id** at
+sign-in (`src/lib/household.ts`) and every read, write, and Realtime filter in
+`src/lib/sync.ts` keys off *that* instead of the signed-in uid, so both accounts
+converge on one set of rows. RLS on the eight kitchen tables was widened from
+`auth.uid() = user_id` to `user_id in (select public.stock_owner_ids())`
+(`supabase/migrations/20260722000000_household_sharing.sql`).
+
+Worth knowing:
+
+- Membership is keyed by **email, not uid**, so you can add someone before they
+  have ever opened Stock — they're in the household the instant they first sign
+  in, with no window where their writes land in a private silo.
+- **Calories are not shared.** Cooks push to `tide_intake_logs` under the
+  signed-in account, so each person logs to their own Tide/Trim day.
+- Only the **owner** seeds an empty kitchen from local data. A member joining
+  adopts the kitchen rather than bulk-uploading whatever they had in local-only
+  mode into someone else's pantry.
+- Adding someone takes effect on their **next app open** — if they're already
+  signed in, have them reload.
+- Removing them is one row; their own kitchen is untouched.
+
 ## Build status (spec §13 order)
 
 | Pillar | State | Verified |

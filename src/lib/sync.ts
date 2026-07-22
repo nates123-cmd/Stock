@@ -16,6 +16,7 @@
  */
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_AVAILABLE } from './supabase';
+import { resolveOwnerId } from './household';
 import { useAuthStore } from '@/store/auth';
 import { useRecipeStore } from '@/store/recipes';
 import { usePlanStore } from '@/store/plan';
@@ -247,7 +248,25 @@ const collections: Collection[] = [
 
 let activeChannel: RealtimeChannel | null = null;
 let activeUserId: string | null = null;
+/**
+ * The uid every kitchen row is stored under — the signed-in uid normally, or
+ * the household owner's uid when this account is a member of someone else's
+ * kitchen ([[project_stock_household_sharing]]). Resolved once per sign-in in
+ * start(); every pull, push, and Realtime filter below uses THIS, not the
+ * signed-in uid, which is what makes two accounts see one kitchen.
+ */
+let activeOwnerId: string | null = null;
 const unsubscribers: Array<() => void> = [];
+
+/**
+ * The kitchen this session is syncing, or null before sign-in. Differs from the
+ * signed-in uid exactly when this account is a member of someone else's
+ * household — which is how the UI knows to say "shared kitchen" rather than
+ * offering to share one.
+ */
+export function getActiveOwnerId(): string | null {
+  return activeOwnerId;
+}
 
 // Per-table cache of the LAST item ref we pushed for each id. A diff against
 // this catches local mutations (new ref) without needing a deep equality.
@@ -298,7 +317,9 @@ async function cloudDelete(
 function makeStoreListener(c: Collection): () => void {
   const cache = refCache[c.table];
   return () => {
-    const userId = useAuthStore.getState().user?.id;
+    // Stamp rows with the household owner, not the signed-in user — otherwise a
+    // member's edits would land in a silo nobody else pulls.
+    const userId = activeOwnerId;
     if (!userId) return;
 
     const items = c.read();
@@ -364,10 +385,20 @@ function seedCache(c: Collection): void {
   for (const item of c.read()) cache.set(item.id, item);
 }
 
-async function start(userId: string): Promise<void> {
-  if (!supabase || activeUserId === userId) return;
+async function start(signedInUserId: string, email: string | null): Promise<void> {
+  if (!supabase || activeUserId === signedInUserId) return;
   if (activeUserId) await stop();
-  activeUserId = userId;
+  activeUserId = signedInUserId;
+
+  // 0) Whose kitchen is this? Own uid normally; the owner's uid if this email
+  //    has been added to someone's household. Everything below keys off it.
+  //    Re-check activeUserId after the await: a fast sign-out/sign-in during
+  //    the round-trip would otherwise let this stale call arm the sync layer
+  //    against the previous account.
+  const ownerId = await resolveOwnerId(signedInUserId, email);
+  if (activeUserId !== signedInUserId) return;
+  activeOwnerId = ownerId;
+  const userId = ownerId;
 
   // 1) Pull + first-sign-in migration per table.
   for (const c of collections) {
@@ -382,7 +413,12 @@ async function start(userId: string): Promise<void> {
     const cloudItems = (data ?? []).map((row) => c.revive(row.data));
     if (cloudItems.length === 0) {
       const local = c.read();
-      if (local.length > 0) {
+      // Only the OWNER seeds an empty kitchen from local data. A member joining
+      // an owner's household is adopting that kitchen, not merging into it —
+      // bulk-uploading whatever they happened to have in local-only mode would
+      // silently dump their pantry into someone else's. Their local items stay
+      // local; anything they actively edit from here on syncs normally.
+      if (local.length > 0 && userId === activeUserId) {
         const rows = local.map((item) => ({
           id: item.id,
           user_id: userId,
@@ -442,6 +478,7 @@ async function stop(): Promise<void> {
     activeChannel = null;
   }
   activeUserId = null;
+  activeOwnerId = null;
 }
 
 /* ---------- Wire to auth state ---------- */
@@ -449,7 +486,7 @@ async function stop(): Promise<void> {
 if (SUPABASE_AVAILABLE) {
   useAuthStore.subscribe((s) => {
     if (s.user && s.user.id !== activeUserId) {
-      void start(s.user.id);
+      void start(s.user.id, s.user.email ?? null);
     } else if (!s.user && activeUserId) {
       void stop();
     }
