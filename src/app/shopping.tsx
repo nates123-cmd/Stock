@@ -50,6 +50,10 @@ import {
   instacartText,
   CATEGORY_ORDER,
   categorizeIngredient,
+  isDeliberateExtra,
+  MANUAL_ACTIVE,
+  MANUAL_STAPLE,
+  PLAN_WIZARD,
   type ShoppingLine,
   type ShoppingSource,
 } from '@/lib/shopping';
@@ -144,6 +148,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // regen — note 7a) + optional store tag / detail (note 3).
   const suppressedMap = useShopMetaStore((s) => s.suppressed);
   const suppress = useShopMetaStore((s) => s.suppress);
+  const unsuppress = useShopMetaStore((s) => s.unsuppress);
   const shopMetaMap = useShopMetaStore((s) => s.meta);
   const setShopMeta = useShopMetaStore((s) => s.setMeta);
   const isSuppressed = (name: string) => suppressedMap[alwaysHaveKey(name)] === true;
@@ -695,7 +700,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const buyLines = useMemo<ShoppingLine[]>(() => {
     const fromItems = visibleItems.filter((i) => !inHave(i.name));
     const fromExtras: ShoppingLine[] = extras
-      .filter((e) => !inHave(e.canonicalName))
+      .filter((e) => isDeliberateExtra(e.originId) || !inHave(e.canonicalName))
       .map((e) => ({
         name: e.canonicalName,
         category: categorizeIngredient(e.canonicalName),
@@ -748,6 +753,24 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
     return [];
   };
+  /**
+   * Which list does a hand-added row live on? New adds record it on the extra
+   * itself (MANUAL_ACTIVE / MANUAL_STAPLE). Rows written before that split carry
+   * a null origin, so they fall back to the OLD rule — a staple pin meant
+   * Staples — and nothing jumps views on upgrade. Returns null for rows that
+   * weren't added by hand.
+   */
+  const manualHome = (ex: {
+    originId: string | null;
+    canonicalName: string;
+  }): 'active' | 'staples' | null => {
+    if (ex.originId === MANUAL_STAPLE) return 'staples';
+    if (ex.originId === MANUAL_ACTIVE) return 'active';
+    if (ex.originId == null)
+      return isAlwaysHave(ex.canonicalName, alwaysHaveMap) ? 'staples' : 'active';
+    return null;
+  };
+
   const allRows = useMemo<FlatRow[]>(() => {
     // MATERIALIZED LIST (PLAN-SHOP-FLOW.md phase 4). Active is no longer
     // live-derived from the week's planned recipes — that was the source of the
@@ -770,13 +793,23 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       // item is a pantry staple. You put it on your shopping list on purpose;
       // it only leaves once you buy it or push it. (Nate: "anything generated
       // from the plan wizard needs to end up in Active. Never Staples.")
-      const fromWizard = ex.originId === 'plan-wizard';
-      const drop = fromWizard
-        ? wasPushed(ex.canonicalName) || isMarked(haveChecked, ex.canonicalName)
-        : gone(ex.canonicalName);
-      // A staple pin hides a NON-wizard row from Active — that IS "Move to
-      // Staples", and it applies to manual adds too, or the row lives in both
-      // views. Adding a name on Active that's currently pinned un-pins it.
+      const fromWizard = ex.originId === PLAN_WIZARD;
+      const home = manualHome(ex);
+      // Added by hand while on Staples → it belongs over there, not here.
+      if (home === 'staples') continue;
+      // Wizard items and manual adds are both DELIBERATE — you put them on this
+      // list on purpose. They leave only when you check them off or push them.
+      // Nothing automatic may hide them: not an always-have pin, not a pantry
+      // `isStaple` flag, not a check-off left over from a previous shop. That
+      // last one was the bug — `checked` is permanent, so a name Nate had ever
+      // bought before (pine nuts) was swallowed the instant he re-added it.
+      //
+      // A staple pin still hides a NON-manual, non-wizard row from Active; that
+      // IS "Move to Staples".
+      const drop =
+        fromWizard || home === 'active'
+          ? wasPushed(ex.canonicalName) || isMarked(haveChecked, ex.canonicalName)
+          : gone(ex.canonicalName);
       if (drop) continue;
       rows.push({
         key: `e:${ex.id}`,
@@ -909,12 +942,29 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     const extraKeys = extras.map((e) => matchKey(e.canonicalName));
     // Plan-wizard items never belong on Staples — they're forced onto Active.
     const wizardKeys = new Set(
-      extras.filter((e) => e.originId === 'plan-wizard').map((e) => matchKey(e.canonicalName)),
+      extras.filter((e) => e.originId === PLAN_WIZARD).map((e) => matchKey(e.canonicalName)),
     );
-    const stapleKeys = new Set<string>([...pinnedKeys, ...pantryKeys, ...extraKeys]);
+    // Added by hand WHILE ON STAPLES. Unconditional residents: no pantry status,
+    // no missing pin, and no already-on-Active collision gets to drop them.
+    const manualStapleKeys = new Set(
+      extras
+        .filter((e) => manualHome(e) === 'staples')
+        .map((e) => matchKey(e.canonicalName)),
+    );
+    // Added by hand while on ACTIVE — those live over there, never here.
+    const manualActiveKeys = new Set(
+      extras
+        .filter((e) => manualHome(e) === 'active')
+        .map((e) => matchKey(e.canonicalName)),
+    );
+    // Extras first, in the order they were typed — the list should read like the
+    // order you built it, not like a dictionary.
+    const stapleKeys = new Set<string>([...extraKeys, ...pantryKeys, ...pinnedKeys]);
     for (const key of stapleKeys) {
-      if (wizardKeys.has(key)) continue;
-      if (wasPushed(key) || onActive.has(key)) continue;
+      if (wizardKeys.has(key) || manualActiveKeys.has(key)) continue;
+      const manual = manualStapleKeys.has(key);
+      if (wasPushed(key)) continue;
+      if (!manual && onActive.has(key)) continue;
       const ex = extras.find((e) => matchKey(e.canonicalName) === key);
       const it = visibleItems.find((i) => matchKey(i.name) === key);
       const pan = pantryItems.find((p) => matchKey(p.canonicalName) === key);
@@ -937,15 +987,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         kind: ex ? 'extra' : 'recipe',
       });
     }
-    // Needs-buying first (out, then low), then the rest alphabetically — the
-    // staples you're actually out of shouldn't be buried in the pile.
+    // Needs-buying first (out, then low) so what you're actually out of isn't
+    // buried. Within a rank the order is the order things arrived — sort() is
+    // stable, so no alphabetical tiebreak. (Nate: the A-Z shuffle just moved
+    // rows around under him for no reason.)
     const rank = (s?: PantryStatus) => (s === 'out' ? 0 : s === 'low' ? 1 : 2);
-    return rows.sort(
-      (a, b) =>
-        rank(a.pantryStatus) - rank(b.pantryStatus) || a.name.localeCompare(b.name),
-    );
+    return rows.sort((a, b) => rank(a.pantryStatus) - rank(b.pantryStatus));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alwaysHaveMap, extras, visibleItems, overrides, pushedSet, statusByKey, activeRows]);
+  }, [alwaysHaveMap, extras, visibleItems, overrides, pushedSet, statusByKey, activeRows, pantryItems]);
 
 
   /** Rows for whichever view you're on; selection + push read from these. */
@@ -1081,7 +1130,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const haveCount = useMemo(() => {
     let n = ghostAlways.length;
     for (const i of visibleItems) if (inHave(i.name)) n++;
-    for (const e of extras) if (inHave(e.canonicalName)) n++;
+    for (const e of extras)
+      if (!isDeliberateExtra(e.originId) && inHave(e.canonicalName)) n++;
     return n;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems, extras, haveChecked, alwaysHaveMap, ghostAlways]);
@@ -1219,19 +1269,54 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const editItemQty = (name: string, qty: string) =>
     setItems((prev) => prev.map((i) => (i.name === name ? { ...i, buy: qty } : i)));
 
-  /** Add a manual item to the list via the extras store (spec §10). */
+  /**
+   * Add a manual item to the list (spec §10).
+   *
+   * A manual add is absolute. What you type lands on whichever list you're
+   * looking at and STAYS there until you check it off, push it, or delete it.
+   * So every piece of sticky state that could silently swallow the new row is
+   * cleared first:
+   *   - the PERMANENT check-off in have.ts (`checked`) — this was the bug: it
+   *     never expires, so any name Nate had bought once before was dropped the
+   *     instant he re-added it ("I can't add pine nuts");
+   *   - a pushed marker, matched as loosely as `wasPushed` hides things;
+   *   - a plan-row suppression and this run's session dismissal.
+   */
   const submitAdd = () => {
     const name = addName.trim();
     if (!name) return;
     const { amount, unit } = parseQty(addQty);
+    const toStaples = listView === 'staples';
+
+    unmarkHave(name);
+    unsuppress(name);
+    const k = matchKey(name);
+    const b = baseIngredient(name);
+    for (const p of pushedItems) {
+      if (!p.key) continue;
+      if (p.key === k || p.key.startsWith(k) || k.startsWith(p.key) || baseIngredient(p.key) === b)
+        restorePushed(p.key);
+    }
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      next.delete(`item:${name}`);
+      return next;
+    });
+
     addExtra([
-      { canonicalName: name, amount, unit, originLabel: 'added by you', originId: null },
+      {
+        canonicalName: name,
+        amount,
+        unit,
+        originLabel: 'added by you',
+        originId: toStaples ? MANUAL_STAPLE : MANUAL_ACTIVE,
+      },
     ]);
-    // Adding while on Staples pins it, so it lands there instead of Active —
-    // "note the pine nuts, don't put them in my face." Adding on Active is the
-    // opposite intent ("I want this now"), so it UN-pins a name that's currently
-    // a staple; otherwise the new row would be hidden by its own pin.
-    pinStaple(name, listView === 'staples');
+    // Which list it lives on is the extra's own origin now, not a side effect of
+    // the staple pin. Adding on Staples still marks it always-have (that's what
+    // a staple IS in the pantry); adding on Active no longer needs to un-pin
+    // anything, because a pin can't hide a manual row any more.
+    if (toStaples) pinStaple(name, true);
     setAddName('');
     setAddQty('');
   };

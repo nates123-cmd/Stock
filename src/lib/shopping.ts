@@ -30,6 +30,44 @@ const KEYWORDS: [ShoppingCategory, RegExp][] = [
   ['pantry', /oil|vinegar|salt|sugar|rice|farro|pasta|sauce|stock|broth|spice|soy|honey|cider|can\b|bean|lentil|sesame|pistachio|nut|almond|walnut/i],
 ];
 
+/* ------------------------------------------------------------------ */
+/* Extra origins — which list a row belongs to, and why                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `originId` values for a row the user put on the list BY HAND ("+ Add item",
+ * the capture sheet). Which list it belongs to is recorded on the extra itself
+ * rather than inferred from the always-have pin, so a manual row can't drift
+ * between Active and Staples behind the user's back.
+ *
+ * Legacy manual adds (written before the split) carry a null originId — those
+ * mean Active.
+ */
+export const MANUAL_ACTIVE = 'manual';
+export const MANUAL_STAPLE = 'manual-staple';
+export const PLAN_WIZARD = 'plan-wizard';
+
+/**
+ * Was this row added by hand? A manual add is the strongest signal there is: it
+ * outranks every automatic hide — a check-off left over from a past shop, an
+ * always-have pin, a pantry `isStaple` flag, a "you probably have this" status.
+ */
+export function isManualExtra(originId: string | null | undefined): boolean {
+  return (
+    originId == null || originId === MANUAL_ACTIVE || originId === MANUAL_STAPLE
+  );
+}
+
+/**
+ * Is this row on the list because it was CHOSEN — by hand, or by the plan
+ * wizard? Deliberate rows are never routed to the Already-have bucket, so they
+ * stay in the "To buy" count and the Copy-for-Instacart text even when the name
+ * happens to be pinned always-have or flagged a pantry staple.
+ */
+export function isDeliberateExtra(originId: string | null | undefined): boolean {
+  return isManualExtra(originId) || originId === PLAN_WIZARD;
+}
+
 export function categorizeIngredient(name: string): ShoppingCategory {
   for (const [cat, re] of KEYWORDS) if (re.test(name)) return cat;
   return 'other';
