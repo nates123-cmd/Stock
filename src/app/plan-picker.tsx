@@ -75,6 +75,16 @@ export default function PlanPicker() {
     }
   };
 
+  const goToCapture = () => {
+    router.push({
+      pathname: '/capture',
+      params: {
+        planDate: params.date,
+        ...(mealType ? { planType: mealType } : {}),
+      },
+    });
+  };
+
   return (
     <View style={styles.root}>
       <Screen>
@@ -97,6 +107,10 @@ export default function PlanPicker() {
             (red +) and To-Try ideas plan as experiments. */}
         <RecipeLibrary addMode onSelectRecipe={pick} onSelectIdea={openExperiment} />
       </Screen>
+
+      <Pressable onPress={goToCapture} style={styles.newRecipe} hitSlop={8}>
+        <Text color="accent">+ New recipe</Text>
+      </Pressable>
 
       <Overlay visible={!!expIdea} onClose={() => setExpIdea(null)}>
         {expIdea ? (
@@ -151,5 +165,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlignVertical: 'top',
   },
+  newRecipe: { alignItems: 'center', paddingVertical: 12 },
   sheetNote: { fontStyle: 'italic', lineHeight: 18 },
 });

@@ -135,7 +135,11 @@ export default function CaptureFlow() {
     refs?: string;
     /** Bench Convert "Save as recipe" seeds the paste area (spec §9). */
     prefillText?: string;
+    /** Set by plan-picker so "Done" after save returns to the plan flow. */
+    planDate?: string;
+    planType?: string;
   }>();
+  const planReturn = params.planDate ? { date: params.planDate, type: params.planType } : null;
   const ideaRefs = useMemo<{ url: string; label: string }[]>(() => {
     try {
       return params.refs ? JSON.parse(params.refs) : [];
@@ -451,7 +455,20 @@ export default function CaptureFlow() {
               setSavedId(null);
               setStep('capture');
             }}
-            onDone={close}
+            doneLabel={planReturn ? 'Back to plan' : 'Done'}
+            onDone={() => {
+              if (planReturn) {
+                router.replace({
+                  pathname: '/plan-picker',
+                  params: {
+                    date: planReturn.date,
+                    ...(planReturn.type ? { type: planReturn.type } : {}),
+                  },
+                });
+              } else {
+                close();
+              }
+            }}
           />
         )}
       </KeyboardAvoidingView>
@@ -884,6 +901,7 @@ function SavedStep({
   onView,
   onAnother,
   onDone,
+  doneLabel = 'Done',
 }: {
   title: string;
   source: RecipeSource;
@@ -891,6 +909,7 @@ function SavedStep({
   onView: () => void;
   onAnother: () => void;
   onDone: () => void;
+  doneLabel?: string;
 }) {
   return (
     <>
@@ -924,7 +943,7 @@ function SavedStep({
       </ScrollView>
 
       <BottomActionBar>
-        <Button label="Done" variant="secondary" flex onPress={onDone} />
+        <Button label={doneLabel} variant="secondary" flex onPress={onDone} />
         <Button label="Add another" glyph="add" flex onPress={onAnother} />
       </BottomActionBar>
     </>
