@@ -13,6 +13,10 @@ import { useRecipeStore } from '@/store/recipes';
 import { usePantryStore } from '@/store/pantry';
 import { useHaveStore } from '@/store/have';
 import { useExtrasStore } from '@/store/extras';
+import { usePushedStore } from '@/store/pushed';
+import { useShopMetaStore } from '@/store/shopMeta';
+import { pushedKeysCovering, planWizardWrite } from '@/lib/activeList';
+import { PLAN_WIZARD } from '@/lib/shopping';
 import { useSynonymsStore } from '@/store/synonyms';
 import { dateKey } from '@/lib/week';
 import { matchKey, looksLikeSameItem } from '@/lib/pantry';
@@ -63,6 +67,12 @@ export default function BuildListScreen() {
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
   const setAlways = useHaveStore((s) => s.setAlways);
   const addExtras = useExtrasStore((s) => s.add);
+  const updateExtra = useExtrasStore((s) => s.update);
+  const existingExtras = useExtrasStore((s) => s.items);
+  const unmarkHave = useHaveStore((s) => s.unmark);
+  const unsuppress = useShopMetaStore((s) => s.unsuppress);
+  const pushedItems = usePushedStore((s) => s.items);
+  const restorePushed = usePushedStore((s) => s.restore);
   const learnSynonym = useSynonymsStore((s) => s.learn);
   const declineMatch = useSynonymsStore((s) => s.decline);
 
@@ -356,31 +366,30 @@ export default function BuildListScreen() {
   }, [step, selected.length, effGroups]);
 
   const finish = () => {
-    // Phase-1 hand-off: add the combined shop-for items to the shopping list as
-    // extras (the materialized store). Split rows land as separate items.
-    if (combineRows.length > 0) {
-      addExtras(
-        combineRows.map((c) => {
-          // Carry the finalized amount through to the shopping list. A clean
-          // single-unit total parses to amount+unit; a mixed one ("300 g +
-          // 1 pint") can't, so keep it as the unit text so nothing is lost.
-          const p = parseQty(c.qty);
-          return {
-            canonicalName: c.name,
-            amount: p.amount,
-            unit: p.amount != null ? p.unit : c.qty || null,
-            // Show WHICH recipe(s) it's for on the shopping list — that's the
-            // useful context, not a generic "from your plan".
-            originLabel: c.recipes.length ? `for ${c.recipes.join(' · ')}` : 'added by you',
-            // Sentinel so the shopping list keeps plan-wizard items on ACTIVE and
-            // never routes them to Staples, even if the item is also a staple.
-            originId: 'plan-wizard',
-            // Structured recipe titles drive the BY RECIPE grouping (one / Multiple).
-            recipes: c.recipes,
-          };
-        }),
-      );
+    // Hand-off: the combined shop-for items become the materialized shopping
+    // list (extras). Two rules make a rebuild behave, both of which were missing
+    // and are why the list came out wrong after a push:
+    //
+    //  1. UN-HIDE. Everything sticky that could swallow a row is cleared for the
+    //     names we're writing — the permanent check-off, a name-matched pushed
+    //     marker from a previous order, a suppression. Otherwise the wizard
+    //     wrote rows that were invisible the moment they landed. This is exactly
+    //     what a manual "+ Add" already did; the wizard just never did it.
+    //  2. NO DUPLICATES. Rebuilding for one meal must not add a second copy of
+    //     an item already on the list. Same name (matchKey) as a live wizard row
+    //     → update that row in place, unioning the recipes it's for.
+    for (const c of combineRows) {
+      unmarkHave(c.name);
+      unsuppress(c.name);
+      for (const key of pushedKeysCovering(c.name, pushedItems)) restorePushed(key);
     }
+
+    // `originId: PLAN_WIZARD` is the sentinel that keeps these rows on ACTIVE
+    // and never routes them to Staples, even when the item is also a staple.
+    // `recipes` drives the BY RECIPE grouping on the list.
+    const write = planWizardWrite(combineRows, existingExtras, parseQty, PLAN_WIZARD);
+    for (const u of write.updates) updateExtra(u.extra.id, u.patch);
+    if (write.adds.length > 0) addExtras(write.adds);
     // Land on the real Shop TAB (with tab chrome), not the standalone /shopping
     // stack screen (which showed a "Done" header — an extra step).
     router.replace({ pathname: '/', params: { segment: 'shop' } });

@@ -35,10 +35,15 @@ type ExtrasState = {
   hydrated: boolean;
   hydrate: () => Promise<void>;
   add: (items: Omit<ExtraItem, 'id' | 'addedAt'>[]) => void;
-  /** Inline-edit an existing extra (name / amount / unit). */
+  /** Inline-edit an existing extra (name / amount / unit / provenance). */
   update: (
     id: string,
-    patch: Partial<Pick<ExtraItem, 'canonicalName' | 'amount' | 'unit'>>,
+    patch: Partial<
+      Pick<
+        ExtraItem,
+        'canonicalName' | 'amount' | 'unit' | 'originLabel' | 'originId' | 'recipes'
+      >
+    >,
   ) => void;
   remove: (id: string) => void;
   removeByOrigin: (originId: string) => void;

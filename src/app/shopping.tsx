@@ -31,9 +31,16 @@ import { useShopMetaStore } from '@/store/shopMeta';
 import { usePushedStore } from '@/store/pushed';
 import { useCartFillStore } from '@/store/cartFill';
 import type { PantryLocation, PantryStatus } from '@/types';
-import { baseIngredient, matchKey, looksLikeSameItem } from '@/lib/pantry';
+import { matchKey, looksLikeSameItem } from '@/lib/pantry';
 import { areApart } from '@/lib/synonyms';
 import { alwaysHaveKey, isAlwaysHave, isExactAlwaysHave } from '@/lib/alwaysHave';
+import {
+  activeExtras,
+  extrasForPushed,
+  extrasForAllPushed,
+  isNamePushed,
+  pushedKeysCovering,
+} from '@/lib/activeList';
 import {
   STORES,
   storeLabel,
@@ -329,10 +336,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       const missRows = job.rows.filter((row) => !gotRows.includes(row));
 
       if (gotRows.length > 0) {
-        pushToPushed(
-          gotRows.map((row) => row.baseName),
-          job.retailer,
-        );
+        pushToPushed(pushRefs(gotRows), job.retailer);
       }
 
       const unavailNames = (r.unavailable ?? [])
@@ -562,11 +566,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const isPantryStaple = (name: string) => {
     const k = matchKey(name);
     if (pantryStapleKeys.has(k)) return true;
-    const b = baseIngredient(name);
-    for (const key of pantryStapleKeys) {
-      if (key.startsWith(k) || k.startsWith(key)) return true;
-      if (baseIngredient(key) === b) return true;
-    }
+    // Via looksLikeSameItem, not a raw head-noun compare. The raw compare had no
+    // "one of them is a single word" guard, so a staple jar of "olive oil" made
+    // "sesame oil" read as a staple — off Active, never bought.
+    for (const key of pantryStapleKeys) if (looksLikeSameItem(name, key)) return true;
     return false;
   };
 
@@ -637,22 +640,15 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     [pushedItems],
   );
   /**
-   * Was this name pushed? Matched LOOSELY, the same way the pantry matches.
-   * Exact keys don't work: the list says "shallot" but the cart got "shallots",
-   * "basil leaves" vs "basil", "ripe tomatoes" vs "tomatoes" — so pushed items
-   * kept sitting on the list. Prefix covers shallot/shallots and basil leaves/
-   * basil; head-noun covers ripe tomatoes/tomatoes and cooked chickpeas/chickpeas.
+   * Was this NAME pushed? Only for rows with no extra behind them (pantry
+   * restock lines) — materialized rows are matched by id instead, which is what
+   * stopped a push from hiding items it never sent.
+   *
+   * Matching goes through `looksLikeSameItem`, the app's one notion of "same
+   * thing". The old inline version compared head nouns with no guard, so
+   * "green onions" ate "red onions" and "olive oil" ate "sesame oil".
    */
-  const wasPushed = (name: string): boolean => {
-    const k = matchKey(name);
-    if (pushedSet.has(k)) return true;
-    const b = baseIngredient(name);
-    for (const key of pushedSet) {
-      if (key.startsWith(k) || k.startsWith(key)) return true;
-      if (baseIngredient(key) === b) return true;
-    }
-    return false;
-  };
+  const wasPushed = (name: string): boolean => isNamePushed(name, pushedItems);
 
   /** Pantry restock rows: items you've flagged low/out in the pantry that no
    *  planned-recipe row or extra already covers. Surfaced as their own buy
@@ -782,50 +778,31 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     //
     // Pantry restocks still surface in STAPLES (stapleRows), unchanged. The push
     // surface reads from these rows, so it's unaffected.
-    const rows: FlatRow[] = [];
-    const gone = (base: string) => inHave(base) || wasPushed(base);
-    for (const ex of extras) {
-      // In-flight items (pushed to Wegmans/Costco, agent still filling) leave
-      // Active immediately for the collapsed "Pending" folder — they only land
-      // in "Pushed" once the fill completes.
-      if (pendingKeys.has(matchKey(ex.canonicalName))) continue;
-      // Plan-wizard items ALWAYS live on Active, never Staples — even if the
-      // item is a pantry staple. You put it on your shopping list on purpose;
-      // it only leaves once you buy it or push it. (Nate: "anything generated
-      // from the plan wizard needs to end up in Active. Never Staples.")
-      const fromWizard = ex.originId === PLAN_WIZARD;
-      const home = manualHome(ex);
-      // Added by hand while on Staples → it belongs over there, not here.
-      if (home === 'staples') continue;
-      // Wizard items and manual adds are both DELIBERATE — you put them on this
-      // list on purpose. They leave only when you check them off or push them.
-      // Nothing automatic may hide them: not an always-have pin, not a pantry
-      // `isStaple` flag, not a check-off left over from a previous shop. That
-      // last one was the bug — `checked` is permanent, so a name Nate had ever
-      // bought before (pine nuts) was swallowed the instant he re-added it.
-      //
-      // A staple pin still hides a NON-manual, non-wizard row from Active; that
-      // IS "Move to Staples".
-      const drop =
-        fromWizard || home === 'active'
-          ? wasPushed(ex.canonicalName) || isMarked(haveChecked, ex.canonicalName)
-          : gone(ex.canonicalName);
-      if (drop) continue;
-      rows.push({
-        key: `e:${ex.id}`,
-        name: ex.canonicalName,
-        baseName: ex.canonicalName,
-        qty: extraQty(ex),
-        extraId: ex.id,
-        origin: ex.originLabel,
-        pantryStatus: statusFor(ex.canonicalName),
-        kind: 'extra',
-        recipes: recipesForExtra(ex),
-      });
-    }
-    return rows;
+    // The row rules themselves are pure and unit-tested — see lib/activeList.ts
+    // and tests/shoppingList.test.ts. Wizard items and manual adds are
+    // DELIBERATE: you put them on this list on purpose, so they leave only when
+    // you check them off or push them, and a push can only take the rows it
+    // actually sent (matched by extra id, not by name).
+    const kept = activeExtras(extras, {
+      pushed: pushedItems,
+      pendingKeys,
+      checked: haveChecked,
+      manualHome,
+      inHave,
+    });
+    return kept.map<FlatRow>((ex) => ({
+      key: `e:${ex.id}`,
+      name: ex.canonicalName,
+      baseName: ex.canonicalName,
+      qty: extraQty(ex),
+      extraId: ex.id,
+      origin: ex.originLabel,
+      pantryStatus: statusFor(ex.canonicalName),
+      kind: 'extra',
+      recipes: recipesForExtra(ex),
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [extras, overrides, pushedSet, pendingKeys, haveChecked, alwaysHaveMap, statusByKey, shopMetaMap]);
+  }, [extras, overrides, pushedItems, pendingKeys, haveChecked, alwaysHaveMap, statusByKey, shopMetaMap]);
 
   /** Active = the dominant "get this now" list, with manual merges folded in. */
   const activeRows = useMemo(() => {
@@ -1060,6 +1037,20 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     () => currentRows.filter((r) => selected.has(matchKey(r.baseName))),
     [currentRows, selected],
   );
+
+  /**
+   * What a push records: the row's display name plus the id of every extra
+   * behind it. A MERGED row is one line on screen but several extras — sending
+   * only the visible one left its members on the list (or, once names were
+   * matched loosely, hidden with no way to reach them). All members go in under
+   * the merged row's name, so the Pushed section still shows one entry.
+   */
+  const pushRefs = (rows: FlatRow[]) =>
+    rows.flatMap((r) =>
+      r.members?.length
+        ? r.members.map((m) => ({ name: r.baseName, extraId: m.extraId }))
+        : [{ name: r.baseName, extraId: r.extraId }],
+    );
   const allSelected =
     currentRows.length > 0 &&
     currentRows.every((r) => selected.has(matchKey(r.baseName)));
@@ -1106,7 +1097,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       setHint(
         `Sent ${rows.length} to the "${REMINDERS_SHORTCUT}" Shortcut → Reminders "Shared Groceries."`,
       );
-      pushToPushed(rows.map((r) => r.baseName), 'reminders');
+      pushToPushed(pushRefs(rows), 'reminders');
       clearSelection();
     } catch {
       setHint(`Install the "${REMINDERS_SHORTCUT}" Shortcut first — see SHORTCUTS.md.`);
@@ -1220,16 +1211,20 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // to Active (its extra stays). CLEAR = delete it for good — also remove the
   // underlying extra, else dropping the marker bounces it right back onto Active
   // (that was the "Clear moved it back to the list" bug).
+  //
+  // Both of these delete EVERY extra the marker is hiding, using the same
+  // predicate that hid them (extrasForPushed). The old version looked the extra
+  // up by exact matchKey and took the FIRST hit — so a duplicate name, a merged
+  // row's other members, and anything the loose name match had swallowed all
+  // survived the delete, invisible. Dropping the markers then dumped the whole
+  // lot back onto Active: "I cleared my list and days-old items came back."
   const deletePushedItem = (key: string) => {
-    const ex = extras.find((e) => matchKey(e.canonicalName) === key);
-    if (ex) removeExtra(ex.id);
-    restorePushed(key); // drop the pushed marker (extra already gone)
+    const entry = pushedItems.find((e) => e.key === key);
+    if (entry) for (const ex of extrasForPushed(entry, extras)) removeExtra(ex.id);
+    restorePushed(key); // drop the pushed marker (extras already gone)
   };
   const clearAllPushed = () => {
-    for (const e of pushedItems) {
-      const ex = extras.find((x) => matchKey(x.canonicalName) === e.key);
-      if (ex) removeExtra(ex.id);
-    }
+    for (const ex of extrasForAllPushed(pushedItems, extras)) removeExtra(ex.id);
     clearPushed();
   };
 
@@ -1290,13 +1285,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
 
     unmarkHave(name);
     unsuppress(name);
-    const k = matchKey(name);
-    const b = baseIngredient(name);
-    for (const p of pushedItems) {
-      if (!p.key) continue;
-      if (p.key === k || p.key.startsWith(k) || k.startsWith(p.key) || baseIngredient(p.key) === b)
-        restorePushed(p.key);
-    }
+    for (const key of pushedKeysCovering(name, pushedItems)) restorePushed(key);
     setDismissed((prev) => {
       const next = new Set(prev);
       next.delete(`item:${name}`);
@@ -1449,7 +1438,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       // No job to watch on this path, so settle up immediately.
       setHint('Not signed in — copying the list and opening Instacart to paste.');
       await copyAndOpen();
-      pushToPushed(rows.map((r) => r.baseName), 'wegmans');
+      pushToPushed(pushRefs(rows), 'wegmans');
       clearSelection();
       return;
     }
@@ -1519,7 +1508,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       urls.forEach((u) => void Linking.openURL(u));
       setHint(`Opened ${n} Amazon search${n === 1 ? '' : 'es'}.`);
     }
-    pushToPushed(rows.map((r) => r.baseName), 'amazon');
+    pushToPushed(pushRefs(rows), 'amazon');
     clearSelection();
   };
 

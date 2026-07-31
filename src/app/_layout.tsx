@@ -24,6 +24,7 @@ import { useShopMetaStore } from '@/store/shopMeta';
 import { usePrefsStore } from '@/store/prefs';
 import { useSynonymsStore } from '@/store/synonyms';
 import { useCartFillStore } from '@/store/cartFill';
+import { usePushedStore } from '@/store/pushed';
 // Side-effect import: cloud sync wires itself to auth-state changes the
 // moment this module loads. No-op when SUPABASE_* env vars are unset.
 import '@/lib/sync';
@@ -62,6 +63,10 @@ export default function RootLayout() {
   const hydratePrefs = usePrefsStore((s) => s.hydrate);
   const hydrateSynonyms = useSynonymsStore((s) => s.hydrate);
   const hydrateCartFill = useCartFillStore((s) => s.hydrate);
+  // Pushed markers used to hydrate only when the Shopping screen mounted, so
+  // any code that wrote to the store first (or read it early) saw an EMPTY
+  // pushed list — and the subscriber would persist that emptiness.
+  const hydratePushed = usePushedStore((s) => s.hydrate);
   useEffect(() => {
     // Hydrate the local-first stores: native = SQLite (+ seed first run),
     // web = IndexedDB (+ seed first run) — Stock is a real PWA, see
@@ -80,6 +85,7 @@ export default function RootLayout() {
     hydratePrefs();
     hydrateSynonyms();
     hydrateCartFill();
+    hydratePushed();
   }, [
     hydrateRecipes,
     hydratePlan,
@@ -94,6 +100,7 @@ export default function RootLayout() {
     hydratePrefs,
     hydrateSynonyms,
     hydrateCartFill,
+    hydratePushed,
   ]);
 
   return (
