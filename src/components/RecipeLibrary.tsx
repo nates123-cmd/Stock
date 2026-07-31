@@ -14,17 +14,20 @@ import { useCookPlanStore } from '@/store/cookPlans';
 import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
 import { isModified } from '@/lib/recipe';
+import { AUTO_TAGS, matchesQuery, norm } from '@/lib/recipeTags';
 import { canMakeNow, recipeCoverage } from '@/lib/pantry';
 import type { CookPlan, PipelineIdea, Recipe } from '@/types';
 
-const BASE_FILTERS = ['All', 'Cook plans', 'Have it', 'Weeknight', 'Baking', 'Project', 'Modified'] as const;
+const BASE_FILTERS = ['All', 'Cook plans', 'Have it', 'Modified'] as const;
 type Filter = (typeof BASE_FILTERS)[number];
 
-const TAG_FILTER: Partial<Record<Filter, string>> = {
-  Weeknight: 'weeknight',
-  Baking: 'baking',
-  Project: 'project',
-};
+/**
+ * Tag chips come in two rows: the AUTO vocabulary first (always the same
+ * chips in the same order, so muscle memory works even when the library
+ * changes), then whatever free-form tags you have typed, by frequency.
+ * Weeknight / Baking / Project used to be hard-coded "canned filters" here;
+ * they are ordinary auto tags now, so the tagger fills them in.
+ */
 
 type Segment = 'favorites' | 'totry' | 'all';
 
@@ -68,36 +71,38 @@ export function RecipeLibrary({
   // Cook plans aren't addable to a single day, so drop that filter in add mode.
   const FILTERS = addMode ? BASE_FILTERS.filter((f) => f !== 'Cook plans') : BASE_FILTERS;
 
-  const userTags = useMemo(() => {
-    const cannedTagSet = new Set(Object.values(TAG_FILTER));
+  const { autoTagsInUse, userTags } = useMemo(() => {
+    const autoSet = new Set<string>(AUTO_TAGS);
     const counts = new Map<string, number>();
     for (const r of recipes) {
       if (r.status === 'archived') continue;
-      for (const t of r.tags) {
-        if (cannedTagSet.has(t)) continue;
-        counts.set(t, (counts.get(t) ?? 0) + 1);
-      }
+      for (const t of r.tags) counts.set(norm(t), (counts.get(norm(t)) ?? 0) + 1);
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+    return {
+      // Vocabulary order, but only the ones something actually has — an
+      // always-empty chip is just noise.
+      autoTagsInUse: AUTO_TAGS.filter((t) => counts.has(t)),
+      userTags: [...counts.entries()]
+        .filter(([t]) => !autoSet.has(t))
+        .sort((a, b) => b[1] - a[1])
+        .map(([t]) => t),
+    };
   }, [recipes]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return recipes.filter((r) => {
-      if (
-        q &&
-        !r.title.toLowerCase().includes(q) &&
-        !r.tags.some((t) => t.includes(q)) &&
-        !r.ingredients.some((i) => i.canonicalName.toLowerCase().includes(q))
-      )
-        return false;
+      // Every search term must match something (title / tag / ingredient), so
+      // "quick chicken" narrows rather than widening. `tag:x` restricts a term
+      // to tags. See lib/recipeTags.ts.
+      if (!matchesQuery(r, query)) return false;
       if (filter === 'Modified' && !isModified(r)) return false;
       if (filter === 'Have it' && !canMakeNow(recipeCoverage(r.ingredients, pantry)))
         return false;
-      const cannedTag = TAG_FILTER[filter];
-      if (cannedTag && !r.tags.includes(cannedTag)) return false;
-      if (activeTags.length && !activeTags.every((t) => r.tags.includes(t)))
-        return false;
+      // Chips are AND-ed: "vegetarian" + "quick" means both.
+      if (activeTags.length) {
+        const mine = new Set(r.tags.map(norm));
+        if (!activeTags.every((t) => mine.has(norm(t)))) return false;
+      }
       return true;
     });
   }, [recipes, query, filter, activeTags, pantry]);
@@ -222,7 +227,11 @@ export function RecipeLibrary({
       ) : (
         <>
           <View style={styles.search}>
-            <SearchBar value={query} onChangeText={setQuery} />
+            <SearchBar
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search title, tag or ingredient"
+            />
           </View>
 
           <View style={styles.chips}>
@@ -237,6 +246,22 @@ export function RecipeLibrary({
               ))}
             </ChipRow>
           </View>
+
+          {autoTagsInUse.length > 0 ? (
+            <View style={styles.chips}>
+              <ChipRow>
+                {autoTagsInUse.map((t) => (
+                  <FilterChip
+                    key={t}
+                    label={t}
+                    variant="tag"
+                    active={activeTags.includes(t)}
+                    onPress={() => toggleTag(t)}
+                  />
+                ))}
+              </ChipRow>
+            </View>
+          ) : null}
 
           {userTags.length > 0 ? (
             <View style={styles.chips}>

@@ -25,6 +25,7 @@ import { pickRecipePhoto } from '@/lib/photo';
 import type { Ingredient, MealType, Recipe, Step, Unit } from '@/types';
 import { formatMinutes } from '@/lib/format';
 import { shortDate } from '@/lib/pantry';
+import { applyTagEdit, norm, type TagMeta } from '@/lib/recipeTags';
 import type { Nutrition, RecipeSource } from '@/types';
 
 const SOURCE_NAME: Record<RecipeSource['type'], string> = {
@@ -44,6 +45,7 @@ export default function RecipeDetail() {
   const toggleFavorite = useRecipeStore((s) => s.toggleFavorite);
   const toggleToTry = useRecipeStore((s) => s.toggleToTry);
   const removeRecipe = useRecipeStore((s) => s.remove);
+  const autoTag = useRecipeStore((s) => s.autoTag);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Autocomplete source for the tag editor — every tag used anywhere in the
   // library, deduped case-insensitively (spec §6 tag editor).
@@ -317,8 +319,20 @@ export default function RecipeDetail() {
         {!clean ? (
           <TagEditor
             tags={recipe.tags}
+            tagMeta={recipe.tagMeta}
             allTags={allTagsAcrossLibrary}
-            onChange={(tags) => save({ ...recipe, tags, modifiedAt: new Date() })}
+            onChange={(tags) =>
+              // Record WHAT the edit meant before saving: deleting an auto tag
+              // is a standing "not this one", so re-running the tagger never
+              // brings it back. See lib/recipeTags.ts.
+              save({
+                ...recipe,
+                tags,
+                tagMeta: applyTagEdit(recipe.tags, tags, recipe.tagMeta),
+                modifiedAt: new Date(),
+              })
+            }
+            onRetag={() => void autoTag(recipe.id)}
           />
         ) : null}
 
@@ -556,16 +570,23 @@ function NutritionCard({ n }: { n: Nutrition }) {
  */
 function TagEditor({
   tags,
+  tagMeta,
   allTags,
   onChange,
+  onRetag,
 }: {
   tags: string[];
+  tagMeta?: TagMeta;
   allTags: string[];
   onChange: (tags: string[]) => void;
+  onRetag: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
 
+  // Which chips the tagger owns — drawn with a tint so it is obvious which are
+  // guesses you can overrule and which you put there yourself.
+  const autoSet = useMemo(() => new Set((tagMeta?.auto ?? []).map(norm)), [tagMeta]);
   const tagSet = new Set(tags.map((t) => t.toLowerCase()));
   const suggestions = useMemo(() => {
     const q = draft.trim().toLowerCase();
@@ -596,12 +617,21 @@ function TagEditor({
 
   return (
     <View style={tagStyles.wrap}>
-      <SectionLabel color="textMuted" style={tagStyles.label}>
-        Tags
-      </SectionLabel>
+      <View style={tagStyles.head}>
+        <SectionLabel color="textMuted" style={tagStyles.label}>
+          Tags
+        </SectionLabel>
+        {/* Auto tags are derived from the ingredients, time and method. This
+            re-runs that; anything you added or deleted is left alone. */}
+        <Pressable onPress={onRetag} hitSlop={8} accessibilityRole="button">
+          <Text variant="sectionLabel" color="accent">
+            Re-run auto tags
+          </Text>
+        </Pressable>
+      </View>
       <View style={tagStyles.row}>
         {tags.map((t) => (
-          <View key={t} style={tagStyles.chip}>
+          <View key={t} style={[tagStyles.chip, autoSet.has(norm(t)) && tagStyles.chipAuto]}>
             <Text variant="bodyStrong" color="textMuted">
               {t}
             </Text>
@@ -659,6 +689,12 @@ function TagEditor({
 
 const tagStyles = StyleSheet.create({
   wrap: { gap: 6 },
+  head: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
   label: { letterSpacing: 1.5 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' },
   chip: {
@@ -670,6 +706,11 @@ const tagStyles = StyleSheet.create({
     paddingRight: 8,
     paddingVertical: 5,
     borderRadius: 6,
+  },
+  chipAuto: {
+    backgroundColor: colors.bg2,
+    borderWidth: 1,
+    borderColor: colors.accentSoft,
   },
   addChip: {
     flexDirection: 'row',

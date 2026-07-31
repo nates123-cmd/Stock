@@ -51,6 +51,7 @@ const navTheme: Theme = {
 
 export default function RootLayout() {
   const hydrateRecipes = useRecipeStore((s) => s.hydrate);
+  const autoTagRecipes = useRecipeStore((s) => s.autoTag);
   const hydratePlan = usePlanStore((s) => s.hydrate);
   const hydratePantry = usePantryStore((s) => s.hydrate);
   const hydratePipeline = usePipelineStore((s) => s.hydrate);
@@ -72,7 +73,10 @@ export default function RootLayout() {
     // web = IndexedDB (+ seed first run) — Stock is a real PWA, see
     // project_stock_is_a_pwa. hydrateAuth pulls the persisted Supabase
     // session and subscribes to auth changes; sync layer rides on top.
-    hydrateRecipes();
+    // Auto-tags are derived locally and deterministically, and the reconcile
+    // never overrides an edit — so re-running on every boot is free and keeps
+    // tags honest after a recipe is edited. See lib/recipeTags.ts.
+    void hydrateRecipes().then(() => autoTagRecipes());
     hydratePlan();
     hydratePantry();
     hydratePipeline();
@@ -88,6 +92,7 @@ export default function RootLayout() {
     hydratePushed();
   }, [
     hydrateRecipes,
+    autoTagRecipes,
     hydratePlan,
     hydratePantry,
     hydratePipeline,

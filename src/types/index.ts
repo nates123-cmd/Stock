@@ -1,4 +1,5 @@
 import type { PantryCategory } from '@/lib/pantryCategories';
+import type { TagMeta } from '@/lib/recipeTags';
 /**
  * Core domain types — transcribed from spec §4 "Data model".
  *
@@ -58,6 +59,12 @@ export type Recipe = {
   ingredients: Ingredient[];
   steps: Step[];
   tags: string[];
+  /**
+   * Provenance for `tags` — which of them the auto-tagger added, and which auto
+   * tags you deleted. Absent means "every tag here is yours", so switching
+   * auto-tagging on can never take one away. See lib/recipeTags.ts.
+   */
+  tagMeta?: TagMeta;
   myNotes?: string;
   /** optional planning note set at capture */
   firstCookIntention?: string;
