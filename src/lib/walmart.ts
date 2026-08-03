@@ -22,7 +22,7 @@
  * gap rather than guessed at.
  */
 import { matchCatalog } from './catalogMatch';
-import { WALMART_ALIASES, WALMART_BY_ID, WALMART_PRODUCTS, WALMART_STORE } from './walmartCatalog';
+import { activeWalmartCatalog } from './walmartLive';
 import type { WalmartProduct } from './walmartCatalog';
 
 const ADD_TO_CART = 'https://affil.walmart.com/cart/addToCart';
@@ -57,13 +57,18 @@ export type WalmartQuote = {
   shipsSeparately: WalmartLine[];
   /** Estimated basket from snapshot prices. Not a promise — see walmartCatalog. */
   estimatedSubtotal: number;
-  store: typeof WALMART_STORE;
+  /** Which catalog answered, how old it is, and which store priced it. */
+  store: { id: string; refreshedAt: string; source: 'bundled' | 'cached' | 'live' };
 };
 
 /** Resolve a whole list into a quote: what's in, what's out, what it'll run. */
 export function quoteWalmart(items: { name: string; qty?: number }[]): WalmartQuote {
+  // Read the catalog ONCE per quote. It can be swapped out from under us by a
+  // background refresh, and half a basket priced against each version would be
+  // a subtotal that matches neither.
+  const cat = activeWalmartCatalog();
   const lines: WalmartLine[] = items.map(({ name, qty }) => {
-    const { product, via } = matchCatalog(name, WALMART_PRODUCTS, WALMART_ALIASES, WALMART_BY_ID);
+    const { product, via } = matchCatalog(name, cat.products, cat.aliases, cat.byId);
     return { query: name, qty: Math.max(1, qty ?? 1), product, via };
   });
   const matched = lines.filter((l) => l.product);
@@ -75,7 +80,7 @@ export function quoteWalmart(items: { name: string; qty?: number }[]): WalmartQu
     shipsSeparately: matched.filter((l) => l.product?.fulfillment === 'ship'),
     estimatedSubtotal:
       Math.round(matched.reduce((s, l) => s + (l.product!.price * l.qty), 0) * 100) / 100,
-    store: WALMART_STORE,
+    store: { id: cat.storeId, refreshedAt: cat.refreshedAt, source: cat.source },
   };
 }
 

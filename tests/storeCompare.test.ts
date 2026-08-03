@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { compareQuotes, describeSlot, type StoreQuote } from '../src/lib/quotes';
 import { cartLinks, quoteWalmart } from '../src/lib/walmart';
 import { WALMART_PRODUCTS } from '../src/lib/walmartCatalog';
+import { activeWalmartCatalog, isOwnStore, OWN_STORE_ID } from '../src/lib/walmartLive';
 import { quoteAllStores, quoteWalmartStore, quoteWegmansStore } from '../src/lib/storeQuotes';
 
 const NOW = new Date('2026-08-03T12:00:00-04:00');
@@ -122,6 +123,24 @@ describe('quote providers', () => {
     expect(quoteWalmartStore([{ name: 'carrots' }]).note).toBe(
       'Delivery from your store. Cart shows the real total.',
     );
+  });
+
+  it('flags that Walmart prices came from a nearby store, not his own', () => {
+    // The bundled catalog IS store 5293, so no caveat. The nightly refresh
+    // reads whatever store Walmart geolocates the Beelink to, and presenting
+    // that as his pricing is the small lie that makes the whole comparison
+    // untrusted. Guard the honest-by-default direction.
+    const note = quoteWalmartStore([{ name: 'carrots' }]).note ?? '';
+    expect(note).not.toContain('nearby store');
+    expect(activeWalmartCatalog().storeId).toBe(OWN_STORE_ID);
+    expect(isOwnStore()).toBe(true);
+  });
+
+  it('reports which catalog answered and how old it is', () => {
+    const q = quoteWalmart([{ name: 'carrots' }]);
+    expect(q.store.source).toBe('bundled');
+    expect(q.store.id).toBe(OWN_STORE_ID);
+    expect(q.store.refreshedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('excludes a store it cannot actually price', () => {

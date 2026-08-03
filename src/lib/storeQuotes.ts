@@ -14,7 +14,7 @@
  */
 import { matchCatalog } from './catalogMatch';
 import type { QuoteLine, QuoteRetailer, StoreQuote } from './quotes';
-import { WALMART_ALIASES, WALMART_BY_ID, WALMART_PRODUCTS } from './walmartCatalog';
+import { activeWalmartCatalog, isOwnStore } from './walmartLive';
 import { WEGMANS_ALIASES, WEGMANS_BY_ID, WEGMANS_PRODUCTS } from './wegmansCatalog';
 
 export type QuoteInput = { name: string; qty?: number };
@@ -38,7 +38,8 @@ const subtotalOf = (lines: QuoteLine[]) =>
   Math.round(lines.reduce((s, l) => s + (l.price ?? 0) * l.qty, 0) * 100) / 100;
 
 export function quoteWalmartStore(items: QuoteInput[]): StoreQuote {
-  const hits = items.map((i) => matchCatalog(i.name, WALMART_PRODUCTS, WALMART_ALIASES, WALMART_BY_ID));
+  const cat = activeWalmartCatalog();
+  const hits = items.map((i) => matchCatalog(i.name, cat.products, cat.aliases, cat.byId));
   const lines = items.map((i, n) => lineFor(i, hits[n]!));
 
   // Walmart splits a cart: store-picked items ride a same-day delivery slot,
@@ -46,6 +47,18 @@ export function quoteWalmartStore(items: QuoteInput[]): StoreQuote {
   // over a basket that's half shipped would be the wrong answer to the
   // question Nate is actually asking.
   const shipping = hits.filter((h) => h.product?.fulfillment === 'ship').length;
+
+  const split = shipping
+    ? `Delivery from your store, but ${
+        shipping === 1 ? '1 item ships separately and arrives' : `${shipping} items ship separately and arrive`
+      } in a few days.`
+    : 'Delivery from your store. Cart shows the real total.';
+
+  // When the prices came from a nearby store rather than his own, say so. The
+  // cart is still exact — it resolves against HIS store when he opens it — but
+  // the estimate here can miss his rollbacks, and quietly presenting it as his
+  // pricing is the kind of small lie that makes the whole comparison untrusted.
+  const caveat = isOwnStore(cat) ? '' : ' Priced from a nearby store, so the total is a ballpark.';
 
   return {
     retailer: 'walmart',
@@ -55,11 +68,7 @@ export function quoteWalmartStore(items: QuoteInput[]): StoreQuote {
     // fee (and any small-basket charge) once the slot is picked.
     fees: 0,
     complete: true,
-    note: shipping
-      ? `Delivery from your store, but ${
-          shipping === 1 ? '1 item ships separately and arrives' : `${shipping} items ship separately and arrive`
-        } in a few days.`
-      : 'Delivery from your store. Cart shows the real total.',
+    note: split + caveat,
   };
 }
 

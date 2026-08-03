@@ -75,6 +75,7 @@ import {
   type Retailer,
 } from '@/lib/instacart';
 import { cartLinks, quoteWalmart } from '@/lib/walmart';
+import { hydrateWalmartCatalog, onWalmartCatalogChange } from '@/lib/walmartLive';
 import type { QuoteRetailer } from '@/lib/quotes';
 import type { Recipe, ShoppingCategory } from '@/types';
 
@@ -146,6 +147,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   useEffect(() => {
     void hydratePushed();
   }, [hydratePushed]);
+  // Pull the nightly Walmart refresh (cached copy first, then Supabase). Failing
+  // is fine — the bundled catalog answers either way, just staler.
+  useEffect(() => {
+    const off = onWalmartCatalogChange(() => setCatalogVersion((v) => v + 1));
+    void hydrateWalmartCatalog();
+    return off;
+  }, []);
   // Subscribe to have-state so rows re-render on tap (we use the Map directly
   // for derived booleans below, but the selector keeps us reactive).
   const haveChecked = useHaveStore((s) => s.checked);
@@ -206,6 +214,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // "Compare stores" sheet — prices the selection at every store we can quote
   // locally, so the choice happens before anything is sent anywhere.
   const [compareOpen, setCompareOpen] = useState(false);
+  // Bumped when the nightly Walmart refresh lands, to re-quote against it. The
+  // catalog itself lives outside React (walmartLive) so quoting stays sync.
+  const [catalogVersion, setCatalogVersion] = useState(0);
   // Inline row editor (Reminders-style tap-to-edit): matchKey of the row being
   // edited, plus the working name/qty. Session rename/qty overrides for recipe
   // + restock rows live in `overrides` (extras write straight to their store).
@@ -1048,7 +1059,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  compare sheet re-quotes every store whenever this identity changes. */
   const compareItems = useMemo(
     () => selectedRows.map((r) => ({ name: r.name })),
-    [selectedRows],
+    // catalogVersion is a deliberate dependency, not a stale-closure slip: a
+    // refresh landing mid-session must re-quote, and the quote is derived from
+    // this list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedRows, catalogVersion],
   );
 
   /**
