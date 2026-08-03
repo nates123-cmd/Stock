@@ -24,7 +24,12 @@ export type WalmartProduct = {
   name: string;
   /** Snapshot price in dollars at harvest time. */
   price: number;
-  category: 'produce' | 'refrigerated' | 'meat' | 'pantry' | 'beverages' | 'personal care' | 'home';
+  /**
+   * Purely descriptive, and optional so a machine-refreshed catalog (which has
+   * no way to infer it) is the same shape as this hand-harvested one. Nothing
+   * reads it — don't start without making refresh.mjs emit it too.
+   */
+  category?: 'produce' | 'refrigerated' | 'meat' | 'pantry' | 'beverages' | 'personal care' | 'home';
   /**
    * Where it comes from — Walmart's own `fulfillmentType`, checked per SKU on
    * 2026-08-03.
