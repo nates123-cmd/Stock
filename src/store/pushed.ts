@@ -21,7 +21,7 @@ export type { PushedInput };
  */
 const NATIVE = Platform.OS !== 'web';
 
-export type PushDest = 'wegmans' | 'reminders' | 'amazon' | 'costco';
+export type PushDest = 'wegmans' | 'reminders' | 'amazon' | 'costco' | 'walmart';
 export type PushedEntry = {
   /** matchKey of the item name — the display / de-dupe key. */
   key: string;

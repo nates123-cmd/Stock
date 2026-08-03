@@ -20,6 +20,7 @@ import {
   BottomActionBar,
   Overlay,
   SegmentedControl,
+  StoreCompareSheet,
 } from '@/components';
 import { colors, fonts, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
@@ -73,6 +74,8 @@ import {
   type JobStatus,
   type Retailer,
 } from '@/lib/instacart';
+import { cartLinks, quoteWalmart } from '@/lib/walmart';
+import type { QuoteRetailer } from '@/lib/quotes';
 import type { Recipe, ShoppingCategory } from '@/types';
 
 const CAT_LABEL: Record<ShoppingCategory, string> = {
@@ -200,6 +203,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // local — reselect each visit.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // "Compare stores" sheet — prices the selection at every store we can quote
+  // locally, so the choice happens before anything is sent anywhere.
+  const [compareOpen, setCompareOpen] = useState(false);
   // Inline row editor (Reminders-style tap-to-edit): matchKey of the row being
   // edited, plus the working name/qty. Session rename/qty overrides for recipe
   // + restock rows live in `overrides` (extras write straight to their store).
@@ -1038,6 +1044,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     [currentRows, selected],
   );
 
+  /** The selection as plain names for the quote providers. Memoised because the
+   *  compare sheet re-quotes every store whenever this identity changes. */
+  const compareItems = useMemo(
+    () => selectedRows.map((r) => ({ name: r.name })),
+    [selectedRows],
+  );
+
   /**
    * What a push records: the row's display name plus the id of every extra
    * behind it. A MERGED row is one line on screen but several extras — sending
@@ -1475,6 +1488,71 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
   };
 
+  /**
+   * Push the SELECTED rows to the Walmart cart, for delivery from Nate's store.
+   *
+   * Nothing queues and nothing waits: Walmart's add-to-cart link is keyless, so
+   * one navigation in a browser he's already signed into fills the whole cart
+   * and lands on /shoppingcart with Delivery selected and the real total shown.
+   * That's also why this is the one push that can't lie about what it got —
+   * he's looking straight at the cart.
+   *
+   * Only resolved items move to Pushed. Anything the catalog has no SKU for
+   * STAYS on the list, same rule as the Wegmans path: a gap we can't fill must
+   * never look like a thing we bought.
+   */
+  const pushToWalmart = () => {
+    const rows = selectedRows;
+    if (rows.length === 0) return;
+    const quote = quoteWalmart(rows.map((r) => ({ name: r.name })));
+    const urls = cartLinks(quote.lines);
+    if (!urls.length) {
+      setHint(
+        `Walmart catalog has none of these yet. Add them to walmartCatalog.ts, or push to Wegmans.`,
+      );
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      // Open WITHOUT the 'noopener' feature string and sever the link after:
+      // `window.open(url, '_blank', 'noopener')` returns null *by design*, so
+      // there is no way to tell a blocked pop-up from a successful one. That
+      // false "blocked" reading used to abort the push — the cart filled, the
+      // items stayed on the list, and the message said the opposite.
+      let blocked = 0;
+      for (const u of urls) {
+        const w = window.open(u, '_blank');
+        if (w) w.opener = null;
+        else blocked++;
+      }
+      if (blocked) {
+        setHint(`Allow pop-ups for this site — ${blocked} of ${urls.length} cart tabs were blocked.`);
+        return;
+      }
+    } else {
+      urls.forEach((u) => void Linking.openURL(u));
+    }
+
+    const gotNames = new Set(quote.matched.map((l) => l.query));
+    const movedRows = rows.filter((r) => gotNames.has(r.name));
+    const left = quote.missing;
+    setHint(
+      left.length
+        ? `Sent ${quote.matched.length} to your Walmart cart (about $${quote.estimatedSubtotal.toFixed(2)}). Still on the list: ${left.join(', ')}.`
+        : `Sent ${quote.matched.length} to your Walmart cart — about $${quote.estimatedSubtotal.toFixed(2)}. Pick your delivery slot there.`,
+    );
+    pushToPushed(pushRefs(movedRows), 'walmart');
+    clearSelection();
+  };
+
+  /** Route a compare-sheet pick to whichever pipeline that store uses. */
+  const pushFromCompare = (retailer: QuoteRetailer) => {
+    setCompareOpen(false);
+    if (retailer === 'walmart') pushToWalmart();
+    else if (retailer === 'costco') void pushToCostco();
+    else void pushToWegmans();
+  };
+
   // ── Staples-section pushes (Amazon + Costco) ───────────────────────────────
 
   /**
@@ -1494,10 +1572,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     );
     const n = urls.length;
     if (Platform.OS === 'web') {
+      // Same trap as the Walmart push: with the 'noopener' feature string
+      // window.open ALWAYS returns null, so every successful tab counted as
+      // blocked and the message read "opened 0 of 5". Sever opener manually.
       let blocked = 0;
       for (const u of urls) {
-        const w = window.open(u, '_blank', 'noopener');
-        if (!w) blocked++;
+        const w = window.open(u, '_blank');
+        if (w) w.opener = null;
+        else blocked++;
       }
       setHint(
         blocked
@@ -2286,8 +2368,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             </>
           ) : (
             <>
+              {/* Compare answers "which store" before anything is sent; the
+                  other two are the destinations Nate picks without thinking.
+                  Reminders keeps its button because it's the local-pickup
+                  escape hatch, and no store quote can stand in for it. */}
               <Button
-                label={`Push to Reminders · ${selectedRows.length}`}
+                label="Compare"
+                variant="secondary"
+                flex
+                onPress={() => setCompareOpen(true)}
+              />
+              <Button
+                label="Reminders"
                 variant="secondary"
                 flex
                 onPress={pushToReminders}
@@ -2295,10 +2387,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
               <Button
                 label={
                   filling
-                    ? 'Filling cart…'
+                    ? 'Filling…'
                     : sending
                       ? 'Pushing…'
-                      : `Push to Wegmans · ${selectedRows.length}`
+                      : `Wegmans · ${selectedRows.length}`
                 }
                 glyph="next"
                 flex
@@ -2309,6 +2401,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           )}
         </BottomActionBar>
       ) : null}
+
+      <StoreCompareSheet
+        visible={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        items={compareItems}
+        onPush={pushFromCompare}
+        busy={sending || filling}
+      />
     </SafeAreaView>
   );
 }
