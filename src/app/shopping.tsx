@@ -76,7 +76,14 @@ import {
 } from '@/lib/instacart';
 import { cartLinks, quoteWalmart } from '@/lib/walmart';
 import { hydrateWalmartCatalog, onWalmartCatalogChange } from '@/lib/walmartLive';
-import type { QuoteRetailer } from '@/lib/quotes';
+import {
+  SCAN_AVAILABLE,
+  queueScan,
+  scanStatus,
+  scanToQuotes,
+  type ScanResult,
+} from '@/lib/storeScan';
+import type { QuoteRetailer, StoreQuote } from '@/lib/quotes';
 import type { Recipe, ShoppingCategory } from '@/types';
 
 const CAT_LABEL: Record<ShoppingCategory, string> = {
@@ -217,6 +224,12 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // Bumped when the nightly Walmart refresh lands, to re-quote against it. The
   // catalog itself lives outside React (walmartLive) so quoting stays sync.
   const [catalogVersion, setCatalogVersion] = useState(0);
+  // Live Instacart scan: id of the queued job, whatever it returned, and how
+  // it's going. Read-only — a scan never touches a cart.
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [scanState, setScanState] = useState<'idle' | 'running' | 'error'>('idle');
+  const [scanError, setScanError] = useState<string | undefined>();
+  const [liveQuotes, setLiveQuotes] = useState<StoreQuote[] | undefined>();
   // Inline row editor (Reminders-style tap-to-edit): matchKey of the row being
   // edited, plus the working name/qty. Session rename/qty overrides for recipe
   // + restock rows live in `overrides` (extras write straight to their store).
@@ -1560,6 +1573,67 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     clearSelection();
   };
 
+  /**
+   * Ask the Beelink to read live prices at the Instacart storefronts.
+   *
+   * Read-only: this queues a scan job, never a cart fill. It takes a minute or
+   * two because the box drives a real logged-in session one storefront at a
+   * time, so the sheet stays open and fills in when the result lands.
+   */
+  const startScan = async () => {
+    if (!SCAN_AVAILABLE()) {
+      setScanState('error');
+      setScanError('Sign in to check live prices.');
+      return;
+    }
+    try {
+      setScanState('running');
+      setScanError(undefined);
+      const id = await queueScan(compareItems);
+      setScanId(id);
+    } catch (e) {
+      setScanState('error');
+      const msg = (e as Error).message;
+      // Already a sentence when it's the sign-in case; only wrap the rest.
+      setScanError(/^Sign in/.test(msg) ? msg : `Couldn't start the scan: ${msg}`);
+    }
+  };
+
+  // Poll the scan job. Stops on done/error, and on unmount or a new scan.
+  useEffect(() => {
+    if (!scanId) return;
+    let alive = true;
+    const tick = async () => {
+      const s = await scanStatus(scanId);
+      if (!alive || !s) return;
+      if (s.status === 'done') {
+        // An empty result is NOT a comparison — leaving the bundled quotes
+        // alone beats replacing them with nothing.
+        const quotes = scanToQuotes(s.result as ScanResult);
+        if (quotes.length) setLiveQuotes(quotes);
+        else setScanError('The scan came back empty — showing catalog prices instead.');
+        setScanState(quotes.length ? 'idle' : 'error');
+        setScanId(null);
+      } else if (s.status === 'error') {
+        setScanState('error');
+        setScanError(s.error ?? 'The scan failed.');
+        setScanId(null);
+      }
+    };
+    const timer = setInterval(() => void tick(), 4000);
+    void tick();
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [scanId]);
+
+  // A changed selection invalidates a scan of the old one — showing prices for
+  // items no longer on screen would be worse than showing none.
+  useEffect(() => {
+    setLiveQuotes(undefined);
+  }, [compareItems]);
+
   /** Route a compare-sheet pick to whichever pipeline that store uses. */
   const pushFromCompare = (retailer: QuoteRetailer) => {
     setCompareOpen(false);
@@ -2423,6 +2497,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         items={compareItems}
         onPush={pushFromCompare}
         busy={sending || filling}
+        liveQuotes={liveQuotes}
+        onScan={() => void startScan()}
+        scanState={scanState}
+        scanError={scanError}
       />
     </SafeAreaView>
   );

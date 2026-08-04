@@ -18,19 +18,42 @@
 
 import { describeSize, sizesDiverge, type ParsedSize, type UnitPrice } from './size';
 
-export type QuoteRetailer = 'walmart' | 'wegmans' | 'costco';
+/**
+ * A store id. The bundled catalogs use 'walmart'/'wegmans'; a live Instacart
+ * scan can return any storefront slug ('food-bazaar', 'shoprite', …), so this
+ * is deliberately open rather than a closed union.
+ */
+export type QuoteRetailer = string;
 
-export const RETAILER_LABEL: Record<QuoteRetailer, string> = {
+const KNOWN_LABELS: Record<string, string> = {
   walmart: 'Walmart',
   wegmans: 'Wegmans',
   costco: 'Costco',
+  'food-bazaar': 'Food Bazaar',
+  shoprite: 'ShopRite',
+  'key-food': 'Key Food',
+  'stop-shop': 'Stop & Shop',
 };
+
+/** Title-case a slug we don't have a name for, so nothing renders as "key-food". */
+const titleize = (slug: string) =>
+  slug.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+/** Display name for a store id, falling back to a tidied-up slug. */
+export function retailerLabel(slug: QuoteRetailer): string {
+  return KNOWN_LABELS[slug] ?? titleize(String(slug));
+}
 
 export type QuoteLine = {
   /** The list item this answers, verbatim, so lines can be joined across stores. */
   query: string;
   qty: number;
-  status: 'exact' | 'substitute' | 'missing';
+  /**
+   * `unknown` is NOT `missing`. A live scan uses it for a store/item pair it
+   * never managed to check; treating that as "doesn't carry it" would invent a
+   * gap, which is the same lie as inventing coverage.
+   */
+  status: 'exact' | 'substitute' | 'missing' | 'unknown';
   /** Resolved product name, when the store has something. */
   name?: string;
   /** Price of ONE PACK in dollars — not per ounce. See `unit`. */
@@ -43,6 +66,8 @@ export type QuoteLine = {
 
 export type StoreQuote = {
   retailer: QuoteRetailer;
+  /** Display name, when the source knows it better than the slug does. */
+  label?: string;
   lines: QuoteLine[];
   /** Cost of what this store can actually supply. */
   subtotal: number;
@@ -51,6 +76,13 @@ export type StoreQuote = {
    * NOT the same as slow, and must never be rendered as if it were.
    */
   earliestDelivery?: string;
+  /**
+   * Instacart's own wording, e.g. "Delivery by 10:05pm". Kept verbatim rather
+   * than parsed into a timestamp — it's already the clearest form, and a bad
+   * parse would silently reorder stores by speed.
+   */
+  etaText?: string;
+  distanceMi?: number;
   /** Delivery + service fees, when known. */
   fees?: number;
   /** False when the quote couldn't be trusted end to end (stale session, etc). */
@@ -66,11 +98,15 @@ export type StoreSummary = {
   /** Items it offers a stand-in for. */
   substitutes: number;
   missing: string[];
+  /** Never checked — distinct from missing, and never counted as either. */
+  unknown: string[];
   total: number;
   subtotal: number;
   /** subtotal + fees, the number that actually leaves the account. */
   allIn: number;
   earliestDelivery?: string;
+  etaText?: string;
+  distanceMi?: number;
   complete: boolean;
 };
 
@@ -110,14 +146,18 @@ function summarize(q: StoreQuote): StoreSummary {
   const substitutes = q.lines.filter((l) => l.status === 'substitute').length;
   return {
     retailer: q.retailer,
-    label: RETAILER_LABEL[q.retailer],
+    label: q.label ?? retailerLabel(q.retailer),
     have,
     substitutes,
     missing: q.lines.filter((l) => l.status === 'missing').map((l) => l.query),
+    // Never rolled into `missing`: these were never checked.
+    unknown: q.lines.filter((l) => l.status === 'unknown').map((l) => l.query),
     total: q.lines.length,
     subtotal: q.subtotal,
     allIn: Math.round((q.subtotal + (q.fees ?? 0)) * 100) / 100,
     earliestDelivery: q.earliestDelivery,
+    etaText: q.etaText,
+    distanceMi: q.distanceMi,
     complete: q.complete !== false,
   };
 }
@@ -145,10 +185,13 @@ export function compareQuotes(quotes: StoreQuote[], now = new Date()): Compariso
     ) as Record<string, QuoteLine | undefined>,
   }));
 
+  // Only claim nobody has it when every store actually SAID so. One `unknown`
+  // and we don't know, so we don't say.
   const nobodyHas = matrix
-    .filter((row) =>
-      Object.values(row.byStore).every((l) => !l || l.status === 'missing'),
-    )
+    .filter((row) => {
+      const seen = Object.values(row.byStore).filter(Boolean) as QuoteLine[];
+      return seen.length > 0 && seen.every((l) => l.status === 'missing');
+    })
     .map((r) => r.query);
 
   // ── coverage ────────────────────────────────────────────────────────────
@@ -181,7 +224,7 @@ export function compareQuotes(quotes: StoreQuote[], now = new Date()): Compariso
     const cheaperPack = a.price! <= b.price! ? { k: aKey, l: a } : { k: bKey, l: b };
     const betterValue = a.unit!.value <= b.unit!.value ? { k: aKey, l: a } : { k: bKey, l: b };
 
-    const label = (k: string) => RETAILER_LABEL[k as QuoteRetailer] ?? k;
+    const label = (k: string) => retailerLabel(k);
     const desc = (l: QuoteLine) =>
       `${money(l.price!)} for ${describeSize(l.size ?? null) ?? 'an unlisted size'}`;
 
@@ -223,7 +266,32 @@ export function compareQuotes(quotes: StoreQuote[], now = new Date()): Compariso
     }
   }
 
+  // ── speed, as the store itself worded it ────────────────────────────────
+  // A live scan hands back Instacart's own text ("Delivery by 10:05pm"), which
+  // is clearer than anything we'd derive and can't be mis-parsed into a wrong
+  // ordering. Only mention it when the stores actually differ.
+  const withEta = stores.filter((s) => s.etaText);
+  if (withEta.length > 1) {
+    const distinct = new Set(withEta.map((s) => s.etaText));
+    if (distinct.size > 1) {
+      const soonest = withEta.find((s) => /today|hour|min|\dpm|\dam/i.test(s.etaText!) && !/tomorrow/i.test(s.etaText!));
+      const later = withEta.filter((s) => /tomorrow/i.test(s.etaText ?? ''));
+      for (const s of later) {
+        verdicts.push(
+          soonest
+            ? `${s.label} is ${s.etaText!.toLowerCase()}; ${soonest.label} can do ${soonest.etaText!.toLowerCase()}.`
+            : `${s.label} is ${s.etaText!.toLowerCase()}.`,
+        );
+      }
+    }
+  }
+
   for (const s of stores) {
+    if (s.unknown.length) {
+      verdicts.push(
+        `Couldn't check ${s.unknown.slice(0, 3).join(', ')}${s.unknown.length > 3 ? ` and ${s.unknown.length - 3} more` : ''} at ${s.label} — not counted either way.`,
+      );
+    }
     if (!s.complete) verdicts.push(`${s.label}'s quote didn't finish — treat its total as a guess.`);
   }
 

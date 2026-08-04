@@ -4,7 +4,7 @@ import { colors, layout } from '@/design';
 import { Button } from './Button';
 import { Overlay } from './Overlay';
 import { Text } from './Text';
-import { compareQuotes, describeSlot, RETAILER_LABEL, type QuoteRetailer } from '@/lib/quotes';
+import { compareQuotes, describeSlot, type QuoteRetailer, type StoreQuote } from '@/lib/quotes';
 import { quoteAllStores, type QuoteInput } from '@/lib/storeQuotes';
 
 /**
@@ -25,6 +25,10 @@ export function StoreCompareSheet({
   items,
   onPush,
   busy,
+  liveQuotes,
+  onScan,
+  scanState = 'idle',
+  scanError,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -33,11 +37,22 @@ export function StoreCompareSheet({
   /** Send the list to this store. The sheet doesn't know how each one works. */
   onPush: (retailer: QuoteRetailer) => void;
   busy?: boolean;
+  /** Results of a live Instacart scan, merged in alongside the bundled ones. */
+  liveQuotes?: StoreQuote[];
+  onScan?: () => void;
+  scanState?: 'idle' | 'running' | 'error';
+  scanError?: string;
 }) {
   const { comparison, quotes } = useMemo(() => {
-    const qs = quoteAllStores(items);
+    // Bundled catalogs answer instantly; a live scan adds the Instacart
+    // storefronts. A live quote WINS over a bundled one for the same store —
+    // it was read minutes ago, the catalog possibly weeks ago.
+    const bundled = quoteAllStores(items);
+    const live = liveQuotes ?? [];
+    const liveSlugs = new Set(live.map((q) => q.retailer));
+    const qs = [...bundled.filter((q) => !liveSlugs.has(q.retailer)), ...live];
     return { comparison: compareQuotes(qs), quotes: qs };
-  }, [items]);
+  }, [items, liveQuotes]);
 
   const noteFor = (r: QuoteRetailer) => quotes.find((q) => q.retailer === r)?.note;
 
@@ -59,9 +74,37 @@ export function StoreCompareSheet({
           </View>
         ) : (
           <Text variant="body" color="textMuted" style={styles.verdict}>
-            Both stores carry everything on this list at about the same price.
+            These stores carry everything on this list at about the same price.
           </Text>
         )}
+
+        {onScan ? (
+          <View style={styles.scanRow}>
+            <Button
+              label={
+                scanState === 'running'
+                  ? 'Checking storefronts…'
+                  : liveQuotes?.length
+                    ? 'Re-check live prices'
+                    : 'Check live prices at more stores'
+              }
+              variant="secondary"
+              flex
+              disabled={scanState === 'running' || !items.length}
+              onPress={onScan}
+            />
+          </View>
+        ) : null}
+        {scanState === 'running' ? (
+          <Text variant="body" color="textMuted" style={styles.note}>
+            Reading Food Bazaar, ShopRite, Key Food and Stop &amp; Shop on Instacart. Takes a minute or two.
+          </Text>
+        ) : null}
+        {scanState === 'error' && scanError ? (
+          <Text variant="body" color="accent" style={styles.note}>
+            {scanError}
+          </Text>
+        ) : null}
 
         {comparison.stores.map((s) => {
           const slot = describeSlot(s.earliestDelivery);
@@ -82,12 +125,19 @@ export function StoreCompareSheet({
               <Text variant="body" color="textMuted">
                 {s.have + s.substitutes} of {s.total} items
                 {s.subtotal > 0 ? ` · about $${s.subtotal.toFixed(2)}` : ''}
-                {slot ? ` · ${slot}` : ''}
+                {s.etaText ? ` · ${s.etaText.toLowerCase()}` : slot ? ` · ${slot}` : ''}
+                {s.distanceMi ? ` · ${s.distanceMi} mi` : ''}
               </Text>
 
               {s.missing.length ? (
                 <Text variant="body" color="accent" style={styles.missing}>
                   No {s.missing.join(', ')}
+                </Text>
+              ) : null}
+
+              {s.unknown.length ? (
+                <Text variant="body" color="textMuted" style={styles.missing}>
+                  Couldn't check {s.unknown.join(', ')}
                 </Text>
               ) : null}
 
@@ -101,7 +151,7 @@ export function StoreCompareSheet({
                 label={
                   s.retailer === 'walmart'
                     ? `Open Walmart cart · ${s.have + s.substitutes}`
-                    : `Push to ${RETAILER_LABEL[s.retailer]} · ${s.have + s.substitutes}`
+                    : `Push to ${s.label} · ${s.have + s.substitutes}`
                 }
                 variant={recommended ? 'primary' : 'secondary'}
                 disabled={busy || s.have + s.substitutes === 0}
@@ -140,5 +190,6 @@ const styles = StyleSheet.create({
   missing: { marginTop: 2 },
   note: { marginTop: 2 },
   cta: { marginTop: 10 },
+  scanRow: { marginBottom: 12 },
   disclaimer: { marginTop: 2, marginBottom: 8, lineHeight: 18 },
 });

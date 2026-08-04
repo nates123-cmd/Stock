@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { compareQuotes, describeSlot, type StoreQuote } from '../src/lib/quotes';
+import { compareQuotes, describeSlot, retailerLabel, type StoreQuote } from '../src/lib/quotes';
+import { scanToQuotes } from '../src/lib/storeScan';
 import { cartLinks, quoteWalmart } from '../src/lib/walmart';
 import { WALMART_PRODUCTS } from '../src/lib/walmartCatalog';
 import { activeWalmartCatalog, isOwnStore, OWN_STORE_ID } from '../src/lib/walmartLive';
@@ -310,5 +311,80 @@ describe('describeSlot', () => {
   it('returns null for missing or unparseable input', () => {
     expect(describeSlot(undefined, NOW)).toBeNull();
     expect(describeSlot('not a date', NOW)).toBeNull();
+  });
+});
+
+// ── live scans: unknown is not missing ──────────────────────────────────────
+
+describe('live scan quotes', () => {
+  it('carries unknown through instead of folding it into missing', () => {
+    const quotes = scanToQuotes({
+      quotes: [
+        {
+          slug: 'shoprite',
+          eta: 'Delivery by 10:45pm',
+          distanceMi: 4.9,
+          subtotal: 3.39,
+          lines: [
+            { query: 'green beans', status: 'exact', name: 'Bowl & Basket Green Beans, 12 oz', price: 3.39 },
+            { query: 'halloumi', status: 'unknown' },
+          ],
+        },
+      ],
+    });
+    expect(quotes[0]!.retailer).toBe('shoprite');
+    expect(quotes[0]!.label).toBe('ShopRite');
+    expect(quotes[0]!.etaText).toBe('Delivery by 10:45pm');
+    expect(quotes[0]!.lines[1]!.status).toBe('unknown');
+    // Sizes are parsed from the live name too, so unit pricing works either way.
+    expect(quotes[0]!.lines[0]!.unit?.label).toBe('$0.28/oz');
+  });
+
+  it('leaves Instacart fees unknown rather than zero', () => {
+    const q = scanToQuotes({ quotes: [{ slug: 'wegmans', subtotal: 1, lines: [] }] });
+    expect(q[0]!.fees).toBeUndefined();
+  });
+
+  it('returns nothing for an empty or absent scan', () => {
+    expect(scanToQuotes(null)).toEqual([]);
+    expect(scanToQuotes({ quotes: [] })).toEqual([]);
+  });
+
+  it('does not count an unchecked item as missing OR as covered', () => {
+    const c = compareQuotes([
+      quote({
+        retailer: 'shoprite',
+        lines: [
+          { query: 'beans', qty: 1, status: 'exact', price: 3.39 },
+          { query: 'halloumi', qty: 1, status: 'unknown' },
+        ],
+      }),
+    ], NOW);
+    const s = c.stores[0]!;
+    expect(s.have).toBe(1);
+    expect(s.missing).toEqual([]);
+    expect(s.unknown).toEqual(['halloumi']);
+    expect(c.verdicts.some((v) => v.includes("Couldn't check halloumi at ShopRite"))).toBe(true);
+  });
+
+  it('will not claim nobody carries an item when a store was never checked', () => {
+    const c = compareQuotes([
+      quote({ retailer: 'wegmans', lines: [{ query: 'yuzu', qty: 1, status: 'missing' }] }),
+      quote({ retailer: 'shoprite', lines: [{ query: 'yuzu', qty: 1, status: 'unknown' }] }),
+    ], NOW);
+    expect(c.nobodyHas).toEqual([]);
+  });
+
+  it('names the store that only delivers tomorrow, in Instacart wording', () => {
+    const c = compareQuotes([
+      quote({ retailer: 'food-bazaar', lines: [{ query: 'x', qty: 1, status: 'exact', price: 1 }], etaText: 'Delivery by 10:30pm' }),
+      quote({ retailer: 'costco', lines: [{ query: 'x', qty: 1, status: 'exact', price: 1 }], etaText: 'Delivery by 12:45pm tomorrow' }),
+    ], NOW);
+    expect(c.verdicts.some((v) => v.includes('Costco is delivery by 12:45pm tomorrow'))).toBe(true);
+  });
+
+  it('titles an unknown slug rather than showing it raw', () => {
+    expect(retailerLabel('lincoln-market')).toBe('Lincoln Market');
+    expect(retailerLabel('food-bazaar')).toBe('Food Bazaar');
   });
 });
