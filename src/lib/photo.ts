@@ -14,8 +14,20 @@ import * as ImagePicker from 'expo-image-picker';
  * Supabase Storage upload and nothing else has to change.
  */
 
-/** Longest edge, in px, of a stored recipe photo. */
-const MAX_EDGE = 1024;
+/**
+ * Longest edge, in px, of a stored recipe photo.
+ *
+ * 384, not 1024. A data URI costs its byte size in the row but
+ * width × height × 4 bytes of live bitmap the moment it's decoded, and the
+ * recipe library renders every card at once — 163 of them. At 1024 that's
+ * 4.2 MB of bitmap per photo; at 700 (where the imported thumbnails sat) it
+ * was 1.9 MB each, and 43 of them decoded 80 MB in one frame and killed the
+ * tab on mobile Safari.
+ *
+ * Cards display these at roughly 365 × 124, so 384 is already generous. Raise
+ * it only if you also stop decoding the whole library at once.
+ */
+const MAX_EDGE = 384;
 const JPEG_QUALITY = 0.8;
 
 const WEB = Platform.OS === 'web';
