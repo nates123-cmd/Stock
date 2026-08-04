@@ -25,6 +25,7 @@ export { CookPlanCard } from './CookPlanCard';
 export { IngredientAmount, IngredientName } from './IngredientLine';
 export { StepBody } from './StepBody';
 export { Overlay } from './Overlay';
+export { StoreCompareSheet } from './StoreCompareSheet';
 export { TimerStrip } from './TimerStrip';
 export { AwakeIndicator } from './AwakeIndicator';
 export { SegmentedControl } from './SegmentedControl';

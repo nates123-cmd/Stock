@@ -20,6 +20,7 @@ import {
   BottomActionBar,
   Overlay,
   SegmentedControl,
+  StoreCompareSheet,
 } from '@/components';
 import { colors, fonts, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
@@ -73,6 +74,18 @@ import {
   type JobStatus,
   type Retailer,
 } from '@/lib/instacart';
+import { cartLinks, quoteWalmart } from '@/lib/walmart';
+import { hydrateWalmartCatalog, onWalmartCatalogChange } from '@/lib/walmartLive';
+import {
+  SCAN_AVAILABLE,
+  canPush,
+  queueScan,
+  scanStatus,
+  scanToQuotes,
+  type ScanResult,
+} from '@/lib/storeScan';
+import { retailerLabel } from '@/lib/quotes';
+import type { QuoteRetailer, StoreQuote } from '@/lib/quotes';
 import type { Recipe, ShoppingCategory } from '@/types';
 
 const CAT_LABEL: Record<ShoppingCategory, string> = {
@@ -143,6 +156,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   useEffect(() => {
     void hydratePushed();
   }, [hydratePushed]);
+  // Pull the nightly Walmart refresh (cached copy first, then Supabase). Failing
+  // is fine — the bundled catalog answers either way, just staler.
+  useEffect(() => {
+    const off = onWalmartCatalogChange(() => setCatalogVersion((v) => v + 1));
+    void hydrateWalmartCatalog();
+    return off;
+  }, []);
   // Subscribe to have-state so rows re-render on tap (we use the Map directly
   // for derived booleans below, but the selector keeps us reactive).
   const haveChecked = useHaveStore((s) => s.checked);
@@ -200,6 +220,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // local — reselect each visit.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // "Compare stores" sheet — prices the selection at every store we can quote
+  // locally, so the choice happens before anything is sent anywhere.
+  const [compareOpen, setCompareOpen] = useState(false);
+  // Bumped when the nightly Walmart refresh lands, to re-quote against it. The
+  // catalog itself lives outside React (walmartLive) so quoting stays sync.
+  const [catalogVersion, setCatalogVersion] = useState(0);
+  // Live Instacart scan: id of the queued job, whatever it returned, and how
+  // it's going. Read-only — a scan never touches a cart.
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [scanState, setScanState] = useState<'idle' | 'running' | 'error'>('idle');
+  const [scanError, setScanError] = useState<string | undefined>();
+  const [liveQuotes, setLiveQuotes] = useState<StoreQuote[] | undefined>();
   // Inline row editor (Reminders-style tap-to-edit): matchKey of the row being
   // edited, plus the working name/qty. Session rename/qty overrides for recipe
   // + restock rows live in `overrides` (extras write straight to their store).
@@ -1038,6 +1070,17 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     [currentRows, selected],
   );
 
+  /** The selection as plain names for the quote providers. Memoised because the
+   *  compare sheet re-quotes every store whenever this identity changes. */
+  const compareItems = useMemo(
+    () => selectedRows.map((r) => ({ name: r.name })),
+    // catalogVersion is a deliberate dependency, not a stale-closure slip: a
+    // refresh landing mid-session must re-quote, and the quote is derived from
+    // this list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedRows, catalogVersion],
+  );
+
   /**
    * What a push records: the row's display name plus the id of every extra
    * behind it. A MERGED row is one line on screen but several extras — sending
@@ -1475,6 +1518,145 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     }
   };
 
+  /**
+   * Push the SELECTED rows to the Walmart cart, for delivery from Nate's store.
+   *
+   * Nothing queues and nothing waits: Walmart's add-to-cart link is keyless, so
+   * one navigation in a browser he's already signed into fills the whole cart
+   * and lands on /shoppingcart with Delivery selected and the real total shown.
+   * That's also why this is the one push that can't lie about what it got —
+   * he's looking straight at the cart.
+   *
+   * Only resolved items move to Pushed. Anything the catalog has no SKU for
+   * STAYS on the list, same rule as the Wegmans path: a gap we can't fill must
+   * never look like a thing we bought.
+   */
+  const pushToWalmart = () => {
+    const rows = selectedRows;
+    if (rows.length === 0) return;
+    const quote = quoteWalmart(rows.map((r) => ({ name: r.name })));
+    const urls = cartLinks(quote.lines);
+    if (!urls.length) {
+      setHint(
+        `Walmart catalog has none of these yet. Add them to walmartCatalog.ts, or push to Wegmans.`,
+      );
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      // Open WITHOUT the 'noopener' feature string and sever the link after:
+      // `window.open(url, '_blank', 'noopener')` returns null *by design*, so
+      // there is no way to tell a blocked pop-up from a successful one. That
+      // false "blocked" reading used to abort the push — the cart filled, the
+      // items stayed on the list, and the message said the opposite.
+      let blocked = 0;
+      for (const u of urls) {
+        const w = window.open(u, '_blank');
+        if (w) w.opener = null;
+        else blocked++;
+      }
+      if (blocked) {
+        setHint(`Allow pop-ups for this site — ${blocked} of ${urls.length} cart tabs were blocked.`);
+        return;
+      }
+    } else {
+      urls.forEach((u) => void Linking.openURL(u));
+    }
+
+    const gotNames = new Set(quote.matched.map((l) => l.query));
+    const movedRows = rows.filter((r) => gotNames.has(r.name));
+    const left = quote.missing;
+    setHint(
+      left.length
+        ? `Sent ${quote.matched.length} to your Walmart cart (about $${quote.estimatedSubtotal.toFixed(2)}). Still on the list: ${left.join(', ')}.`
+        : `Sent ${quote.matched.length} to your Walmart cart — about $${quote.estimatedSubtotal.toFixed(2)}. Pick your delivery slot there.`,
+    );
+    pushToPushed(pushRefs(movedRows), 'walmart');
+    clearSelection();
+  };
+
+  /**
+   * Ask the Beelink to read live prices at the Instacart storefronts.
+   *
+   * Read-only: this queues a scan job, never a cart fill. It takes a minute or
+   * two because the box drives a real logged-in session one storefront at a
+   * time, so the sheet stays open and fills in when the result lands.
+   */
+  const startScan = async () => {
+    if (!SCAN_AVAILABLE()) {
+      setScanState('error');
+      setScanError('Sign in to check live prices.');
+      return;
+    }
+    try {
+      setScanState('running');
+      setScanError(undefined);
+      const id = await queueScan(compareItems);
+      setScanId(id);
+    } catch (e) {
+      setScanState('error');
+      const msg = (e as Error).message;
+      // Already a sentence when it's the sign-in case; only wrap the rest.
+      setScanError(/^Sign in/.test(msg) ? msg : `Couldn't start the scan: ${msg}`);
+    }
+  };
+
+  // Poll the scan job. Stops on done/error, and on unmount or a new scan.
+  useEffect(() => {
+    if (!scanId) return;
+    let alive = true;
+    const tick = async () => {
+      const s = await scanStatus(scanId);
+      if (!alive || !s) return;
+      if (s.status === 'done') {
+        // An empty result is NOT a comparison — leaving the bundled quotes
+        // alone beats replacing them with nothing.
+        const quotes = scanToQuotes(s.result as ScanResult);
+        if (quotes.length) setLiveQuotes(quotes);
+        else setScanError('The scan came back empty — showing catalog prices instead.');
+        setScanState(quotes.length ? 'idle' : 'error');
+        setScanId(null);
+      } else if (s.status === 'error') {
+        setScanState('error');
+        setScanError(s.error ?? 'The scan failed.');
+        setScanId(null);
+      }
+    };
+    const timer = setInterval(() => void tick(), 4000);
+    void tick();
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [scanId]);
+
+  // A changed selection invalidates a scan of the old one — showing prices for
+  // items no longer on screen would be worse than showing none.
+  useEffect(() => {
+    setLiveQuotes(undefined);
+  }, [compareItems]);
+
+  /**
+   * Route a compare-sheet pick to whichever pipeline that store uses.
+   *
+   * Only the three with a real fill path are routed. A live scan can price
+   * Food Bazaar or ShopRite, but nothing can SEND to them — and the old
+   * fall-through sent every unrecognised store to Wegmans, i.e. filled the
+   * wrong cart. Refuse loudly instead.
+   */
+  const pushFromCompare = (retailer: QuoteRetailer) => {
+    if (!canPush(retailer)) {
+      setHint(
+        `${retailerLabel(retailer)} is compare-only — Stock can't fill its cart. Order it in Instacart, or push to Wegmans.`,
+      );
+      return;
+    }
+    setCompareOpen(false);
+    if (retailer === 'walmart') pushToWalmart();
+    else if (retailer === 'costco') void pushToCostco();
+    else void pushToWegmans();
+  };
+
   // ── Staples-section pushes (Amazon + Costco) ───────────────────────────────
 
   /**
@@ -1494,10 +1676,14 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     );
     const n = urls.length;
     if (Platform.OS === 'web') {
+      // Same trap as the Walmart push: with the 'noopener' feature string
+      // window.open ALWAYS returns null, so every successful tab counted as
+      // blocked and the message read "opened 0 of 5". Sever opener manually.
       let blocked = 0;
       for (const u of urls) {
-        const w = window.open(u, '_blank', 'noopener');
-        if (!w) blocked++;
+        const w = window.open(u, '_blank');
+        if (w) w.opener = null;
+        else blocked++;
       }
       setHint(
         blocked
@@ -2286,8 +2472,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             </>
           ) : (
             <>
+              {/* Compare answers "which store" before anything is sent; the
+                  other two are the destinations Nate picks without thinking.
+                  Reminders keeps its button because it's the local-pickup
+                  escape hatch, and no store quote can stand in for it. */}
               <Button
-                label={`Push to Reminders · ${selectedRows.length}`}
+                label="Compare"
+                variant="secondary"
+                flex
+                onPress={() => setCompareOpen(true)}
+              />
+              <Button
+                label="Reminders"
                 variant="secondary"
                 flex
                 onPress={pushToReminders}
@@ -2295,10 +2491,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
               <Button
                 label={
                   filling
-                    ? 'Filling cart…'
+                    ? 'Filling…'
                     : sending
                       ? 'Pushing…'
-                      : `Push to Wegmans · ${selectedRows.length}`
+                      : `Wegmans · ${selectedRows.length}`
                 }
                 glyph="next"
                 flex
@@ -2309,6 +2505,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           )}
         </BottomActionBar>
       ) : null}
+
+      <StoreCompareSheet
+        visible={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        items={compareItems}
+        onPush={pushFromCompare}
+        busy={sending || filling}
+        liveQuotes={liveQuotes}
+        onScan={() => void startScan()}
+        scanState={scanState}
+        scanError={scanError}
+      />
     </SafeAreaView>
   );
 }
