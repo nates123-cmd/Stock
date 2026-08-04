@@ -16,6 +16,8 @@
  * quietly missing the thing you're cooking tonight is not cheaper.
  */
 
+import { describeSize, sizesDiverge, type ParsedSize, type UnitPrice } from './size';
+
 export type QuoteRetailer = 'walmart' | 'wegmans' | 'costco';
 
 export const RETAILER_LABEL: Record<QuoteRetailer, string> = {
@@ -31,8 +33,12 @@ export type QuoteLine = {
   status: 'exact' | 'substitute' | 'missing';
   /** Resolved product name, when the store has something. */
   name?: string;
-  /** Per-unit price in dollars. */
+  /** Price of ONE PACK in dollars — not per ounce. See `unit`. */
   price?: number;
+  /** Pack size parsed from the name, when there is one. */
+  size?: ParsedSize | null;
+  /** Price per ounce / fl oz / item. The only fair way to compare two packs. */
+  unit?: UnitPrice | null;
 };
 
 export type StoreQuote = {
@@ -155,6 +161,36 @@ export function compareQuotes(quotes: StoreQuote[], now = new Date()): Compariso
   }
   if (nobodyHas.length) {
     verdicts.push(`No store here carries ${nobodyHas.join(', ')} — that one's a local pickup.`);
+  }
+
+  // ── pack sizes ──────────────────────────────────────────────────────────
+  // A store can look cheaper purely by selling less. Where the same item comes
+  // in materially different packs, say which is actually better value per
+  // ounce — otherwise the price line below is comparing two different things.
+  for (const row of matrix) {
+    const priced = Object.entries(row.byStore).filter(
+      ([, l]) => l && l.status !== 'missing' && l.price != null && l.unit,
+    ) as [string, QuoteLine][];
+    if (priced.length < 2) continue;
+
+    const [aKey, a] = priced[0]!;
+    const worst = priced.slice(1).find(([, b]) => sizesDiverge(a.size ?? null, b.size ?? null));
+    if (!worst) continue;
+    const [bKey, b] = worst;
+
+    const cheaperPack = a.price! <= b.price! ? { k: aKey, l: a } : { k: bKey, l: b };
+    const betterValue = a.unit!.value <= b.unit!.value ? { k: aKey, l: a } : { k: bKey, l: b };
+
+    const label = (k: string) => RETAILER_LABEL[k as QuoteRetailer] ?? k;
+    const desc = (l: QuoteLine) =>
+      `${money(l.price!)} for ${describeSize(l.size ?? null) ?? 'an unlisted size'}`;
+
+    verdicts.push(
+      cheaperPack.k === betterValue.k
+        ? `${row.query}: ${label(cheaperPack.k)} ${desc(cheaperPack.l)} vs ${label(cheaperPack.k === aKey ? bKey : aKey)} ${desc(cheaperPack.k === aKey ? b : a)} — cheaper either way.`
+        : // The trap: the smaller pack has the smaller sticker price.
+          `${row.query}: ${label(cheaperPack.k)} is ${desc(cheaperPack.l)} but ${label(betterValue.k)} is ${desc(betterValue.l)} — ${label(betterValue.k)} is better value at ${betterValue.l.unit!.label}.`,
+    );
   }
 
   // ── price ───────────────────────────────────────────────────────────────

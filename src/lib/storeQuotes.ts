@@ -13,6 +13,7 @@
  * the real total before he checks out. Never present these numbers as final.
  */
 import { matchCatalog } from './catalogMatch';
+import { parseSize, unitPrice } from './size';
 import type { QuoteLine, QuoteRetailer, StoreQuote } from './quotes';
 import { activeWalmartCatalog, isOwnStore } from './walmartLive';
 import { WEGMANS_ALIASES, WEGMANS_BY_ID, WEGMANS_PRODUCTS } from './wegmansCatalog';
@@ -25,12 +26,18 @@ function lineFor(
 ): QuoteLine {
   const qty = Math.max(1, input.qty ?? 1);
   if (!hit.product) return { query: input.name, qty, status: 'missing' };
+  // Size comes from the product name — the one field every source carries.
+  // Null when it isn't stated, and the comparison then says it's comparing
+  // pack prices rather than inventing a per-ounce figure.
+  const size = parseSize(hit.product.name);
   return {
     query: input.name,
     qty,
     status: 'exact',
     name: hit.product.name,
     price: hit.product.price,
+    size,
+    unit: unitPrice(hit.product.price, size),
   };
 }
 
