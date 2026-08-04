@@ -26,6 +26,8 @@ export { IngredientAmount, IngredientName } from './IngredientLine';
 export { StepBody } from './StepBody';
 export { Overlay } from './Overlay';
 export { StoreCompareSheet } from './StoreCompareSheet';
+export { PushToCartSheet } from './PushToCartSheet';
+export type { CartTarget } from './PushToCartSheet';
 export { TimerStrip } from './TimerStrip';
 export { AwakeIndicator } from './AwakeIndicator';
 export { SegmentedControl } from './SegmentedControl';

@@ -21,6 +21,8 @@ import {
   Overlay,
   SegmentedControl,
   StoreCompareSheet,
+  PushToCartSheet,
+  type CartTarget,
 } from '@/components';
 import { colors, fonts, layout } from '@/design';
 import { usePlanStore } from '@/store/plan';
@@ -79,6 +81,8 @@ import { hydrateWalmartCatalog, onWalmartCatalogChange } from '@/lib/walmartLive
 import {
   SCAN_AVAILABLE,
   canPush,
+  cartsToQuotes,
+  queueCartFill,
   queueScan,
   scanStatus,
   scanToQuotes,
@@ -223,6 +227,8 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   // "Compare stores" sheet — prices the selection at every store we can quote
   // locally, so the choice happens before anything is sent anywhere.
   const [compareOpen, setCompareOpen] = useState(false);
+  // "Push to a cart" destination picker: Wegmans / Walmart / Compare.
+  const [pushOpen, setPushOpen] = useState(false);
   // Bumped when the nightly Walmart refresh lands, to re-quote against it. The
   // catalog itself lives outside React (walmartLive) so quoting stays sync.
   const [catalogVersion, setCatalogVersion] = useState(0);
@@ -232,6 +238,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const [scanState, setScanState] = useState<'idle' | 'running' | 'error'>('idle');
   const [scanError, setScanError] = useState<string | undefined>();
   const [liveQuotes, setLiveQuotes] = useState<StoreQuote[] | undefined>();
+  // Which kind of job we're waiting on, so the result is read with the right
+  // shape — a fill returns carts, a scan returns quotes.
+  const [scanMode, setScanMode] = useState<'scan' | 'fill'>('scan');
   // Inline row editor (Reminders-style tap-to-edit): matchKey of the row being
   // edited, plus the working name/qty. Session rename/qty overrides for recipe
   // + restock rows live in `overrides` (extras write straight to their store).
@@ -1582,6 +1591,34 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    * two because the box drives a real logged-in session one storefront at a
    * time, so the sheet stays open and fills in when the result lands.
    */
+  /**
+   * Compare by actually building carts.
+   *
+   * The catalogue version guessed and got it wrong — it claimed Wegmans doesn't
+   * sell salmon. This asks the box to resolve every item against each store's
+   * own search and put it in that store's real cart, so the answer is what the
+   * stores say, and the winning cart is ready to check out.
+   */
+  const startCompare = async () => {
+    if (!SCAN_AVAILABLE()) {
+      setScanState('error');
+      setScanError('Sign in to compare carts.');
+      return;
+    }
+    try {
+      setScanState('running');
+      setScanError(undefined);
+      setLiveQuotes(undefined);
+      const id = await queueCartFill(compareItems);
+      setScanId(id);
+      setScanMode('fill');
+    } catch (e) {
+      setScanState('error');
+      const msg = (e as Error).message;
+      setScanError(/^Sign in/.test(msg) ? msg : `Couldn't start the compare: ${msg}`);
+    }
+  };
+
   const startScan = async () => {
     if (!SCAN_AVAILABLE()) {
       setScanState('error');
@@ -1593,6 +1630,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       setScanError(undefined);
       const id = await queueScan(compareItems);
       setScanId(id);
+      setScanMode('scan');
     } catch (e) {
       setScanState('error');
       const msg = (e as Error).message;
@@ -1611,9 +1649,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       if (s.status === 'done') {
         // An empty result is NOT a comparison — leaving the bundled quotes
         // alone beats replacing them with nothing.
-        const quotes = scanToQuotes(s.result as ScanResult);
+        const res = s.result as ScanResult;
+        const quotes = scanMode === 'fill' ? cartsToQuotes(res) : scanToQuotes(res);
         if (quotes.length) setLiveQuotes(quotes);
-        else setScanError('The scan came back empty — showing catalog prices instead.');
+        else setScanError('Came back empty — showing catalog prices instead.');
         setScanState(quotes.length ? 'idle' : 'error');
         setScanId(null);
       } else if (s.status === 'error') {
@@ -1644,6 +1683,23 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    * fall-through sent every unrecognised store to Wegmans, i.e. filled the
    * wrong cart. Refuse loudly instead.
    */
+  /**
+   * Route a "Push to a cart" pick.
+   *
+   * Compare is the odd one out: it doesn't send anywhere yet. It asks the box
+   * to build a real cart at every store and report back, so it opens the
+   * comparison sheet and starts a fill.
+   */
+  const pickCart = (target: CartTarget) => {
+    setPushOpen(false);
+    if (target === 'wegmans') void pushToWegmans();
+    else if (target === 'walmart') pushToWalmart();
+    else {
+      setCompareOpen(true);
+      void startCompare();
+    }
+  };
+
   const pushFromCompare = (retailer: QuoteRetailer) => {
     if (!canPush(retailer)) {
       setHint(
@@ -2472,16 +2528,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             </>
           ) : (
             <>
-              {/* Compare answers "which store" before anything is sent; the
-                  other two are the destinations Nate picks without thinking.
-                  Reminders keeps its button because it's the local-pickup
-                  escape hatch, and no store quote can stand in for it. */}
-              <Button
-                label="Compare"
-                variant="secondary"
-                flex
-                onPress={() => setCompareOpen(true)}
-              />
+              {/* Two ways for a selection to leave the list: Reminders (local
+                  pickup, on-device) or a cart. Which cart is a second choice,
+                  not a third button — Wegmans, Walmart and Compare are all
+                  "push to a cart" and lining them up as peers made the bar a
+                  guessing game. */}
               <Button
                 label="Reminders"
                 variant="secondary"
@@ -2494,17 +2545,25 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                     ? 'Filling…'
                     : sending
                       ? 'Pushing…'
-                      : `Wegmans · ${selectedRows.length}`
+                      : `Push to a cart · ${selectedRows.length}`
                 }
                 glyph="next"
                 flex
                 disabled={sending || filling}
-                onPress={pushToWegmans}
+                onPress={() => setPushOpen(true)}
               />
             </>
           )}
         </BottomActionBar>
       ) : null}
+
+      <PushToCartSheet
+        visible={pushOpen}
+        onClose={() => setPushOpen(false)}
+        count={selectedRows.length}
+        onPick={pickCart}
+        busy={sending || filling}
+      />
 
       <StoreCompareSheet
         visible={compareOpen}

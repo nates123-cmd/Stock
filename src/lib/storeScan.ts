@@ -42,6 +42,9 @@ export const canPush = (retailer: string) => PUSHABLE_STORES.has(retailer);
 
 export type ScanStatus = 'queued' | 'running' | 'done' | 'error';
 
+/** What a job does: look at prices, or actually build carts. */
+export type ScanMode = 'scan' | 'fill';
+
 type RawLine = {
   query: string;
   status: 'exact' | 'missing' | 'unknown';
@@ -58,6 +61,17 @@ type RawQuote = {
   subtotal: number;
 };
 
+/** A store whose real cart was filled. `added` is what landed in it. */
+export type FilledCart = {
+  slug: string;
+  lines: { query: string; status: 'added' | 'missing' | 'failed'; name?: string; price?: number; alreadyInCart?: boolean }[];
+  subtotal: number;
+  added: number;
+  missing: string[];
+  failed: string[];
+  cartItemCount?: number | null;
+};
+
 export type ScanResult = {
   scannedAt?: string;
   quotes?: RawQuote[];
@@ -65,6 +79,8 @@ export type ScanResult = {
   stores?: { slug: string; name: string; eta?: string | null; distanceMi?: number | null }[];
   unresolved?: number;
   note?: string;
+  /** Present on a `fill` job: the carts that were actually built. */
+  carts?: FilledCart[];
 };
 
 export const SCAN_AVAILABLE = () => !!supabase;
@@ -80,20 +96,60 @@ function friendlyInsertError(message: string): string {
     : message;
 }
 
-/** Queue a basket scan. Returns the job id. */
+/**
+ * Queue a job. `scan` only reads prices; `fill` puts the items in each store's
+ * REAL cart so the winner is ready to check out.
+ */
 export async function queueScan(
   items: { name: string; qty?: number }[],
   stores: readonly string[] = SCAN_STORES,
+  mode: ScanMode = 'scan',
 ): Promise<string> {
   if (!supabase) throw new Error('Sign in to scan live prices.');
   if (!items.length) throw new Error('Nothing selected to price.');
   const { data, error } = await supabase
     .from('store_scan_jobs')
-    .insert({ stores, items }) // user_id defaults to auth.uid()
+    .insert({ stores, items, mode }) // user_id defaults to auth.uid()
     .select('id')
     .single();
   if (error) throw new Error(friendlyInsertError(error.message));
   return data.id as string;
+}
+
+/** Build a real cart at each store and report what landed. */
+export const queueCartFill = (
+  items: { name: string; qty?: number }[],
+  stores: readonly string[] = SCAN_STORES,
+) => queueScan(items, stores, 'fill');
+
+/**
+ * Turn filled carts into the shared quote shape.
+ *
+ * `added` maps to `exact` — the item is in the cart. It does NOT mean bought,
+ * and it doesn't even mean available: Instacart accepts the add and only then
+ * flags "not available in your area", so the cart itself is the source of truth
+ * and this is a report of what we put there.
+ */
+export function cartsToQuotes(result: ScanResult | null | undefined): StoreQuote[] {
+  if (!result?.carts?.length) return [];
+  return result.carts.map((c) => {
+    const lines: QuoteLine[] = c.lines.map((l) => {
+      if (l.status !== 'added' || l.price == null) {
+        return { query: l.query, qty: 1, status: l.status === 'failed' ? 'unknown' : 'missing' };
+      }
+      const size = parseSize(l.name ?? '');
+      return { query: l.query, qty: 1, status: 'exact', name: l.name, price: l.price, size, unit: unitPrice(l.price, size) };
+    });
+    return {
+      retailer: c.slug,
+      label: STORE_LABEL[c.slug] ?? c.slug,
+      lines,
+      subtotal: c.subtotal,
+      fees: undefined,
+      complete: true,
+      note: `Cart filled — ${c.added} item${c.added === 1 ? '' : 's'} in. Fees and markup not included.`,
+    };
+  });
 }
 
 /** Queue an anchor scan: which stores near me carry this? */
