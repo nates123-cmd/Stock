@@ -43,13 +43,15 @@ export const canPush = (retailer: string) => PUSHABLE_STORES.has(retailer);
 export type ScanStatus = 'queued' | 'running' | 'done' | 'error';
 
 /** What a job does: look at prices, or actually build carts. */
-export type ScanMode = 'scan' | 'fill';
+export type ScanMode = 'scan' | 'fill' | 'walmart';
 
 type RawLine = {
   query: string;
   status: 'exact' | 'missing' | 'unknown';
   name?: string;
   price?: number;
+  itemId?: string;
+  fulfillment?: 'store' | 'ship';
 };
 
 type RawQuote = {
@@ -62,6 +64,16 @@ type RawQuote = {
 };
 
 /** A store whose real cart was filled. `added` is what landed in it. */
+/** One item resolved against Walmart's live search. */
+export type WalmartLiveLine = {
+  query: string;
+  status: 'exact' | 'missing' | 'unknown';
+  itemId?: string;
+  name?: string;
+  price?: number;
+  fulfillment?: 'store' | 'ship';
+};
+
 export type FilledCart = {
   slug: string;
   lines: { query: string; status: 'added' | 'missing' | 'failed'; name?: string; price?: number; alreadyInCart?: boolean }[];
@@ -81,6 +93,13 @@ export type ScanResult = {
   note?: string;
   /** Present on a `fill` job: the carts that were actually built. */
   carts?: FilledCart[];
+  /** Present on a `walmart` job: items resolved to Walmart item ids. */
+  lines?: WalmartLiveLine[];
+  retailer?: string;
+  matched?: number;
+  ships?: number;
+  subtotal?: number;
+  storeId?: string | null;
 };
 
 export const SCAN_AVAILABLE = () => !!supabase;
@@ -115,6 +134,16 @@ export async function queueScan(
   if (error) throw new Error(friendlyInsertError(error.message));
   return data.id as string;
 }
+
+/**
+ * Resolve a list against Walmart's LIVE search.
+ *
+ * The bundled catalogue is 50 staple terms, so a real list mostly missed —
+ * 2 of 11 items. This asks the box to look each one up for real; it takes about
+ * six seconds an item, and nothing is added to a cart until Nate opens the link.
+ */
+export const queueWalmartResolve = (items: { name: string; qty?: number }[]) =>
+  queueScan(items, [], 'walmart');
 
 /** Build a real cart at each store and report what landed. */
 export const queueCartFill = (

@@ -84,6 +84,7 @@ import {
   cartsToQuotes,
   queueCartFill,
   queueScan,
+  queueWalmartResolve,
   scanStatus,
   scanToQuotes,
   type ScanResult,
@@ -240,7 +241,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const [liveQuotes, setLiveQuotes] = useState<StoreQuote[] | undefined>();
   // Which kind of job we're waiting on, so the result is read with the right
   // shape — a fill returns carts, a scan returns quotes.
-  const [scanMode, setScanMode] = useState<'scan' | 'fill'>('scan');
+  const [scanMode, setScanMode] = useState<'scan' | 'fill' | 'walmart'>('scan');
+  // Rows awaiting a Walmart live resolve, so the result can be matched back to
+  // the list and the right rows moved to Pushed.
+  const [walmartRows, setWalmartRows] = useState<FlatRow[]>([]);
   // Inline row editor (Reminders-style tap-to-edit): matchKey of the row being
   // edited, plus the working name/qty. Session rename/qty overrides for recipe
   // + restock rows live in `overrides` (extras write straight to their store).
@@ -1540,37 +1544,115 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    * STAYS on the list, same rule as the Wegmans path: a gap we can't fill must
    * never look like a thing we bought.
    */
-  const pushToWalmart = () => {
+  /**
+   * Open the Walmart cart, resolving the items LIVE first.
+   *
+   * The bundled catalogue is 50 staple terms and a real list mostly missed it —
+   * 2 of 11 items, the rest silently absent from the cart link. So the box now
+   * looks each item up against Walmart's own search (~6s each, no browser, no
+   * cart touched) and hands back item ids; the link then opens a genuinely full
+   * cart in Nate's browser.
+   *
+   * The catalogue stays as an instant fallback for when the box is unreachable
+   * — a partly-filled cart still beats nothing.
+   */
+  const pushToWalmart = async () => {
     const rows = selectedRows;
     if (rows.length === 0) return;
+    if (SCAN_AVAILABLE()) {
+      try {
+        setScanState('running');
+        setScanError(undefined);
+        setHint(`Looking up ${rows.length} items at Walmart… about ${Math.ceil(rows.length * 6 / 60)} min.`);
+        const id = await queueWalmartResolve(rows.map((r) => ({ name: r.name })));
+        setScanId(id);
+        setScanMode('walmart');
+        setWalmartRows(rows);
+        return;
+      } catch (e) {
+        // Fall through to the catalogue rather than stranding him.
+        setScanState('idle');
+        setHint(`Couldn't reach the resolver (${(e as Error).message}) — using the catalogue.`);
+      }
+    }
+    openWalmartFromCatalog(rows);
+  };
+
+  /**
+   * The live resolve came back: open the cart with whatever Walmart actually has.
+   *
+   * Only rows that RESOLVED move to Pushed. Anything Walmart doesn't carry, or
+   * that the resolver couldn't read, stays on the list — a gap we couldn't fill
+   * must never look like a thing we bought.
+   */
+  const finishWalmartResolve = (res: ScanResult) => {
+    setScanState('idle');
+    const lines = (res?.lines ?? []) as {
+      query: string; status: string; itemId?: string; qty?: number; fulfillment?: string;
+    }[];
+    const got = lines.filter((l) => l.status === 'exact' && l.itemId);
+    if (!got.length) {
+      setHint("Walmart didn't have any of these, or the lookup was blocked. Nothing sent.");
+      return;
+    }
+    const urls = cartLinks(
+      got.map((l) => ({ query: l.query, qty: 1, via: 'name' as const, product: { itemId: l.itemId!, name: l.query, price: 0, fulfillment: 'store' as const } })),
+    );
+    if (!openUrls(urls)) return;
+
+    const gotNames = new Set(got.map((l) => l.query));
+    const moved = walmartRows.filter((r) => gotNames.has(r.name));
+    const left = lines.filter((l) => l.status !== 'exact').map((l) => l.query);
+    const ships = got.filter((l) => l.fulfillment === 'ship').length;
+    setHint(
+      `Sent ${got.length} of ${lines.length} to your Walmart cart` +
+        (res.subtotal ? ` (about $${res.subtotal.toFixed(2)})` : '') +
+        (ships ? `. ${ships} ship${ships === 1 ? 's' : ''} separately` : '') +
+        (left.length ? `. Still on the list: ${left.join(', ')}` : '.'),
+    );
+    pushToPushed(pushRefs(moved), 'walmart');
+    setWalmartRows([]);
+    clearSelection();
+  };
+
+  /**
+   * Open the cart link(s). Returns false if pop-ups swallowed any of them.
+   *
+   * Deliberately WITHOUT the 'noopener' feature string: `window.open(u,
+   * '_blank', 'noopener')` returns null *by design*, so there's no way to tell
+   * a blocked pop-up from a successful one. That false "blocked" reading used
+   * to abort the push while the cart filled behind it. Sever opener manually.
+   */
+  const openUrls = (urls: string[]): boolean => {
+    if (Platform.OS !== 'web') {
+      urls.forEach((u) => void Linking.openURL(u));
+      return true;
+    }
+    let blocked = 0;
+    for (const u of urls) {
+      const w = window.open(u, '_blank');
+      if (w) w.opener = null;
+      else blocked++;
+    }
+    if (blocked) {
+      setHint(`Allow pop-ups for this site — ${blocked} of ${urls.length} cart tabs were blocked.`);
+      return false;
+    }
+    return true;
+  };
+
+  /** Last-resort path: build the link from the bundled 50-term catalogue. */
+  const openWalmartFromCatalog = (rows: FlatRow[]) => {
     const quote = quoteWalmart(rows.map((r) => ({ name: r.name })));
     const urls = cartLinks(quote.lines);
     if (!urls.length) {
       setHint(
-        `Walmart catalog has none of these yet. Add them to walmartCatalog.ts, or push to Wegmans.`,
+        `Couldn't resolve any of these at Walmart. Try Wegmans, or check live prices.`,
       );
       return;
     }
 
-    if (Platform.OS === 'web') {
-      // Open WITHOUT the 'noopener' feature string and sever the link after:
-      // `window.open(url, '_blank', 'noopener')` returns null *by design*, so
-      // there is no way to tell a blocked pop-up from a successful one. That
-      // false "blocked" reading used to abort the push — the cart filled, the
-      // items stayed on the list, and the message said the opposite.
-      let blocked = 0;
-      for (const u of urls) {
-        const w = window.open(u, '_blank');
-        if (w) w.opener = null;
-        else blocked++;
-      }
-      if (blocked) {
-        setHint(`Allow pop-ups for this site — ${blocked} of ${urls.length} cart tabs were blocked.`);
-        return;
-      }
-    } else {
-      urls.forEach((u) => void Linking.openURL(u));
-    }
+    if (!openUrls(urls)) return;
 
     const gotNames = new Set(quote.matched.map((l) => l.query));
     const movedRows = rows.filter((r) => gotNames.has(r.name));
@@ -1650,6 +1732,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         // An empty result is NOT a comparison — leaving the bundled quotes
         // alone beats replacing them with nothing.
         const res = s.result as ScanResult;
+        if (scanMode === 'walmart') {
+          finishWalmartResolve(res);
+          setScanId(null);
+          return;
+        }
         const quotes = scanMode === 'fill' ? cartsToQuotes(res) : scanToQuotes(res);
         if (quotes.length) setLiveQuotes(quotes);
         else setScanError('Came back empty — showing catalog prices instead.');
