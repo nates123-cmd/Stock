@@ -19,6 +19,7 @@ export { BottomActionBar } from './ActionBar';
 export { ProgressStepList } from './ProgressStepList';
 export type { ProgressStep, ProgressState } from './ProgressStepList';
 export { RecipeCard } from './RecipeCard';
+export { LazyImage } from './LazyImage';
 export { RecipeLibrary } from './RecipeLibrary';
 export { CartFillBanner } from './CartFillBanner';
 export { CookPlanCard } from './CookPlanCard';

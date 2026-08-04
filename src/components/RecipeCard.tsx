@@ -1,4 +1,5 @@
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { LazyImage } from './LazyImage';
 import { Card } from './Card';
 import { Text, Numeric } from './Text';
 import { SourceBadge, Pill } from './Badge';
@@ -36,7 +37,7 @@ export function RecipeCard({
     <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
       <Card style={styles.card}>
         {recipe.imageUrl ? (
-          <Image
+          <LazyImage
             source={{ uri: recipe.imageUrl }}
             style={styles.thumb}
             resizeMode="cover"
