@@ -1568,6 +1568,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         setScanId(id);
         setScanMode('walmart');
         setWalmartRows(rows);
+        // Same floating banner as the Wegmans push — this now takes about a
+        // minute, and he shouldn't have to sit on this screen to know it's alive.
+        startCartFill({ jobId: id, retailer: 'walmart', total: rows.length, startedAtMs: Date.now(), source: 'scan' });
         return;
       } catch (e) {
         // Fall through to the catalogue rather than stranding him.
@@ -1694,6 +1697,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       const id = await queueCartFill(compareItems);
       setScanId(id);
       setScanMode('fill');
+      startCartFill({ jobId: id, retailer: 'compare', total: compareItems.length, startedAtMs: Date.now(), source: 'scan' });
     } catch (e) {
       setScanState('error');
       const msg = (e as Error).message;

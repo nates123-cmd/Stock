@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { Text } from './Text';
 import { colors } from '@/design';
 import { jobStatus } from '@/lib/instacart';
+import { scanStatus } from '@/lib/storeScan';
 import { useCartFillStore } from '@/store/cartFill';
 
 /**
@@ -16,7 +17,21 @@ import { useCartFillStore } from '@/store/cartFill';
  * Progress is time-based (the agent doesn't emit per-item progress): it eases
  * toward ~90% over the typical fill time, then snaps to 100% on done.
  */
-const EST_FILL_MS = 35_000;
+/**
+ * How long each kind of job typically takes, for the progress bar.
+ *
+ * These differ by an order of magnitude — a Wegmans fill is ~35s, a Walmart
+ * live resolve is ~6s PER ITEM, and a multi-store compare fills a cart at every
+ * store. Using one constant made the bar sit at 90% for minutes, which reads as
+ * "stuck".
+ */
+const EST_MS: Record<string, number> = {
+  wegmans: 35_000,
+  costco: 35_000,
+  walmart: 8_000, // × items
+  compare: 25_000, // × items
+};
+const PER_ITEM = new Set(['walmart', 'compare']);
 
 export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
   const router = useRouter();
@@ -32,6 +47,7 @@ export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
   const unavailable = useCartFillStore((s) => s.unavailable);
   const verified = useCartFillStore((s) => s.verified);
   const startedAtMs = useCartFillStore((s) => s.startedAtMs);
+  const source = useCartFillStore((s) => s.source);
   const update = useCartFillStore((s) => s.update);
   const clear = useCartFillStore((s) => s.clear);
 
@@ -43,7 +59,8 @@ export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
     if (!jobId || !active) return;
     let alive = true;
     const poll = async () => {
-      const s = await jobStatus(jobId);
+      // Poll whichever queue this job actually lives in.
+      const s = source === 'scan' ? await scanStatus(jobId) : await jobStatus(jobId);
       if (!alive || !s) return;
       if (s.status === 'done') {
         const r = s.result as
@@ -67,7 +84,7 @@ export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
       alive = false;
       clearInterval(iv);
     };
-  }, [jobId, active, status, update]);
+  }, [jobId, active, status, update, source]);
 
   // Tick the progress bar while active.
   useEffect(() => {
@@ -85,19 +102,39 @@ export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
 
   if (!jobId || !status) return null;
 
-  const store = retailer === 'costco' ? 'Costco' : 'Wegmans';
-  const frac =
-    active && startedAtMs ? Math.min(0.9, (nowMs - startedAtMs) / EST_FILL_MS) : 1;
+  const STORE_NAME: Record<string, string> = {
+    costco: 'Costco',
+    wegmans: 'Wegmans',
+    walmart: 'Walmart',
+    compare: 'Compare',
+  };
+  const store = STORE_NAME[retailer] ?? 'Wegmans';
+  const est = (EST_MS[retailer] ?? 35_000) * (PER_ITEM.has(retailer) ? Math.max(1, total) : 1);
+  const frac = active && startedAtMs ? Math.min(0.9, (nowMs - startedAtMs) / est) : 1;
+
+  // Walmart is a LOOKUP, not a fill — the cart only opens once it's resolved,
+  // so saying "filling your cart" would be a lie for most of the wait.
+  const working =
+    retailer === 'walmart'
+      ? `Looking up ${total} item${total === 1 ? '' : 's'} at Walmart…`
+      : retailer === 'compare'
+        ? `Building carts at ${total ? 'every store' : 'the stores'}…`
+        : `Filling ${store} cart… ${total} item${total === 1 ? '' : 's'}`;
+
   const label =
     status === 'error'
-      ? `${store} cart fill hit a problem`
+      ? `${store} hit a problem`
       : status === 'done'
-        ? verified === false
-          ? `${store} cart filled — couldn’t auto-confirm, check it`
-          : `${store} cart filled${added != null ? ` · ${added} added` : ''}${
-              unavailable ? ` · ${unavailable} unavailable` : ''
-            }`
-        : `Filling ${store} cart… ${total} item${total === 1 ? '' : 's'}`;
+        ? retailer === 'walmart'
+          ? 'Walmart items resolved — opening your cart'
+          : retailer === 'compare'
+            ? 'Carts built — open Compare to see them'
+            : verified === false
+              ? `${store} cart filled — couldn’t auto-confirm, check it`
+              : `${store} cart filled${added != null ? ` · ${added} added` : ''}${
+                  unavailable ? ` · ${unavailable} unavailable` : ''
+                }`
+        : working;
 
   return (
     <Pressable

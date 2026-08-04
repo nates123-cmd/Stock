@@ -16,11 +16,20 @@ import { webPersist } from '@/lib/db/webStore';
 const NATIVE = Platform.OS !== 'web';
 
 export type CartFillStatus = 'queued' | 'running' | 'done' | 'error';
-export type CartRetailer = 'wegmans' | 'costco';
+export type CartRetailer = 'wegmans' | 'costco' | 'walmart' | 'compare';
+
+/**
+ * Which queue the job lives in. `instacart` = instacart_jobs (the cart fill);
+ * `scan` = store_scan_jobs (Walmart live resolve, and the multi-store compare).
+ * The banner has to poll the right table, and getting this wrong shows a
+ * spinner that never resolves.
+ */
+export type CartFillSource = 'instacart' | 'scan';
 
 type Persisted = {
   jobId: string;
   retailer: CartRetailer;
+  source?: CartFillSource;
   total: number;
   startedAtMs: number;
   status: CartFillStatus;
@@ -30,6 +39,7 @@ type Persisted = {
 type CartFillState = {
   jobId: string | null;
   retailer: CartRetailer;
+  source: CartFillSource;
   total: number;
   startedAtMs: number | null;
   status: CartFillStatus | null;
@@ -46,6 +56,7 @@ type CartFillState = {
     retailer: CartRetailer;
     total: number;
     startedAtMs: number;
+    source?: CartFillSource;
   }) => void;
   update: (a: {
     status?: CartFillStatus;
@@ -59,6 +70,7 @@ type CartFillState = {
 export const useCartFillStore = create<CartFillState>((set, get) => ({
   jobId: null,
   retailer: 'wegmans',
+  source: 'instacart',
   total: 0,
   startedAtMs: null,
   status: null,
@@ -79,10 +91,11 @@ export const useCartFillStore = create<CartFillState>((set, get) => ({
     set({ hydrated: true });
   },
 
-  start: ({ jobId, retailer, total, startedAtMs }) =>
+  start: ({ jobId, retailer, total, startedAtMs, source = 'instacart' }) =>
     set({
       jobId,
       retailer,
+      source,
       total,
       startedAtMs,
       status: 'queued',
@@ -117,6 +130,7 @@ if (!NATIVE) {
       ? {
           jobId: s.jobId,
           retailer: s.retailer,
+          source: s.source,
           total: s.total,
           startedAtMs: s.startedAtMs ?? 0,
           status: s.status ?? 'queued',
