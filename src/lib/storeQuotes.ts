@@ -25,7 +25,15 @@ function lineFor(
   hit: { product: { name: string; price: number } | null },
 ): QuoteLine {
   const qty = Math.max(1, input.qty ?? 1);
-  if (!hit.product) return { query: input.name, qty, status: 'missing' };
+  // NOT `missing`. These catalogs are "things Nate has bought before" — 39 SKUs
+  // for Walmart — not an inventory. A catalog can tell you a store HAS
+  // something; it can never tell you a store lacks it.
+  //
+  // This shipped wrong and it destroyed trust in the whole feature: Stock told
+  // him Walmart and Wegmans don't sell salmon. Walmart's catalog simply has no
+  // fish in it, and Wegmans' entry is "…Atlantic Salmon Fillet" against a query
+  // of "Salmon filets". Only a live store search can say `missing`.
+  if (!hit.product) return { query: input.name, qty, status: 'unknown' };
   // Size comes from the product name — the one field every source carries.
   // Null when it isn't stated, and the comparison then says it's comparing
   // pack prices rather than inventing a per-ounce figure.
@@ -39,6 +47,16 @@ function lineFor(
     size,
     unit: unitPrice(hit.product.price, size),
   };
+}
+
+/**
+ * Point at the live scan when the catalog couldn't answer, so an `unknown` reads
+ * as "ask properly" rather than as a shrug.
+ */
+function unknownNote(lines: QuoteLine[]): string {
+  const n = lines.filter((l) => l.status === 'unknown').length;
+  if (!n) return '';
+  return ` ${n} item${n === 1 ? " isn't" : "s aren't"} in the catalog — check live prices to find out.`;
 }
 
 const subtotalOf = (lines: QuoteLine[]) =>
@@ -75,7 +93,7 @@ export function quoteWalmartStore(items: QuoteInput[]): StoreQuote {
     // fee (and any small-basket charge) once the slot is picked.
     fees: 0,
     complete: true,
-    note: split + caveat,
+    note: split + caveat + unknownNote(lines),
   };
 }
 
@@ -92,7 +110,7 @@ export function quoteWegmansStore(items: QuoteInput[]): StoreQuote {
     // the price comparison quietly wrong in Wegmans' favour.
     fees: undefined,
     complete: true,
-    note: 'Via Instacart. Delivery + service fees not included.',
+    note: 'Via Instacart. Delivery + service fees not included.' + unknownNote(lines),
   };
 }
 

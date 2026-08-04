@@ -18,6 +18,27 @@ const norm = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
 /**
+ * Fold a word to a comparable stem.
+ *
+ * The all-tokens gate is literal, so trivial spelling drift reads as "the store
+ * doesn't carry it". Real case: "Salmon filets" missed "Wegmans Fresh Atlantic
+ * Salmon Fillet" — one L and one S apart — and Stock reported Wegmans doesn't
+ * sell salmon.
+ */
+function stem(w: string): string {
+  let x = w;
+  if (x === 'filets' || x === 'filet' || x === 'fillets') x = 'fillet';
+  // Plurals. Keep it dumb and reversible; both sides get the same treatment,
+  // so "berries"/"berry" and "tomatoes"/"tomato" meet in the middle.
+  if (x.length > 3 && x.endsWith('ies')) x = x.slice(0, -3) + 'y';
+  else if (x.length > 3 && x.endsWith('es') && /(ch|sh|s|x|z|o)es$/.test(x)) x = x.slice(0, -2);
+  else if (x.length > 3 && x.endsWith('s') && !x.endsWith('ss')) x = x.slice(0, -1);
+  return x;
+}
+
+const stemAll = (s: string) => norm(s).split(' ').filter(Boolean).map(stem);
+
+/**
  * Words that describe preparation or measurement rather than the product.
  * Left in, they poison a match: "1 cup grated parmesan" would demand a product
  * whose *name* contains "cup" and "grated".
@@ -40,7 +61,8 @@ const STOPWORDS = new Set([
 export function coreTokens(query: string): string[] {
   return norm(query)
     .split(' ')
-    .filter((w) => w && !STOPWORDS.has(w) && !/^\d+$/.test(w));
+    .filter((w) => w && !STOPWORDS.has(w) && !/^\d+$/.test(w))
+    .map(stem);
 }
 
 /**
@@ -78,8 +100,10 @@ export function matchCatalog<T extends CatalogItem>(
   // ones are variants that happen to include the word ("Asparagus Risotto Kit").
   let best: T | null = null;
   for (const p of products) {
-    const hay = norm(p.name);
-    if (!tokens.every((t) => hay.includes(t))) continue;
+    // Stem BOTH sides, then match on whole words. Substring matching on stems
+    // is too loose once words are shortened ("pea" would hit "peanut").
+    const hay = stemAll(p.name);
+    if (!tokens.every((t) => hay.some((h) => h === t || h.includes(t)))) continue;
     if (!best || p.name.length < best.name.length) best = p;
   }
   return best ? { product: best, via: 'name' } : { product: null, via: 'none' };

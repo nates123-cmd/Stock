@@ -403,3 +403,38 @@ describe('push routing', () => {
     expect(canPush('stop-shop')).toBe(false);
   });
 });
+
+// ── the "you told me Wegmans doesn't sell salmon" regression ────────────────
+
+describe('catalog misses are unknown, never missing', () => {
+  it('matches "Salmon filets" against "…Atlantic Salmon Fillet"', () => {
+    // One L and one S apart. The literal all-tokens gate missed it and Stock
+    // reported that Wegmans doesn't sell salmon.
+    const q = quoteWegmansStore([{ name: 'Salmon filets' }]);
+    expect(q.lines[0]!.status).toBe('exact');
+    expect(q.lines[0]!.name).toMatch(/Salmon Fillet/i);
+  });
+
+  it('folds ordinary plurals so a query and a label can meet', () => {
+    expect(quoteWegmansStore([{ name: 'tomatoes' }]).lines[0]!.status).toBe('exact');
+  });
+
+  it('never claims a store lacks something just because the catalog does', () => {
+    // The Walmart catalog is ~39 SKUs of things Nate has bought. It has no
+    // fish at all. That cannot support "Walmart doesn't have salmon".
+    const q = quoteWalmartStore([{ name: 'Salmon filets' }]);
+    expect(q.lines[0]!.status).toBe('unknown');
+    expect(q.lines[0]!.status).not.toBe('missing');
+  });
+
+  it('points at the live scan instead of shrugging', () => {
+    expect(quoteWalmartStore([{ name: 'Salmon filets' }]).note).toContain('check live prices');
+  });
+
+  it('produces no "doesn\'t have" verdict from catalogs alone', () => {
+    const c = compareQuotes(quoteAllStores([{ name: 'Salmon filets' }, { name: 'baking powder' }]), NOW);
+    expect(c.verdicts.some((v) => /doesn't have/.test(v))).toBe(false);
+    expect(c.nobodyHas).toEqual([]);
+    expect(c.verdicts.some((v) => /Couldn't check/.test(v))).toBe(true);
+  });
+});
