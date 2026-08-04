@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compareQuotes, describeSlot, retailerLabel, type StoreQuote } from '../src/lib/quotes';
-import { scanToQuotes } from '../src/lib/storeScan';
+import { canPush, scanToQuotes } from '../src/lib/storeScan';
 import { cartLinks, quoteWalmart } from '../src/lib/walmart';
 import { WALMART_PRODUCTS } from '../src/lib/walmartCatalog';
 import { activeWalmartCatalog, isOwnStore, OWN_STORE_ID } from '../src/lib/walmartLive';
@@ -386,5 +386,20 @@ describe('live scan quotes', () => {
   it('titles an unknown slug rather than showing it raw', () => {
     expect(retailerLabel('lincoln-market')).toBe('Lincoln Market');
     expect(retailerLabel('food-bazaar')).toBe('Food Bazaar');
+  });
+});
+
+describe('push routing', () => {
+  it('only offers a push where Stock has a real fill path', () => {
+    // Walmart = deep link, Wegmans/Costco = the Instacart agent. Everything
+    // else the scan can PRICE but nothing can SEND to, and the old router fell
+    // through to Wegmans — i.e. filled the wrong store's cart.
+    expect(canPush('walmart')).toBe(true);
+    expect(canPush('wegmans')).toBe(true);
+    expect(canPush('costco')).toBe(true);
+    expect(canPush('shoprite')).toBe(false);
+    expect(canPush('food-bazaar')).toBe(false);
+    expect(canPush('key-food')).toBe(false);
+    expect(canPush('stop-shop')).toBe(false);
   });
 });

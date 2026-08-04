@@ -6,6 +6,7 @@ import { Overlay } from './Overlay';
 import { Text } from './Text';
 import { compareQuotes, describeSlot, type QuoteRetailer, type StoreQuote } from '@/lib/quotes';
 import { quoteAllStores, type QuoteInput } from '@/lib/storeQuotes';
+import { canPush } from '@/lib/storeScan';
 
 /**
  * "Where should I order this from?" — the same list priced at every store we
@@ -147,17 +148,25 @@ export function StoreCompareSheet({
                 </Text>
               ) : null}
 
-              <Button
-                label={
-                  s.retailer === 'walmart'
-                    ? `Open Walmart cart · ${s.have + s.substitutes}`
-                    : `Push to ${s.label} · ${s.have + s.substitutes}`
-                }
-                variant={recommended ? 'primary' : 'secondary'}
-                disabled={busy || s.have + s.substitutes === 0}
-                onPress={() => onPush(s.retailer)}
-                style={styles.cta}
-              />
+              {canPush(s.retailer) ? (
+                <Button
+                  label={
+                    s.retailer === 'walmart'
+                      ? `Open Walmart cart · ${s.have + s.substitutes}`
+                      : `Push to ${s.label} · ${s.have + s.substitutes}`
+                  }
+                  variant={recommended ? 'primary' : 'secondary'}
+                  disabled={busy || s.have + s.substitutes === 0}
+                  onPress={() => onPush(s.retailer)}
+                  style={styles.cta}
+                />
+              ) : (
+                // No fill path for this storefront. Say so instead of showing a
+                // button that would have to refuse — or worse, fill Wegmans.
+                <Text variant="body" color="textMuted" style={styles.cta}>
+                  Compare only — order this one in Instacart yourself.
+                </Text>
+              )}
             </View>
           );
         })}

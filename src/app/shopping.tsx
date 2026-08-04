@@ -78,11 +78,13 @@ import { cartLinks, quoteWalmart } from '@/lib/walmart';
 import { hydrateWalmartCatalog, onWalmartCatalogChange } from '@/lib/walmartLive';
 import {
   SCAN_AVAILABLE,
+  canPush,
   queueScan,
   scanStatus,
   scanToQuotes,
   type ScanResult,
 } from '@/lib/storeScan';
+import { retailerLabel } from '@/lib/quotes';
 import type { QuoteRetailer, StoreQuote } from '@/lib/quotes';
 import type { Recipe, ShoppingCategory } from '@/types';
 
@@ -1634,8 +1636,21 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     setLiveQuotes(undefined);
   }, [compareItems]);
 
-  /** Route a compare-sheet pick to whichever pipeline that store uses. */
+  /**
+   * Route a compare-sheet pick to whichever pipeline that store uses.
+   *
+   * Only the three with a real fill path are routed. A live scan can price
+   * Food Bazaar or ShopRite, but nothing can SEND to them — and the old
+   * fall-through sent every unrecognised store to Wegmans, i.e. filled the
+   * wrong cart. Refuse loudly instead.
+   */
   const pushFromCompare = (retailer: QuoteRetailer) => {
+    if (!canPush(retailer)) {
+      setHint(
+        `${retailerLabel(retailer)} is compare-only — Stock can't fill its cart. Order it in Instacart, or push to Wegmans.`,
+      );
+      return;
+    }
     setCompareOpen(false);
     if (retailer === 'walmart') pushToWalmart();
     else if (retailer === 'costco') void pushToCostco();

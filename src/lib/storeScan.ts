@@ -27,6 +27,19 @@ export const STORE_LABEL: Record<string, string> = {
   walmart: 'Walmart (Instacart)',
 };
 
+/**
+ * Stores Stock can actually SEND a list to.
+ *
+ * Everything else is compare-only: the live scan can price Food Bazaar or
+ * ShopRite, but there is no fill path for them — Walmart has its deep link,
+ * and the Instacart agent only knows how to drive the wegmans and costco
+ * storefronts. Offering a push we can't honour would fill the WRONG store's
+ * cart, which is exactly the failure this whole feature exists to prevent.
+ */
+export const PUSHABLE_STORES = new Set(['walmart', 'wegmans', 'costco']);
+
+export const canPush = (retailer: string) => PUSHABLE_STORES.has(retailer);
+
 export type ScanStatus = 'queued' | 'running' | 'done' | 'error';
 
 type RawLine = {
