@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from './Text';
 import { SearchBar } from './SearchBar';
@@ -109,13 +109,40 @@ export function RecipeLibrary({
 
   const byNewest = (a: Recipe, b: Recipe) =>
     b.createdAt.getTime() - a.createdAt.getTime();
-  const shown = useMemo(
+  const allShown = useMemo(
     () =>
       (segment === 'favorites' ? filtered.filter((r) => r.isFavorite) : filtered)
         .slice()
         .sort(byNewest),
     [filtered, segment],
   );
+
+  /**
+   * How many cards to actually render.
+   *
+   * The library used to render every recipe at once — 163 of them — and the
+   * page died on mobile Safari. Shrinking the thumbnails 700→384px cut the
+   * decoded bitmap from 80 MB to 24, but the heap stayed at ~172 MB: the images
+   * were never the biggest cost, the 163 mounted card components were.
+   *
+   * A hard cap plus "Show more" rather than viewport-based lazy loading,
+   * because IntersectionObserver does NOT fire in this react-native-web tree —
+   * it silently never callbacks, even on an element sitting on screen, so that
+   * approach shipped blank thumbnails once already. A count is dumb and cannot
+   * fail quietly.
+   *
+   * Search and filters run over the FULL list; this only limits what's drawn,
+   * so nothing becomes unfindable — it just takes another tap to reach.
+   */
+  const PAGE = 36;
+  const [limit, setLimit] = useState(PAGE);
+  // A new search/filter should start from the top again, not deep in a list
+  // that no longer exists.
+  useEffect(() => {
+    setLimit(PAGE);
+  }, [query, filter, segment, activeTags]);
+  const shown = useMemo(() => allShown.slice(0, limit), [allShown, limit]);
+  const more = allShown.length - shown.length;
 
   const toTryIdeas = useMemo(() => {
     const byNew = (a: PipelineIdea, b: PipelineIdea) =>
@@ -314,7 +341,19 @@ export function RecipeLibrary({
                     </View>
                   ))}
                 </View>
-              ) : (
+              ) : null}
+              {more > 0 ? (
+                <Pressable
+                  onPress={() => setLimit((n) => n + PAGE)}
+                  style={styles.showMore}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show ${Math.min(more, PAGE)} more of ${allShown.length} recipes`}>
+                  <Text variant="bodyStrong" color="accent">
+                    Show {Math.min(more, PAGE)} more · {more} not shown
+                  </Text>
+                </Pressable>
+              ) : null}
+              {shown.length === 0 ? (
                 <View style={styles.empty}>
                   <Text color="textMuted">
                     {segment === 'favorites' ? 'No favorites yet.' : 'No recipes match.'}
@@ -325,7 +364,7 @@ export function RecipeLibrary({
                       : 'Try a different search or filter.'}
                   </Text>
                 </View>
-              )}
+              ) : null}
             </>
           )}
         </>
@@ -335,6 +374,7 @@ export function RecipeLibrary({
 }
 
 const styles = StyleSheet.create({
+  showMore: { alignItems: 'center', paddingVertical: 16 },
   segments: { paddingBottom: 14 },
   search: { paddingBottom: 12 },
   chips: { marginHorizontal: -20, paddingHorizontal: 20, paddingBottom: 6 },
