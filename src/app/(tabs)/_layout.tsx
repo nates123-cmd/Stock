@@ -6,7 +6,18 @@ import { Glyph } from '@/components';
 import { colors, fonts, type GlyphName } from '@/design';
 
 /**
- * Three-tab bottom nav (redesign) — Recipes · Plan (index) · Cook. Pipeline,
+ * Recipes is the app's landing screen, so it is also the tab navigator's
+ * anchor: a back gesture from anywhere in the tabs comes to rest here rather
+ * than on a Plan screen the user never chose. The `/` route itself redirects
+ * (see app/index.tsx) — this handles native's back stack, that handles the URL.
+ */
+export const unstable_settings = {
+  anchor: 'recipes',
+  initialRouteName: 'recipes',
+};
+
+/**
+ * Three-tab bottom nav (redesign) — Recipes · Plan · Cook. Pipeline,
  * Bench and Pantry stay as routes but are hidden from the bar (href:null),
  * reached from the new segmented headers and the Cook launcher. The global
  * capture FAB is gone — the shopping list's inline "Add an item" row is the
@@ -47,7 +58,7 @@ export default function TabLayout() {
             letterSpacing: 0.5,
           },
         }}>
-        {/* Visible: Recipes · Plan (index) · Cook. */}
+        {/* Visible: Recipes · Plan · Cook. */}
         <Tabs.Screen
           name="recipes"
           options={{
@@ -56,7 +67,7 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="index"
+          name="plan"
           options={{
             title: 'Plan',
             tabBarIcon: ({ focused }) => <TabGlyph name="plan" focused={focused} />,

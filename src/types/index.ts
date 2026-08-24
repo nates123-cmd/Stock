@@ -65,6 +65,18 @@ export type Recipe = {
    * auto-tagging on can never take one away. See lib/recipeTags.ts.
    */
   tagMeta?: TagMeta;
+  /**
+   * Cuisine style — ONE value, from the closed vocabulary in lib/cuisine.ts.
+   * Deliberately a field and not a tag: cuisines are mutually exclusive and
+   * must OR together in a filter, where tags are a set and AND together.
+   */
+  cuisine?: string;
+  /**
+   * True only while `cuisine` is the deriver's guess. Any manual choice clears
+   * it, and from then on nothing auto-assigns over the top. Same contract as
+   * `tagMeta` — your edit wins, permanently.
+   */
+  cuisineAuto?: true;
   myNotes?: string;
   /** optional planning note set at capture */
   firstCookIntention?: string;

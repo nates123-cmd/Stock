@@ -392,7 +392,7 @@ export default function BuildListScreen() {
     if (write.adds.length > 0) addExtras(write.adds);
     // Land on the real Shop TAB (with tab chrome), not the standalone /shopping
     // stack screen (which showed a "Done" header — an extra step).
-    router.replace({ pathname: '/', params: { segment: 'shop' } });
+    router.replace({ pathname: '/plan', params: { segment: 'shop' } });
   };
 
   /* ---------- render ---------- */

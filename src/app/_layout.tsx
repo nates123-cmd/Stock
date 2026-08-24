@@ -114,6 +114,9 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ThemeProvider value={navTheme}>
           <Stack screenOptions={{ contentStyle: { backgroundColor: colors.bg } }}>
+            {/* `/` is a bare redirect to /recipes (app/index.tsx). Header off so
+                the hop is invisible rather than flashing a stack bar. */}
+            <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen
               name="capture"

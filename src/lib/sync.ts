@@ -26,6 +26,8 @@ import { useCookStore } from '@/store/cooks';
 import { useCookPlanStore } from '@/store/cookPlans';
 import { useHaveStore, type HaveRecord } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
+import { usePushedStore, type PushedEntry } from '@/store/pushed';
+import { useSyncStatusStore } from '@/store/syncStatus';
 import { reviveRecipeDates, reviveCookPlanDates } from './db/repositories';
 import type { Cook, CookPlan, Meal, PantryItem, PipelineIdea } from '@/types';
 
@@ -37,7 +39,8 @@ type CloudTable =
   | 'cooks'
   | 'cook_plans'
   | 'have_records'
-  | 'extras';
+  | 'extras'
+  | 'pushed';
 
 /* ---------- Date revivers (JSON → Date; mirrors repositories.ts) ---------- */
 
@@ -90,6 +93,76 @@ function reviveCook(c: Cook): Cook {
 function reviveExtraItem(e: ExtraItem): ExtraItem {
   e.addedAt = new Date(e.addedAt as unknown as string);
   return e;
+}
+
+/**
+ * Pushed markers cloud shape.
+ *
+ * These are what take a row OFF the active shopping list once you've pushed it
+ * to a store (lib/activeList.ts). They were device-local, which is the whole of
+ * the "the list doesn't clear after a grocery push — but only on some devices"
+ * bug: the extras synced, the markers that hide them did not.
+ *
+ * A marker is identified by its `key` (the matchKey of the name at push time),
+ * so that doubles as the row id. Everything else rides along in `data`.
+ */
+type PushedRow = PushedEntry & { id: string };
+
+function revivePushedRow(r: PushedRow): PushedRow {
+  r.pushedAt = new Date(r.pushedAt as unknown as string);
+  // Belt and braces: a row written by a future/older client that lost `key`
+  // would otherwise be un-matchable against any extra.
+  if (!r.key) r.key = r.id;
+  return r;
+}
+
+// Same trick as haveRowCache: the sync diff is ref-equality based, so an
+// unchanged marker must project to the SAME object every read or every store
+// notification would re-upsert the whole marker list.
+const pushedRowCache = new Map<string, { src: PushedEntry; row: PushedRow }>();
+
+function readPushedRows(): PushedRow[] {
+  const items = usePushedStore.getState().items;
+  const out: PushedRow[] = [];
+  const seen = new Set<string>();
+  for (const entry of items) {
+    seen.add(entry.key);
+    const cached = pushedRowCache.get(entry.key);
+    // `upsertPushed` reuses the object for any key it didn't touch, so a plain
+    // ref check on the source entry is a reliable "did this marker change".
+    if (cached && cached.src === entry) {
+      out.push(cached.row);
+    } else {
+      const row: PushedRow = { ...entry, id: entry.key };
+      pushedRowCache.set(entry.key, { src: entry, row });
+      out.push(row);
+    }
+  }
+  for (const key of Array.from(pushedRowCache.keys())) {
+    if (!seen.has(key)) pushedRowCache.delete(key);
+  }
+  return out;
+}
+
+function replacePushedRows(next: PushedRow[]): void {
+  pushedRowCache.clear();
+  const items: PushedEntry[] = next.map((row) => {
+    const clean: PushedEntry = {
+      key: row.key,
+      name: row.name,
+      pushedAt: row.pushedAt,
+      dest: row.dest,
+      ...(row.extraIds ? { extraIds: row.extraIds } : {}),
+      ...(row.nameMatch ? { nameMatch: true as const } : {}),
+    };
+    pushedRowCache.set(clean.key, { src: clean, row });
+    return clean;
+  });
+  // Mark hydrated: a cloud pull IS a hydrate, and leaving the flag false lets
+  // the local hydrate() fire afterwards and overwrite the cloud set with this
+  // device's stale IndexedDB copy — the exact race that would resurrect a
+  // pushed row.
+  usePushedStore.setState({ items, hydrated: true });
 }
 
 /**
@@ -242,6 +315,17 @@ const collections: Collection[] = [
     subscribe: (l) => useExtrasStore.subscribe(l),
     revive: (raw) => reviveExtraItem(raw as ExtraItem),
   },
+  {
+    // Must sit AFTER `extras`: on a cold pull the markers are meaningless
+    // without the extras they hide, and this order means the list is only ever
+    // briefly too long, never briefly too short (an item flashing away and back
+    // reads as a bug; one arriving a beat late does not).
+    table: 'pushed',
+    read: readPushedRows,
+    replace: (next) => replacePushedRows(next as PushedRow[]),
+    subscribe: (l) => usePushedStore.subscribe(l),
+    revive: (raw) => revivePushedRow(raw as PushedRow),
+  },
 ];
 
 /* ---------- State ---------- */
@@ -279,6 +363,7 @@ const refCache: Record<CloudTable, Map<string, Item>> = {
   cook_plans: new Map(),
   have_records: new Map(),
   extras: new Map(),
+  pushed: new Map(),
 };
 
 // Echo guard: when Realtime delivers a change, we add its id to suppress
@@ -300,7 +385,14 @@ async function cloudUpsert(
   const { error } = await supabase
     .from(table)
     .upsert({ id: item.id, user_id: userId, data: item });
-  if (error) console.warn('[stock/sync] upsert failed', table, error.message);
+  if (error) {
+    console.warn('[stock/sync] upsert failed', table, error.message);
+    // Record it so the UI can stop claiming "Saved" for a write the server
+    // refused. See store/syncStatus.ts.
+    useSyncStatusStore.getState().noteFailure(table, error.message);
+  } else {
+    useSyncStatusStore.getState().noteSuccess();
+  }
 }
 
 async function cloudDelete(
@@ -472,6 +564,10 @@ async function start(signedInUserId: string, email: string | null): Promise<void
 async function stop(): Promise<void> {
   while (unsubscribers.length) unsubscribers.pop()?.();
   for (const c of collections) refCache[c.table].clear();
+  // Projection caches key off the PREVIOUS account's objects; a sign-out must
+  // drop them or the next account's first read reuses stale rows.
+  pushedRowCache.clear();
+  haveRowCache.clear();
   suppress.clear();
   if (activeChannel) {
     await activeChannel.unsubscribe();

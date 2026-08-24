@@ -5,6 +5,7 @@ import { migrate, recipeRepo } from '@/lib/db';
 import { webPersist } from '@/lib/db/webStore';
 import { seedRecipes } from '@/lib/seed';
 import { deriveTags, reconcileTags } from '@/lib/recipeTags';
+import { deriveCuisine, reconcileCuisine } from '@/lib/cuisine';
 
 /**
  * App-facing source of truth for recipes (spec §6). Zustand holds the working
@@ -35,14 +36,37 @@ type RecipeState = {
   autoTag: (id?: string) => Promise<number>;
 };
 
-/** Apply the tagger to one recipe; null when it comes out unchanged. */
+/**
+ * Apply the tagger AND the cuisine deriver to one recipe; null when it comes
+ * out unchanged.
+ *
+ * Cuisine rides along here rather than in its own pass because the contract is
+ * identical (derived locally, deterministic, never overrides an edit) and
+ * because this function is already called on every save and on every boot —
+ * which makes the backfill over the existing library free and automatic
+ * instead of a one-off script somebody has to remember to run.
+ */
 function retag(r: Recipe): Recipe | null {
   const { tags, tagMeta } = reconcileTags(r.tags, deriveTags(r), r.tagMeta);
-  const same =
+  const tagsSame =
     tags.length === r.tags.length &&
     tags.every((t, i) => t === r.tags[i]) &&
     JSON.stringify(tagMeta) === JSON.stringify(r.tagMeta ?? { auto: [], removed: [] });
-  return same ? null : { ...r, tags, tagMeta };
+
+  // Derive from the RECONCILED tags: a cuisine you typed as a tag ("thai")
+  // should win immediately, not one save later.
+  const cuisinePatch = reconcileCuisine(r, deriveCuisine({ ...r, tags }));
+
+  if (tagsSame && cuisinePatch === null) return null;
+  const next: Recipe = { ...r, tags, tagMeta };
+  if (cuisinePatch !== null) {
+    // The patch is the whole cuisine state, so an empty object CLEARS both
+    // fields rather than leaving a stale value behind.
+    delete next.cuisine;
+    delete next.cuisineAuto;
+    Object.assign(next, cuisinePatch);
+  }
+  return next;
 }
 
 export const useRecipeStore = create<RecipeState>((set, get) => ({

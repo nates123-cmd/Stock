@@ -138,7 +138,7 @@ export function CartFillBanner({ bottomOffset }: { bottomOffset?: number }) {
 
   return (
     <Pressable
-      onPress={() => router.push({ pathname: '/', params: { segment: 'shop' } })}
+      onPress={() => router.push({ pathname: '/plan', params: { segment: 'shop' } })}
       style={[styles.wrap, { bottom: offset }]}
       accessibilityRole="button"
       accessibilityLabel={`${label}. Tap to open the shopping list.`}>

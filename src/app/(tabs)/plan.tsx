@@ -78,9 +78,18 @@ export default function PlanScreen() {
 
   const [daysAhead, setDaysAhead] = useState(6); // today + next 5
   const [manage, setManage] = useState<{ meal: Meal; dish: Dish } | null>(null);
-  // The Plan tab hosts three segments in order Plan · Shop · Pantry. Opens on
-  // SHOP — the shopping list is the app's default landing (Nate's call). Shop and
-  // Pantry embed the real screens; Plan is the meal model below.
+  // The Plan tab hosts three segments in order PANTRY · PLAN · SHOP — the real
+  // sequence of the job: see what you have, decide what you're making, buy the
+  // gap. (It used to read Plan · Shop · Pantry.) Pantry and Shop embed the real
+  // screens; Plan is the meal model below.
+  //
+  // Still opens on SHOP. The order changed, the entry point didn't: the
+  // shopping list is what you reach for once you're on this tab, and nothing in
+  // the brief asked to move it. Left as its own decision to make later.
+  //
+  // Segments are addressed by KEY, never by index, so re-ordering them cannot
+  // strand a saved position or a deep link — the reason there is nothing else
+  // to migrate here.
   const [segment, setSegment] = useState<'shop' | 'plan' | 'pantry'>('shop');
   // Deep-link the segment: the "Build shopping list" wizard finishes by routing
   // here with ?segment=shop so it lands ON the real Shop tab (with tab chrome),
@@ -318,9 +327,9 @@ export default function PlanScreen() {
       <View style={styles.segments}>
         <SegmentedControl
           segments={[
+            { key: 'pantry', label: 'Pantry' },
             { key: 'plan', label: 'Plan' },
             { key: 'shop', label: 'Shop' },
-            { key: 'pantry', label: 'Pantry' },
           ]}
           value={segment}
           onChange={(k) => setSegment(k as 'shop' | 'plan' | 'pantry')}

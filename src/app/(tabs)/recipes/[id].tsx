@@ -18,6 +18,7 @@ import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
 import { usePlanStore } from '@/store/plan';
 import { useCookStore } from '@/store/cooks';
+import { useSyncStatusStore } from '@/store/syncStatus';
 import { dayTag, isSameDay } from '@/lib/week';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { uid } from '@/lib/id';
@@ -26,6 +27,7 @@ import type { Ingredient, MealType, Recipe, Step, Unit } from '@/types';
 import { formatMinutes } from '@/lib/format';
 import { shortDate } from '@/lib/pantry';
 import { applyTagEdit, norm, type TagMeta } from '@/lib/recipeTags';
+import { CUISINES, cuisineLabel, normCuisine, setCuisineManually } from '@/lib/cuisine';
 import type { Nutrition, RecipeSource } from '@/types';
 
 const SOURCE_NAME: Record<RecipeSource['type'], string> = {
@@ -336,6 +338,25 @@ export default function RecipeDetail() {
           />
         ) : null}
 
+        {!clean ? (
+          <CuisineEditor
+            value={recipe.cuisine}
+            auto={recipe.cuisineAuto === true}
+            onChange={(next) =>
+              save({
+                ...recipe,
+                // setCuisineManually returns the WHOLE cuisine state, so
+                // spreading it clears `cuisineAuto` — which is what makes a
+                // hand-picked cuisine permanent. Strip both first so an empty
+                // patch really does clear rather than leave the old value.
+                ...stripCuisine(recipe),
+                ...setCuisineManually(next),
+                modifiedAt: new Date(),
+              })
+            }
+          />
+        ) : null}
+
         <Button
           label="Add to plan"
           glyph="plan"
@@ -568,6 +589,81 @@ function NutritionCard({ n }: { n: Nutrition }) {
  * with library-wide autocomplete. No explicit save — every mutation
  * propagates via onChange (parent debounce-saves like other free text).
  */
+/**
+ * A recipe with both cuisine fields removed, so a patch can set the whole
+ * state. Spreading `{}` over a recipe leaves the old value in place, which
+ * would make "clear" a no-op.
+ */
+function stripCuisine(r: Recipe): Recipe {
+  const next = { ...r };
+  delete next.cuisine;
+  delete next.cuisineAuto;
+  return next;
+}
+
+/**
+ * Cuisine picker — one value, chosen from the closed vocabulary.
+ *
+ * Same contract as the tag editor above: the deriver's guess is drawn as a
+ * guess, and picking anything by hand makes it yours for good (lib/cuisine.ts
+ * will not touch a value once `cuisineAuto` is gone). Tapping the active chip
+ * clears the field and hands it back to the deriver.
+ */
+function CuisineEditor({
+  value,
+  auto,
+  onChange,
+}: {
+  value?: string;
+  auto: boolean;
+  onChange: (next: string | undefined) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = value ? normCuisine(value) : undefined;
+
+  return (
+    <View style={styles.cuisineBlock}>
+      <View style={styles.cuisineHead}>
+        <SectionLabel color="textMuted">Cuisine</SectionLabel>
+        {current && auto ? (
+          <Text variant="sectionLabel" color="textFaint">
+            guessed · tap to change
+          </Text>
+        ) : null}
+      </View>
+      {open ? (
+        <ChipRow>
+          {CUISINES.map((c) => (
+            <FilterChip
+              key={c}
+              label={cuisineLabel(c)}
+              variant="tag"
+              active={current === c}
+              onPress={() => {
+                // Tapping the active one clears it — the only way back to
+                // "let the app decide".
+                onChange(current === c ? undefined : c);
+                setOpen(false);
+              }}
+            />
+          ))}
+        </ChipRow>
+      ) : (
+        <Pressable
+          onPress={() => setOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            current ? `Cuisine: ${cuisineLabel(current)}. Change it.` : 'Set a cuisine'
+          }>
+          <Text color={current ? 'text' : 'textFaint'} variant={current ? 'bodyStrong' : 'body'}>
+            {current ? cuisineLabel(current) : 'Not set — tap to choose'}
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 function TagEditor({
   tags,
   tagMeta,
@@ -758,21 +854,45 @@ function NotesEditor({
   textRef.current = text;
   const lastSavedRef = useRef(initial);
   const dirty = text !== lastSavedRef.current;
+  const cloudError = useSyncStatusStore((s) => s.lastError);
 
-  const commit = useCallback(
-    async (value?: string) => {
-      const next = value ?? textRef.current;
-      if (next === lastSavedRef.current) return;
-      lastSavedRef.current = next;
-      await onSave(next);
-      setSaved(true);
-      // 4s linger so the badge is actually noticed mid-type. Originally
-      // 1.8s, which was below "did that just blink?" perceptual threshold
-      // for users who type-then-look — fix #4.
-      setTimeout(() => setSaved(false), 4000);
-    },
-    [onSave],
-  );
+  /**
+   * `onSave` behind a ref.
+   *
+   * The caller passes an inline arrow that closes over `recipe`, so its
+   * identity changes on EVERY parent render. When that identity was a hook
+   * dependency below, the effects re-ran constantly — and the unmount effect's
+   * cleanup ran on every render, not on unmount. While the field was dirty
+   * that cleanup called `onSave` directly, which:
+   *
+   *   1. skipped `lastSavedRef`, so it stayed dirty and stayed eligible;
+   *   2. wrote the recipe store, which re-rendered the parent, which made a
+   *      new `onSave`, which fired the cleanup again — forever.
+   *
+   * The result was an unbounded render+save loop that pinned the main thread:
+   * typing stopped being accepted after a few characters, and the note never
+   * settled. Reported on Amanda's account, and it is not account-specific —
+   * it needs a keystroke to land while a save is in flight, which is a matter
+   * of typing speed, not permissions. (Prod RLS on `recipes` does cover a
+   * household member; that was checked before this fix.)
+   *
+   * Reading the latest callback out of a ref keeps the effects mount-stable
+   * while still calling the current closure.
+   */
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
+
+  const commit = useCallback(async (value?: string) => {
+    const next = value ?? textRef.current;
+    if (next === lastSavedRef.current) return;
+    lastSavedRef.current = next;
+    await onSaveRef.current(next);
+    setSaved(true);
+    // 4s linger so the badge is actually noticed mid-type. Originally
+    // 1.8s, which was below "did that just blink?" perceptual threshold
+    // for users who type-then-look — fix #4.
+    setTimeout(() => setSaved(false), 4000);
+  }, []);
 
   // Debounce-save on every keystroke (500ms idle) — spec §6 says no
   // free-text field should require an explicit Save tap. The blur path
@@ -787,29 +907,42 @@ function NotesEditor({
 
   // Force-save on unmount (route change while still dirty) so navigating
   // away via the tab bar or browser back doesn't drop unsaved input.
+  // Deps MUST stay empty: this cleanup is an unmount handler, and any
+  // dependency that changes per render turns it into the save loop above.
   useEffect(() => {
     return () => {
       if (textRef.current !== lastSavedRef.current) {
-        void onSave(textRef.current);
+        // Keep the ref in step even on this path, so a cleanup that somehow
+        // runs twice cannot double-write.
+        const pending = textRef.current;
+        lastSavedRef.current = pending;
+        void onSaveRef.current(pending);
       }
     };
-  }, [onSave]);
+  }, []);
 
   return (
     <Card style={styles.notes}>
       <View style={styles.notesHead}>
         <SectionLabel color="textMuted">My notes</SectionLabel>
-        {saved ? (
+        {dirty ? (
+          <Text variant="sectionLabel" color="warn">
+            Saving…
+          </Text>
+        ) : cloudError ? (
+          // Don't claim "Saved" when the cloud write was refused — the old
+          // badge showed regardless, so a failed sync was indistinguishable
+          // from a good one.
+          <Text variant="sectionLabel" color="warn">
+            Saved on this device only
+          </Text>
+        ) : saved ? (
           <View style={styles.savedBadge}>
             <Glyph name="done" size={11} color="bg" />
             <Text variant="sectionLabel" color="bg" style={styles.savedBadgeText}>
               Saved
             </Text>
           </View>
-        ) : dirty ? (
-          <Text variant="sectionLabel" color="warn">
-            Saving…
-          </Text>
         ) : null}
       </View>
       <TextInput
@@ -959,6 +1092,13 @@ const styles = StyleSheet.create({
   stepBody: { flex: 1, lineHeight: 21 },
   cleanBody: { fontSize: 17, lineHeight: 26 },
   notes: { marginTop: 24, gap: 8 },
+  cuisineBlock: { marginTop: 18, gap: 8 },
+  cuisineHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   notesHead: {
     flexDirection: 'row',
     alignItems: 'center',

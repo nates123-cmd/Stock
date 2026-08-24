@@ -65,8 +65,14 @@ export type TagMeta = {
  *
  * Substring matching is what makes naive dietary tagging wrong: "egg" hits
  * "eggplant", "beef" hits "beefsteak tomato", "ham" hits "hamburger bun".
+ *
+ * Exported because lib/cuisine.ts needs exactly this and learned the lesson the
+ * expensive way: matching its signature terms as plain substrings made "hing"
+ * (asafoetida) hit "somet-hing", "was-hing", "not-hing", and labelled a key lime
+ * pie and a stack of buttermilk pancakes as Indian. One notion of word matching,
+ * shared.
  */
-function hasWord(text: string, needle: string): boolean {
+export function hasWord(text: string, needle: string): boolean {
   const re = new RegExp(`(^|[^a-z])${escapeRe(needle)}(e?s)?([^a-z]|$)`, 'i');
   return re.test(text);
 }

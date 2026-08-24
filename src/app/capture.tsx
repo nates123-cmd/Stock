@@ -41,8 +41,10 @@ import {
 } from '@/lib/parsing';
 import { CLAUDE_AVAILABLE, type ImageMediaType } from '@/lib/api/claudeBridge';
 import { formatAmount } from '@/lib/format';
+import { CUISINES, cuisineLabel, deriveCuisine, normCuisine } from '@/lib/cuisine';
+import { parseQty } from '@/lib/qty';
 import { uid } from '@/lib/id';
-import type { PipelineIdea, Recipe, RecipeSource } from '@/types';
+import type { Ingredient, PipelineIdea, Recipe, RecipeSource, Step as RecipeStep } from '@/types';
 
 type Step = 'capture' | 'parsing' | 'review' | 'saved';
 
@@ -151,6 +153,8 @@ export default function CaptureFlow() {
   const [step, setStep] = useState<Step>('capture');
   const [raw, setRaw] = useState(params.prefillText ?? '');
   const [draft, setDraft] = useState<ParsedRecipeDraft | null>(null);
+  /** Bumped once per completed parse. See the setDraft sites above. */
+  const [parseId, setParseId] = useState(0);
   const [progress, setProgress] = useState<ProgressStep[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -171,7 +175,7 @@ export default function CaptureFlow() {
   // capture was itself launched FROM an idea (params.ideaId already links it).
   const [relatedIdeaIds, setRelatedIdeaIds] = useState<string[]>([]);
   const [linkedIdeaId, setLinkedIdeaId] = useState<string | null>(null);
-  const matchedForDraft = useRef<ParsedRecipeDraft | null>(null);
+  const matchedForParse = useRef<number>(-1);
 
   useEffect(() => {
     void hydratePipeline();
@@ -180,8 +184,8 @@ export default function CaptureFlow() {
   // When a draft lands in review, ask Claude which open ideas it matches.
   useEffect(() => {
     if (step !== 'review' || !draft || params.ideaId) return;
-    if (matchedForDraft.current === draft) return; // once per draft
-    matchedForDraft.current = draft;
+    if (matchedForParse.current === parseId) return; // once per parse
+    matchedForParse.current = parseId;
     const open = ideas.filter((i) => i.status !== 'promoted');
     if (open.length === 0) return;
     const recipeText = [
@@ -199,7 +203,10 @@ export default function CaptureFlow() {
     return () => {
       cancelled = true;
     };
-  }, [step, draft, ideas, params.ideaId]);
+    // `draft` is deliberately NOT a dependency: it changes on every edit in the
+    // review step, and this fires a network call.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, parseId, ideas, params.ideaId]);
 
   const relatedIdeas = useMemo(
     () => ideas.filter((i) => relatedIdeaIds.includes(i.id)),
@@ -213,12 +220,28 @@ export default function CaptureFlow() {
       : { type: 'mine' };
   const hasContent = raw.trim().length > 0;
 
-  // Seed the editable source each time a fresh draft arrives (new parse).
-  // Same draft identity → no re-seed, so user edits survive re-renders.
+  // Seed the editable source each time a fresh PARSE arrives. Keyed on
+  // parseId, not on `draft`: the review step edits the draft in place now, so
+  // draft identity changes constantly and this would stamp the parsed source
+  // back over a correction the moment anything else was touched.
   useEffect(() => {
-    if (draft) setSource(draft.source ?? src);
+    if (!draft) return;
+    setSource(draft.source ?? src);
+    // Auto-assign the cuisine so the preview shows it and it can be corrected
+    // BEFORE saving — same "guess, then let the user overrule" pattern as the
+    // tags. The store re-derives on save anyway, so this is about visibility,
+    // not correctness. Skipped when the parser already supplied one.
+    if (!draft.cuisine) {
+      const guess = deriveCuisine({
+        title: draft.title,
+        ingredients: draft.ingredients ?? [],
+        steps: draft.steps ?? [],
+        tags: draft.tags ?? [],
+      });
+      if (guess) setDraft((d) => (d ? { ...d, cuisine: guess, cuisineAuto: true } : d));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft]);
+  }, [parseId]);
 
   const close = () => (router.canGoBack() ? router.back() : router.replace('/recipes'));
 
@@ -259,6 +282,12 @@ export default function CaptureFlow() {
       setDraft(d);
       setTitle(d.title ?? '');
       setServes(String(d.yield?.serves ?? 4));
+      // A FRESH parse, as distinct from an edit to the draft that's already on
+      // screen. The review step is editable now, so `draft` gets a new identity
+      // on every keystroke — the once-per-parse effects below key off this
+      // counter instead, or they'd re-seed the source and re-run the pipeline
+      // match on every character typed.
+      setParseId((n) => n + 1);
       setStep('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Parsing failed.');
@@ -301,6 +330,12 @@ export default function CaptureFlow() {
       setDraft(d);
       setTitle(d.title ?? '');
       setServes(String(d.yield?.serves ?? 4));
+      // A FRESH parse, as distinct from an edit to the draft that's already on
+      // screen. The review step is editable now, so `draft` gets a new identity
+      // on every keystroke — the once-per-parse effects below key off this
+      // counter instead, or they'd re-seed the source and re-run the pipeline
+      // match on every character typed.
+      setParseId((n) => n + 1);
       setStep('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read that PDF.');
@@ -348,6 +383,12 @@ export default function CaptureFlow() {
       setDraft(d);
       setTitle(d.title ?? '');
       setServes(String(d.yield?.serves ?? 4));
+      // A FRESH parse, as distinct from an edit to the draft that's already on
+      // screen. The review step is editable now, so `draft` gets a new identity
+      // on every keystroke — the once-per-parse effects below key off this
+      // counter instead, or they'd re-seed the source and re-run the pipeline
+      // match on every character typed.
+      setParseId((n) => n + 1);
       setStep('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read that image.');
@@ -371,6 +412,10 @@ export default function CaptureFlow() {
       ingredients: draft.ingredients ?? [],
       steps: draft.steps ?? [],
       tags: draft.tags ?? [],
+      // Cuisine as reviewed: either the deriver's guess, or whatever was picked
+      // in the review step (which clears `cuisineAuto`, making it permanent).
+      ...(draft.cuisine ? { cuisine: draft.cuisine } : {}),
+      ...(draft.cuisine && draft.cuisineAuto ? { cuisineAuto: true as const } : {}),
       // Carry the parser's extracted photo + per-serving nutrition through to
       // the saved recipe — they were being silently dropped here.
       imageUrl: draft.imageUrl,
@@ -421,6 +466,7 @@ export default function CaptureFlow() {
         {step === 'review' && draft && (
           <ReviewStep
             draft={draft}
+            onPatch={(patch) => setDraft((d) => (d ? { ...d, ...patch } : d))}
             title={title}
             setTitle={setTitle}
             serves={serves}
@@ -623,6 +669,7 @@ function ParsingStep({
 /* ---------- Step 4: review ---------- */
 function ReviewStep({
   draft,
+  onPatch,
   title,
   setTitle,
   serves,
@@ -640,6 +687,8 @@ function ReviewStep({
   onSave,
 }: {
   draft: ParsedRecipeDraft;
+  /** Edit the parsed draft in place, before it is ever saved. */
+  onPatch: (patch: Partial<ParsedRecipeDraft>) => void;
   title: string;
   setTitle: (s: string) => void;
   serves: string;
@@ -658,10 +707,83 @@ function ReviewStep({
 }) {
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [units, setUnits] = useState<'original' | 'grams'>('original');
+  const [tagDraft, setTagDraft] = useState('');
+  const [pickCuisine, setPickCuisine] = useState(false);
   const conf = draft.fieldConfidence ?? {};
   const guessed = (k: string) => conf[k] === 'guessed';
+  const ingredients = draft.ingredients ?? [];
   const steps = draft.steps ?? [];
+  const tags = draft.tags ?? [];
+  // Editing is the whole point of this screen now, so the method list opens
+  // fully as soon as you touch it — a collapsed step you can't see is one you
+  // can't fix. The +N more control still gates the FIRST view.
   const shownSteps = showAllSteps ? steps : steps.slice(0, 3);
+  const cuisine = draft.cuisine ? normCuisine(draft.cuisine) : undefined;
+
+  /* ---- draft editing ---- */
+
+  const patchIngredient = (id: string, patch: Partial<Ingredient>) =>
+    onPatch({
+      ingredients: ingredients.map((i) => (i.id === id ? { ...i, ...patch } : i)),
+    });
+
+  /** The qty column is ONE free-text field ("200 g", "1 1/2 cups"). Splitting
+   *  it into number + unit inputs is more taps for every row and gets in the
+   *  way of the messy cases a bad parse actually produces. */
+  const setIngredientQty = (id: string, raw: string) => {
+    const { amount, unit } = parseQty(raw);
+    patchIngredient(id, {
+      amount,
+      // Keep the raw text as the unit when it won't parse, so nothing typed is
+      // silently dropped (same rule the plan wizard uses for mixed units).
+      unit: amount != null ? unit : raw.trim() || null,
+    });
+  };
+
+  const removeIngredient = (id: string) =>
+    onPatch({ ingredients: ingredients.filter((i) => i.id !== id) });
+
+  const addIngredient = () =>
+    onPatch({
+      ingredients: [
+        ...ingredients,
+        {
+          id: uid('ing'),
+          amount: null,
+          unit: null,
+          canonicalName: '',
+          modificationHistory: [],
+        },
+      ],
+    });
+
+  const patchStep = (id: string, body: string) =>
+    onPatch({ steps: steps.map((st) => (st.id === id ? { ...st, body } : st)) });
+
+  /** Renumber after any removal — `ordinal` is what the cook screen counts by,
+   *  so a gap turns into "Step 4" following "Step 2". */
+  const renumber = (list: RecipeStep[]): RecipeStep[] =>
+    list.map((st, i) => ({ ...st, ordinal: i + 1 }));
+
+  const removeStep = (id: string) =>
+    onPatch({ steps: renumber(steps.filter((st) => st.id !== id)) });
+
+  const addStep = () =>
+    onPatch({
+      steps: renumber([
+        ...steps,
+        { id: uid('step'), ordinal: steps.length + 1, body: '' } as RecipeStep,
+      ]),
+    });
+
+  const removeTag = (t: string) => onPatch({ tags: tags.filter((x) => x !== t) });
+
+  const commitTag = () => {
+    const t = tagDraft.trim().toLowerCase();
+    setTagDraft('');
+    if (!t || tags.some((x) => x.toLowerCase() === t)) return;
+    onPatch({ tags: [...tags, t] });
+  };
 
   return (
     <>
@@ -754,14 +876,36 @@ function ReviewStep({
             </Text>
           ) : null}
           <View style={styles.ingList}>
-            {(draft.ingredients ?? []).map((ing) => (
-              <View key={ing.id} style={styles.ingRow}>
-                <Numeric color={guessed('ingredients') ? 'warn' : 'text'} style={styles.amount}>
-                  {formatAmount(ing.amount, ing.unit) || '—'}
-                </Numeric>
-                <Text style={styles.flex}>{ing.canonicalName}</Text>
+            {ingredients.map((ing) => (
+              <View key={ing.id} style={styles.ingEditRow}>
+                <TextInput
+                  defaultValue={formatAmount(ing.amount, ing.unit)}
+                  onEndEditing={(e) => setIngredientQty(ing.id, e.nativeEvent.text)}
+                  placeholder="qty"
+                  placeholderTextColor={colors.textFaint}
+                  style={[styles.field, styles.qtyField]}
+                  accessibilityLabel={`Amount for ${ing.canonicalName || 'new ingredient'}`}
+                />
+                <TextInput
+                  value={ing.canonicalName}
+                  onChangeText={(t) => patchIngredient(ing.id, { canonicalName: t })}
+                  placeholder="ingredient"
+                  placeholderTextColor={colors.textFaint}
+                  style={[styles.field, styles.flex]}
+                  accessibilityLabel="Ingredient name"
+                />
+                <Pressable
+                  onPress={() => removeIngredient(ing.id)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${ing.canonicalName || 'ingredient'}`}>
+                  <Glyph name="close" size={16} color="textFaint" />
+                </Pressable>
               </View>
             ))}
+            <Pressable onPress={addIngredient} accessibilityRole="button">
+              <Text color="accent">+ Add ingredient</Text>
+            </Pressable>
           </View>
         </View>
 
@@ -771,34 +915,100 @@ function ReviewStep({
             {guessed('steps') ? <Pill label="guessed" tone="warn" /> : null}
           </View>
           <View style={styles.method}>
-            {shownSteps.map((s) => (
-              <View key={s.id} style={styles.stepRow}>
+            {shownSteps.map((st) => (
+              <View key={st.id} style={styles.stepEditRow}>
                 <Text variant="recipeTitle" color="accent" style={styles.stepNum}>
-                  {s.ordinal}
+                  {st.ordinal}
                 </Text>
-                <Text style={styles.flex}>{s.body}</Text>
+                <TextInput
+                  value={st.body}
+                  onChangeText={(t) => patchStep(st.id, t)}
+                  multiline
+                  placeholder="step"
+                  placeholderTextColor={colors.textFaint}
+                  style={[styles.field, styles.fieldMulti, styles.flex]}
+                  accessibilityLabel={`Step ${st.ordinal}`}
+                />
+                <Pressable
+                  onPress={() => removeStep(st.id)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove step ${st.ordinal}`}>
+                  <Glyph name="close" size={16} color="textFaint" />
+                </Pressable>
               </View>
             ))}
-            {steps.length > 3 ? (
-              <Pressable onPress={() => setShowAllSteps((v) => !v)}>
-                <Text color="accent">
-                  {showAllSteps ? 'Show less' : `+ ${steps.length - 3} more`}
-                </Text>
+            {steps.length > 3 && !showAllSteps ? (
+              <Pressable onPress={() => setShowAllSteps(true)}>
+                <Text color="accent">{`+ ${steps.length - 3} more`}</Text>
               </Pressable>
             ) : null}
+            <Pressable onPress={addStep} accessibilityRole="button">
+              <Text color="accent">+ Add step</Text>
+            </Pressable>
           </View>
         </View>
 
-        {draft.tags && draft.tags.length > 0 ? (
-          <View style={styles.reviewSection}>
-            <SectionLabel color="textMuted">Tags</SectionLabel>
+        <View style={styles.reviewSection}>
+          <SectionLabel color="textMuted">Tags</SectionLabel>
+          <View style={styles.tagRow}>
+            {tags.map((t) => (
+              <Pressable
+                key={t}
+                onPress={() => removeTag(t)}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove tag ${t}`}>
+                <Pill label={`${t}  ×`} tone="muted" />
+              </Pressable>
+            ))}
+          </View>
+          <TextInput
+            value={tagDraft}
+            onChangeText={setTagDraft}
+            onSubmitEditing={commitTag}
+            onEndEditing={commitTag}
+            placeholder="add a tag"
+            placeholderTextColor={colors.textFaint}
+            autoCapitalize="none"
+            returnKeyType="done"
+            style={styles.field}
+          />
+          <Text color="textFaint" style={styles.tip}>
+            Auto tags (vegetarian, quick, weeknight…) are filled in on save and
+            stay editable on the recipe.
+          </Text>
+        </View>
+
+        <View style={styles.reviewSection}>
+          <View style={styles.labelRow}>
+            <SectionLabel color="textMuted">Cuisine</SectionLabel>
+            {cuisine && draft.cuisineAuto ? <Pill label="guessed" tone="warn" /> : null}
+          </View>
+          {pickCuisine ? (
             <View style={styles.tagRow}>
-              {draft.tags.map((t) => (
-                <Pill key={t} label={t} tone="muted" />
+              {CUISINES.map((c) => (
+                <FilterChip
+                  key={c}
+                  label={cuisineLabel(c)}
+                  active={cuisine === c}
+                  onPress={() => {
+                    // Choosing by hand clears `cuisineAuto`, which is what makes
+                    // the choice stick against every later re-derivation.
+                    if (cuisine === c) onPatch({ cuisine: undefined, cuisineAuto: undefined });
+                    else onPatch({ cuisine: c, cuisineAuto: undefined });
+                    setPickCuisine(false);
+                  }}
+                />
               ))}
             </View>
-          </View>
-        ) : null}
+          ) : (
+            <Pressable onPress={() => setPickCuisine(true)} accessibilityRole="button">
+              <Text color={cuisine ? 'text' : 'textFaint'} variant={cuisine ? 'bodyStrong' : 'body'}>
+                {cuisine ? cuisineLabel(cuisine) : 'Not set — tap to choose'}
+              </Text>
+            </Pressable>
+          )}
+        </View>
 
         {draft.nutrition ? (
           <View style={styles.reviewSection}>
@@ -1020,6 +1230,11 @@ const styles = StyleSheet.create({
   sourceInline: { paddingTop: 6 },
   ingList: { gap: 8 },
   ingRow: { flexDirection: 'row', gap: 12 },
+  ingEditRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // Wide enough for "1 1/2 cups" without wrapping, narrow enough that the
+  // name field still gets most of a phone row.
+  qtyField: { width: 96 },
+  stepEditRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   amount: { minWidth: 60 },
   method: { gap: 14 },
   stepRow: { flexDirection: 'row', gap: 14 },
