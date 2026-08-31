@@ -35,7 +35,7 @@ import {
   resolveOwnerId,
   type HouseholdMember,
 } from '@/lib/household';
-import { getActiveOwnerId } from '@/lib/sync';
+import { getActiveOwnerId, syncNow, useSyncStatus } from '@/lib/sync';
 
 export default function SignIn() {
   const router = useRouter();
@@ -278,6 +278,8 @@ function SignedIn({
         </Text>
       </View>
 
+      <SyncStatusCard />
+
       <Household userId={userId} email={email} />
 
       <BottomActionBar>
@@ -291,6 +293,68 @@ function SignedIn({
         <Button label="Done" glyph="done" flex onPress={onDone} />
       </BottomActionBar>
     </>
+  );
+}
+
+/**
+ * Is sync actually working? Before this card the only way to tell was to add a
+ * recipe on one device and go look on another — which is exactly how a sync
+ * layer that had quietly stopped pulling went unnoticed. Shows when the last
+ * pull landed, whether the live channel is joined, and offers a manual pull.
+ */
+function SyncStatusCard() {
+  const phase = useSyncStatus((s) => s.phase);
+  const live = useSyncStatus((s) => s.live);
+  const lastSyncAt = useSyncStatus((s) => s.lastSyncAt);
+  const lastError = useSyncStatus((s) => s.lastError);
+  // Re-render on a slow tick so "2 minutes ago" doesn't go stale on screen.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 15_000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!SUPABASE_AVAILABLE) return null;
+
+  const ago = (ms: number) => {
+    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 45) return 'just now';
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`;
+    const h = Math.round(m / 60);
+    return `${h} hour${h === 1 ? '' : 's'} ago`;
+  };
+
+  const headline =
+    phase === 'syncing'
+      ? 'Syncing…'
+      : phase === 'starting'
+        ? 'Connecting…'
+        : lastSyncAt
+          ? `Last synced ${ago(lastSyncAt)}`
+          : 'Not synced yet';
+
+  return (
+    <Card style={styles.formCard}>
+      <SectionLabel color="textMuted">Sync</SectionLabel>
+      <Text variant="bodyStrong">{headline}</Text>
+      <Text color="textMuted" style={styles.tip}>
+        {live
+          ? 'Live updates are on — changes from your other devices arrive as they happen.'
+          : 'Live updates are reconnecting. Stock still pulls when you open it and every minute while it’s on screen.'}
+      </Text>
+      {lastError ? (
+        <Text color="textFaint" style={styles.tipFaint}>
+          Last problem: {lastError}
+        </Text>
+      ) : null}
+      <Button
+        label={phase === 'syncing' ? 'Syncing…' : 'Sync now'}
+        variant="secondary"
+        disabled={phase === 'syncing'}
+        onPress={() => void syncNow('manual', { force: true })}
+      />
+    </Card>
   );
 }
 
