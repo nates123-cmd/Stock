@@ -117,3 +117,19 @@ export function makeMod(opts: {
     reason: opts.reason,
   };
 }
+
+/**
+ * Scale every measured ingredient by `ratio`. Amount-less ingredients ("to
+ * taste", counted-by-eye) pass through untouched. Amounts round to 2dp so a
+ * ×0.5 of 1/3 cup doesn't turn into a 16-digit float.
+ */
+export function scaleIngredientAmounts(ingredients: Ingredient[], ratio: number): Ingredient[] {
+  return ingredients.map((ing) =>
+    ing.amount == null ? ing : { ...ing, amount: Math.round(ing.amount * ratio * 100) / 100 },
+  );
+}
+
+/** Servings after scaling by `ratio` — whole numbers, never below 1. */
+export function scaledServes(serves: number, ratio: number): number {
+  return Math.max(1, Math.round(serves * ratio));
+}

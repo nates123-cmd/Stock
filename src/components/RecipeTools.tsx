@@ -15,7 +15,8 @@ import { Overlay } from './Overlay';
 import { FilterChip, ChipRow } from './Chip';
 import { colors } from '@/design';
 import { convertToGrams } from '@/lib/parsing';
-import { formatAmount } from '@/lib/format';
+import { formatAmount, toFraction } from '@/lib/format';
+import { scaleIngredientAmounts, scaledServes } from '@/lib/recipe';
 import type { Ingredient, Recipe } from '@/types';
 
 /**
@@ -43,6 +44,20 @@ export type RecipeToolsProps = {
   style?: StyleProp<ViewStyle>;
 };
 
+/**
+ * Ratio presets. Halving is the everyday case (Nate: "usually I'm halving
+ * recipes if anything"), so ratio is the default Scale mode and 1/2 leads.
+ */
+const RATIO_PRESETS: { label: string; value: number }[] = [
+  { label: '½×', value: 0.5 },
+  { label: '⅔×', value: 2 / 3 },
+  { label: '¾×', value: 0.75 },
+  { label: '1×', value: 1 },
+  { label: '1½×', value: 1.5 },
+  { label: '2×', value: 2 },
+  { label: '3×', value: 3 },
+];
+
 export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeToolsProps) {
   const [converting, setConverting] = useState(false);
   /** Conversion picker — the convertible ingredients (computed client-side, no
@@ -53,8 +68,11 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
   const [convertOn, setConvertOn] = useState<Set<string>>(new Set());
   /** Non-null while the Scale overlay is open; carries the proposed serves. */
   const [scalingTo, setScalingTo] = useState<number | null>(null);
-  /** Scale overlay mode: by servings (×N) or pinned to one ingredient's amount. */
-  const [scaleMode, setScaleMode] = useState<'serves' | 'ingredient'>('serves');
+  /** Scale overlay mode: a plain ratio (default), by servings (×N), or pinned
+   *  to one ingredient's amount. */
+  const [scaleMode, setScaleMode] = useState<'ratio' | 'serves' | 'ingredient'>('ratio');
+  /** Ratio mode: the multiplier as typed (presets write into it too). */
+  const [ratioText, setRatioText] = useState('1');
   /** Ingredient mode: which ingredient is pinned + the amount you actually have. */
   const [pivotId, setPivotId] = useState<string | null>(null);
   const [pivotTarget, setPivotTarget] = useState('');
@@ -133,20 +151,38 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
       return prev.size === all.length ? new Set() : new Set(all.map((i) => i.id));
     });
 
+  // Plain-ratio scaling — the default. No servings arithmetic to reason about:
+  // pick (or type) a multiplier, everything measured moves by it, and the
+  // recipe's serves follows so the per-serving calorie push stays honest.
+  const ratioValue = (() => {
+    const n = parseFloat(ratioText);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
+
+  const applyScaleByRatio = async () => {
+    if (ratioValue == null || ratioValue === 1) {
+      setScalingTo(null);
+      return;
+    }
+    await onSave({
+      ...recipe,
+      ingredients: scaleIngredientAmounts(recipe.ingredients, ratioValue),
+      yield: { ...recipe.yield, serves: scaledServes(recipe.yield.serves, ratioValue) },
+      modifiedAt: new Date(),
+    });
+    onHint(`Scaled ${toFraction(ratioValue)}×.`);
+    setScalingTo(null);
+  };
+
   const applyScale = async () => {
     if (scalingTo == null || scalingTo === recipe.yield.serves || scalingTo < 1) {
       setScalingTo(null);
       return;
     }
     const ratio = scalingTo / recipe.yield.serves;
-    const updated = recipe.ingredients.map((ing) =>
-      ing.amount == null
-        ? ing
-        : { ...ing, amount: Math.round(ing.amount * ratio * 100) / 100 },
-    );
     await onSave({
       ...recipe,
-      ingredients: updated,
+      ingredients: scaleIngredientAmounts(recipe.ingredients, ratio),
       yield: { ...recipe.yield, serves: scalingTo },
       modifiedAt: new Date(),
     });
@@ -171,16 +207,10 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
       return;
     }
     const ratio = pivotRatio;
-    const updated = recipe.ingredients.map((ing) =>
-      ing.amount == null
-        ? ing
-        : { ...ing, amount: Math.round(ing.amount * ratio * 100) / 100 },
-    );
-    const newServes = Math.max(1, Math.round(recipe.yield.serves * ratio));
     await onSave({
       ...recipe,
-      ingredients: updated,
-      yield: { ...recipe.yield, serves: newServes },
+      ingredients: scaleIngredientAmounts(recipe.ingredients, ratio),
+      yield: { ...recipe.yield, serves: scaledServes(recipe.yield.serves, ratio) },
       modifiedAt: new Date(),
     });
     onHint(
@@ -190,7 +220,8 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
   };
 
   const openScale = () => {
-    setScaleMode('serves');
+    setScaleMode('ratio');
+    setRatioText('1');
     setPivotId(recipe.ingredients.find((i) => i.amount != null)?.id ?? null);
     setPivotTarget('');
     setScalingTo(recipe.yield.serves);
@@ -217,6 +248,11 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
             <Text variant="recipeTitle">Scale recipe</Text>
             <ChipRow>
               <FilterChip
+                label="Ratio"
+                active={scaleMode === 'ratio'}
+                onPress={() => setScaleMode('ratio')}
+              />
+              <FilterChip
                 label="By servings"
                 active={scaleMode === 'serves'}
                 onPress={() => setScaleMode('serves')}
@@ -228,7 +264,41 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
               />
             </ChipRow>
 
-            {scaleMode === 'serves' ? (
+            {scaleMode === 'ratio' ? (
+              <>
+                <Text color="textFaint" style={styles.scaleHint}>
+                  Multiplies everything. Servings follow.
+                </Text>
+                <ChipRow>
+                  {RATIO_PRESETS.map((preset) => (
+                    <FilterChip
+                      key={preset.label}
+                      label={preset.label}
+                      active={ratioValue != null && Math.abs(ratioValue - preset.value) < 0.005}
+                      onPress={() => setRatioText(String(Math.round(preset.value * 100) / 100))}
+                    />
+                  ))}
+                </ChipRow>
+                <View style={styles.pivotInputRow}>
+                  <Text color="textMuted">or ×</Text>
+                  <TextInput
+                    value={ratioText}
+                    onChangeText={setRatioText}
+                    keyboardType="numeric"
+                    placeholder="1"
+                    placeholderTextColor={colors.textFaint}
+                    style={styles.pivotInput}
+                  />
+                </View>
+                <Text color="textMuted" style={styles.scaleRatio}>
+                  {ratioValue == null
+                    ? 'Enter a multiplier'
+                    : ratioValue === 1
+                      ? `No change (${recipe.yield.serves} servings)`
+                      : `${toFraction(ratioValue)}× → ${scaledServes(recipe.yield.serves, ratioValue)} servings (from ${recipe.yield.serves})`}
+                </Text>
+              </>
+            ) : scaleMode === 'serves' ? (
               <>
                 <Text color="textFaint" style={styles.scaleHint}>
                   Multiplies all amounts. Tweak anything weird afterward (tap an
@@ -304,7 +374,11 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
               {recipe.ingredients.map((ing) => {
                 if (ing.amount == null) return null;
                 const ratio =
-                  scaleMode === 'serves' ? scalingTo / recipe.yield.serves : pivotRatio;
+                  scaleMode === 'ratio'
+                    ? ratioValue
+                    : scaleMode === 'serves'
+                      ? scalingTo / recipe.yield.serves
+                      : pivotRatio;
                 const newAmt =
                   ratio == null ? ing.amount : Math.round(ing.amount * ratio * 100) / 100;
                 return (
@@ -331,11 +405,19 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
                 glyph="done"
                 flex
                 disabled={
-                  scaleMode === 'serves'
-                    ? scalingTo === recipe.yield.serves
-                    : pivotRatio == null || pivotRatio === 1
+                  scaleMode === 'ratio'
+                    ? ratioValue == null || ratioValue === 1
+                    : scaleMode === 'serves'
+                      ? scalingTo === recipe.yield.serves
+                      : pivotRatio == null || pivotRatio === 1
                 }
-                onPress={scaleMode === 'serves' ? applyScale : applyScaleByIngredient}
+                onPress={
+                  scaleMode === 'ratio'
+                    ? applyScaleByRatio
+                    : scaleMode === 'serves'
+                      ? applyScale
+                      : applyScaleByIngredient
+                }
               />
             </View>
           </View>
