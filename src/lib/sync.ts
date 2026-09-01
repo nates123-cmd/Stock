@@ -41,6 +41,7 @@ import { useCookStore } from '@/store/cooks';
 import { useCookPlanStore } from '@/store/cookPlans';
 import { useHaveStore, type HaveRecord } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
+import { usePushedStore, type PushedEntry } from '@/store/pushed';
 import { reviveRecipeDates, reviveCookPlanDates } from './db/repositories';
 import type { Cook, CookPlan, Meal, PantryItem, PipelineIdea } from '@/types';
 
@@ -52,7 +53,8 @@ type CloudTable =
   | 'cooks'
   | 'cook_plans'
   | 'have_records'
-  | 'extras';
+  | 'extras'
+  | 'pushed';
 
 /* ---------- Date revivers (JSON → Date; mirrors repositories.ts) ---------- */
 
@@ -181,6 +183,92 @@ function replaceHaveRows(next: HaveRow[]): void {
   useHaveStore.setState({ byName, alwaysHave });
 }
 
+/**
+ * Item-shaped projection of a pushed marker.
+ *
+ * `PushedEntry` is keyed by `key` (the matchKey of the item name); the sync
+ * layer needs an `id`. They are the same string — this row type just renames
+ * it so the generic collection machinery can address it like every other
+ * table.
+ */
+type PushedRow = {
+  id: string;
+  name: string;
+  extraIds?: string[];
+  nameMatch?: true;
+  pushedAt: Date;
+  dest: PushedEntry['dest'];
+};
+
+function revivePushedRow(r: PushedRow): PushedRow {
+  r.pushedAt = new Date(r.pushedAt as unknown as string);
+  return r;
+}
+
+const toPushedRow = (e: PushedEntry): PushedRow => ({
+  id: e.key,
+  name: e.name,
+  ...(e.extraIds ? { extraIds: e.extraIds } : {}),
+  ...(e.nameMatch ? { nameMatch: e.nameMatch } : {}),
+  pushedAt: e.pushedAt,
+  dest: e.dest,
+});
+
+// Cached so unchanged markers keep their reference identity — the sync diff is
+// ref-equality based, and a fresh object every read would push every marker on
+// every store notification.
+const pushedRowCache = new Map<string, PushedRow>();
+
+function readPushedRows(): PushedRow[] {
+  const items = usePushedStore.getState().items;
+  const out: PushedRow[] = [];
+  const seen = new Set<string>();
+  for (const e of items) {
+    seen.add(e.key);
+    const cached = pushedRowCache.get(e.key);
+    if (
+      cached &&
+      cached.name === e.name &&
+      cached.dest === e.dest &&
+      cached.pushedAt.getTime() === e.pushedAt.getTime() &&
+      cached.nameMatch === e.nameMatch &&
+      sameIds(cached.extraIds, e.extraIds)
+    ) {
+      out.push(cached);
+    } else {
+      const next = toPushedRow(e);
+      pushedRowCache.set(e.key, next);
+      out.push(next);
+    }
+  }
+  for (const id of Array.from(pushedRowCache.keys())) {
+    if (!seen.has(id)) pushedRowCache.delete(id);
+  }
+  return out;
+}
+
+function sameIds(a: string[] | undefined, b: string[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+function replacePushedRows(next: PushedRow[]): void {
+  pushedRowCache.clear();
+  const items: PushedEntry[] = next.map((row) => {
+    pushedRowCache.set(row.id, row);
+    return {
+      key: row.id,
+      name: row.name,
+      ...(row.extraIds ? { extraIds: row.extraIds } : {}),
+      ...(row.nameMatch ? { nameMatch: row.nameMatch } : {}),
+      pushedAt: row.pushedAt,
+      dest: row.dest,
+    };
+  });
+  usePushedStore.setState({ items });
+}
+
 /* ---------- Per-collection wiring ---------- */
 
 type Item = { id: string };
@@ -271,6 +359,21 @@ const collections: Collection[] = [
     revive: (raw) => reviveExtraItem(raw as ExtraItem),
     hydrated: () => useExtrasStore.getState().hydrated,
   },
+  {
+    // A pushed marker is the ONLY thing that takes a row off the active
+    // shopping list (see lib/activeList.ts). Syncing `extras` without syncing
+    // these means every device pulls the same items but reaches a different
+    // answer about which of them are already ordered — push on the phone and
+    // the laptop still shows the whole list. That is the "shopping list keeps
+    // reappearing / doesn't sync" bug, and it lives here rather than in any of
+    // the row logic that previous rounds kept rewriting.
+    table: 'pushed',
+    read: readPushedRows,
+    replace: (next) => replacePushedRows(next as PushedRow[]),
+    subscribe: (l) => usePushedStore.subscribe(l),
+    revive: (raw) => revivePushedRow(raw as PushedRow),
+    hydrated: () => usePushedStore.getState().hydrated,
+  },
 ];
 
 /* ---------- Observable status (rendered on the sign-in screen) ---------- */
@@ -342,6 +445,7 @@ const refCache: Record<CloudTable, Map<string, Item>> = {
   cook_plans: new Map(),
   have_records: new Map(),
   extras: new Map(),
+  pushed: new Map(),
 };
 
 /**
@@ -359,6 +463,7 @@ const seenUpdatedAt: Record<CloudTable, Map<string, string>> = {
   cook_plans: new Map(),
   have_records: new Map(),
   extras: new Map(),
+  pushed: new Map(),
 };
 
 /**
@@ -376,6 +481,7 @@ const confirmed: Record<CloudTable, Set<string>> = {
   cook_plans: new Set(),
   have_records: new Set(),
   extras: new Set(),
+  pushed: new Set(),
 };
 
 // Echo guard: when Realtime (or a merge) applies a cloud change, we add its id

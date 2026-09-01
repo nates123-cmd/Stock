@@ -98,6 +98,21 @@ export type Recipe = {
    * idea entries. Auto-cleared when the recipe is cooked (see saveCook).
    */
   isToTry?: boolean;
+  /**
+   * The folder this recipe is filed under, or undefined for Unfiled.
+   *
+   * ONE shared set of folders across the whole library, deliberately: To Try
+   * and Favorites stay FILTERS layered on top, so "Weeknight" means the same
+   * thing whichever segment you're looking at, and filing a recipe once files
+   * it everywhere. Per-segment folders would have made a recipe's home depend
+   * on how you happened to arrive at it.
+   *
+   * The folder LIST is derived from these values rather than stored separately
+   * — which means it rides the existing `recipes` sync with no new table, and
+   * a folder therefore exists exactly as long as something is in it. Renaming
+   * is a bulk edit of the members; an emptied folder disappears on its own.
+   */
+  folder?: string;
 };
 
 export type Ingredient = {

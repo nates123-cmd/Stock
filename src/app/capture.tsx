@@ -168,6 +168,8 @@ export default function CaptureFlow() {
   // draft lands in review, then user-correctable (patch #77641107).
   const [source, setSource] = useState<RecipeSource | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  /** Set when a save was refused because this recipe is already in the library. */
+  const [duplicateOf, setDuplicateOf] = useState<Recipe | null>(null);
   const inputRef = useRef<TextInput>(null);
 
   // §11.10 — Pipeline ideas this capture might be fulfilling. `linkedIdeaId`
@@ -395,7 +397,7 @@ export default function CaptureFlow() {
     }
   }, []);
 
-  const persist = async (status: Recipe['status']) => {
+  const persist = async (status: Recipe['status'], force = false) => {
     if (!draft) return;
     const now = new Date();
     const refsNote = ideaRefs.length
@@ -428,7 +430,16 @@ export default function CaptureFlow() {
       modifiedAt: now,
       cookCount: 0,
     };
-    await save(recipe);
+    // `force` is the second press, after the duplicate notice has told the
+    // user what they're about to double.
+    const res = await save(recipe, { allowDuplicate: force });
+    if (!res.ok) {
+      // Not an error — the recipe is already here. Show which one, and let
+      // them open it or save this copy anyway.
+      setDuplicateOf(res.duplicateOf);
+      return;
+    }
+    setDuplicateOf(null);
     // Promote whichever idea this fulfills: the one we were launched from, or
     // the one the user linked from the §11.10 related-ideas suggestions.
     const fulfilled = params.ideaId || linkedIdeaId;
@@ -482,6 +493,12 @@ export default function CaptureFlow() {
             onToggleLink={(id) => setLinkedIdeaId((cur) => (cur === id ? null : id))}
             onSaveDraft={() => persist('draft')}
             onSave={() => persist('active')}
+            duplicateOf={duplicateOf}
+            onOpenDuplicate={() => {
+              if (!duplicateOf) return;
+              router.push({ pathname: '/recipes/[id]', params: { id: duplicateOf.id } });
+            }}
+            onSaveAnyway={() => persist('active', true)}
           />
         )}
         {step === 'saved' && draft && (
@@ -685,6 +702,9 @@ function ReviewStep({
   onToggleLink,
   onSaveDraft,
   onSave,
+  duplicateOf,
+  onOpenDuplicate,
+  onSaveAnyway,
 }: {
   draft: ParsedRecipeDraft;
   /** Edit the parsed draft in place, before it is ever saved. */
@@ -704,6 +724,10 @@ function ReviewStep({
   onToggleLink: (id: string) => void;
   onSaveDraft: () => void;
   onSave: () => void;
+  /** The library copy that blocked this save, if one did. */
+  duplicateOf: Recipe | null;
+  onOpenDuplicate: () => void;
+  onSaveAnyway: () => void;
 }) {
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [units, setUnits] = useState<'original' | 'grams'>('original');
@@ -1071,6 +1095,25 @@ function ReviewStep({
         </Pressable>
       </ScrollView>
 
+      {duplicateOf && (
+        <Card style={styles.dupeNotice}>
+          <Text variant="bodyStrong">Already in your library</Text>
+          <Text color="textMuted">
+            “{duplicateOf.title}” looks like the same recipe. Saving again would
+            give you two copies.
+          </Text>
+          <View style={styles.dupeActions}>
+            <Button
+              label="Open the one I have"
+              variant="secondary"
+              flex
+              onPress={onOpenDuplicate}
+            />
+            <Button label="Save anyway" variant="secondary" flex onPress={onSaveAnyway} />
+          </View>
+        </Card>
+      )}
+
       <BottomActionBar>
         <Button label="Save draft" variant="secondary" flex onPress={onSaveDraft} />
         <Button label="Save recipe" glyph="done" flex onPress={onSave} />
@@ -1249,6 +1292,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   savedCard: { width: '100%', gap: 10 },
+  dupeNotice: { marginHorizontal: 16, marginBottom: 8, gap: 8 },
+  dupeActions: { flexDirection: 'row', gap: 8 },
   savedMeta: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   nextList: { width: '100%', gap: 12, paddingTop: 6 },
   nextRow: {

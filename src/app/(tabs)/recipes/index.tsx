@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
@@ -11,10 +11,15 @@ import {
 } from '@/components';
 import { colors } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
+import { findDuplicateCandidates } from '@/lib/recipeDupes';
 
 export default function RecipesLibrary() {
   const router = useRouter();
-  const recipeCount = useRecipeStore((s) => s.recipes.length);
+  const recipes = useRecipeStore((s) => s.recipes);
+  const recipeCount = recipes.length;
+  // O(n²) over the library, so it is memoised on the recipe list rather than
+  // recomputed per render. At ~330 recipes that is a few ms once.
+  const dupeCount = useMemo(() => findDuplicateCandidates(recipes).length, [recipes]);
   /** The + sheet: recipe, idea, or a cook plan. */
   const [addOpen, setAddOpen] = useState(false);
 
@@ -25,6 +30,17 @@ export default function RecipesLibrary() {
           <View>
             <Heading variant="screenTitle">Recipes</Heading>
             <Text color="textMuted">{recipeCount} saved</Text>
+            {/* Only ever shown when there IS something to review, so it
+                disappears for good once the library is clean. */}
+            {dupeCount > 0 && (
+              <Pressable
+                onPress={() => router.push('/recipe-duplicates')}
+                accessibilityRole="button">
+                <Text color="accent">
+                  {dupeCount} possible duplicate{dupeCount === 1 ? '' : 's'} — review
+                </Text>
+              </Pressable>
+            )}
           </View>
         </View>
 

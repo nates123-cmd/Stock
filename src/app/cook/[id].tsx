@@ -449,7 +449,7 @@ export default function CookScreen() {
           onMarkCooked={finishCook}
           onEditIngredient={setEditingIng}
           onAddIngredient={() => setAddingIng(true)}
-          onSaveRecipe={saveRecipe}
+          onSaveRecipe={(r) => void saveRecipe(r)}
           toolHint={toolHint}
           onToolHint={setToolHint}
         />

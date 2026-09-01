@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Overlay } from '@/components';
+import { FolderPicker } from '@/components/FolderPicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow, RecipeTools } from '@/components';
@@ -46,6 +47,8 @@ export default function RecipeDetail() {
   const save = useRecipeStore((s) => s.save);
   const toggleFavorite = useRecipeStore((s) => s.toggleFavorite);
   const toggleToTry = useRecipeStore((s) => s.toggleToTry);
+  const setFolder = useRecipeStore((s) => s.setFolder);
+  const [pickFolder, setPickFolder] = useState(false);
   const removeRecipe = useRecipeStore((s) => s.remove);
   const autoTag = useRecipeStore((s) => s.autoTag);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -219,6 +222,30 @@ export default function RecipeDetail() {
           </Pressable>
         </View>
 
+        {/* Folder is shared across To Try / Favorites / All, so it belongs on
+            the recipe itself rather than under either flag. */}
+        <Pressable
+          style={styles.folderRow}
+          onPress={() => setPickFolder(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Change folder">
+          <Glyph name="next" size={13} color="textFaint" />
+          <Text color={recipe.folder ? 'accent' : 'textFaint'}>
+            {recipe.folder ?? 'Unfiled'}
+          </Text>
+        </Pressable>
+
+        {pickFolder && (
+          <FolderPicker
+            current={recipe.folder}
+            onClose={() => setPickFolder(false)}
+            onPick={(f) => {
+              void setFolder(recipe.id, f);
+              setPickFolder(false);
+            }}
+          />
+        )}
+
         <View style={styles.metaRow}>
           <Pressable
             onPress={() => {
@@ -364,7 +391,7 @@ export default function RecipeDetail() {
           onPress={() => setPlanning(true)}
         />
 
-        <RecipeTools recipe={recipe} onSave={save} onHint={setHint}>
+        <RecipeTools recipe={recipe} onSave={(r) => void save(r)} onHint={setHint}>
           <Button
             label="Cook"
             glyph="done"
@@ -450,7 +477,7 @@ export default function RecipeDetail() {
             key={recipe.id}
             initial={recipe.myNotes ?? ''}
             onSave={(text) =>
-              save({
+              void save({
                 ...recipe,
                 myNotes: text.trim() || undefined,
                 modifiedAt: new Date(),
@@ -1059,6 +1086,7 @@ const styles = StyleSheet.create({
   },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   titleFlag: { paddingTop: 5 },
+  folderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 8 },
   title: { fontSize: 26, lineHeight: 32, paddingTop: 6 },
   metaRow: {
     flexDirection: 'row',

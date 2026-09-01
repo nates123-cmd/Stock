@@ -18,6 +18,7 @@ import { isModified } from '@/lib/recipe';
 import { AUTO_TAGS, matchesQuery, norm } from '@/lib/recipeTags';
 import { cuisineLabel, normCuisine } from '@/lib/cuisine';
 import { canMakeNow, recipeCoverage } from '@/lib/pantry';
+import { folderCounts, inFolder, unfiledCount, UNFILED } from '@/lib/recipeFolders';
 import type { CookPlan, PipelineIdea, Recipe } from '@/types';
 
 const BASE_FILTERS = ['All', 'Cook plans', 'Have it', 'Modified'] as const;
@@ -103,6 +104,13 @@ export function RecipeLibrary({
   const ideas = usePipelineStore((s) => s.ideas);
 
   const [segment, setSegment] = useState<Segment>('all');
+  /**
+   * Selected folder: null = all folders, UNFILED = the ones in none.
+   *
+   * Deliberately NOT reset when the segment changes — folders are shared, so
+   * staying in "Weeknight" while you flip All → Favorites is the whole point.
+   */
+  const [folderSel, setFolderSel] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('All');
   const [activeTags, setActiveTags] = useState<string[]>([]);
@@ -281,12 +289,26 @@ export function RecipeLibrary({
     [lastCookedAt],
   );
 
+  /**
+   * The recipes this segment is about, BEFORE the folder filter.
+   *
+   * The folder bar's counts are computed from this, which is what makes one
+   * shared folder bar serve all three segments: pick "Favorites" and
+   * "Weeknight" reads 4 because four of your favourites are in it, not because
+   * the library has four Weeknight recipes.
+   */
+  const segmentBase = useMemo(
+    () => (segment === 'favorites' ? filtered.filter((r) => r.isFavorite) : filtered),
+    [filtered, segment],
+  );
+
   const allShown = useMemo(
     () =>
-      (segment === 'favorites' ? filtered.filter((r) => r.isFavorite) : filtered)
+      segmentBase
+        .filter((r) => inFolder(r, folderSel))
         .slice()
         .sort(comparators[sort]),
-    [filtered, segment, comparators, sort],
+    [segmentBase, folderSel, comparators, sort],
   );
 
   /**
@@ -312,19 +334,51 @@ export function RecipeLibrary({
   // that no longer exists.
   useEffect(() => {
     setLimit(PAGE);
-  }, [query, filter, segment, activeTags, activeCuisines, sort]);
+  }, [query, filter, segment, activeTags, activeCuisines, sort, folderSel]);
   const shown = useMemo(() => allShown.slice(0, limit), [allShown, limit]);
   const more = allShown.length - shown.length;
 
   const toTryIdeas = useMemo(() => {
+    // A half-baked idea is not a recipe and cannot be filed, so narrowing to a
+    // folder has to hide them — otherwise every folder would show the same
+    // untouched pile of ideas underneath it.
+    if (folderSel !== null) return [];
     const byNew = (a: PipelineIdea, b: PipelineIdea) =>
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     return ideas.filter((i) => i.status !== 'promoted').sort(byNew);
-  }, [ideas]);
-  const toTryRecipes = useMemo(
+  }, [ideas, folderSel]);
+  const toTryAll = useMemo(
     () => recipes.filter((r) => r.isToTry).slice().sort(byNewest),
     [recipes],
   );
+  const toTryRecipes = useMemo(
+    () => toTryAll.filter((r) => inFolder(r, folderSel)),
+    [toTryAll, folderSel],
+  );
+
+  /**
+   * The folder bar, scoped to whichever segment is showing. Built from the
+   * recipes themselves — there is no folder table (see lib/recipeFolders.ts).
+   */
+  const folderSource = segment === 'totry' ? toTryAll : segmentBase;
+  const folders = useMemo(() => {
+    const found = folderCounts(folderSource);
+    // Keep the SELECTED folder on the bar even when nothing in this segment is
+    // in it. Otherwise switching All → To Try makes the active chip disappear
+    // while the filter stays on: the list looks empty for no visible reason and
+    // there is no way to switch the folder off except "All folders".
+    if (
+      folderSel !== null &&
+      folderSel !== UNFILED &&
+      !found.some((f) => f.name.toLowerCase() === folderSel.toLowerCase())
+    ) {
+      return [...found, { name: folderSel, count: 0 }].sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+      );
+    }
+    return found;
+  }, [folderSource, folderSel]);
+  const unfiled = useMemo(() => unfiledCount(folderSource), [folderSource]);
 
   const favoriteCount = useMemo(
     () => recipes.filter((r) => r.isFavorite).length,
@@ -378,6 +432,36 @@ export function RecipeLibrary({
         />
       </View>
 
+      {/* Folders are shared across every segment, so this bar sits above the
+          segment's content rather than inside any one of them. Hidden until
+          something is actually filed — an empty folder bar is just noise. */}
+      {(folders.length > 0 || folderSel !== null) && (
+        <View style={styles.folderRow}>
+        <ChipRow>
+          <FilterChip
+            label="All folders"
+            active={folderSel === null}
+            onPress={() => setFolderSel(null)}
+          />
+          {folders.map((f) => (
+            <FilterChip
+              key={f.name}
+              label={`${f.name} ${f.count}`}
+              active={folderSel !== null && folderSel !== UNFILED && folderSel.toLowerCase() === f.name.toLowerCase()}
+              onPress={() => setFolderSel(f.name)}
+            />
+          ))}
+          {unfiled > 0 && (
+            <FilterChip
+              label={`Unfiled ${unfiled}`}
+              active={folderSel === UNFILED}
+              onPress={() => setFolderSel(UNFILED)}
+            />
+          )}
+        </ChipRow>
+        </View>
+      )}
+
       {segment === 'totry' ? (
         <View style={styles.list}>
           {toTryRecipes.length > 0 ? (
@@ -420,10 +504,26 @@ export function RecipeLibrary({
           ))}
           {toTryIdeas.length === 0 && toTryRecipes.length === 0 ? (
             <View style={styles.empty}>
-              <Text color="textMuted">Nothing to try yet.</Text>
-              <Text color="textFaint">
-                Flag a recipe to-try (the ⚐), or capture an idea, ingredient or link.
-              </Text>
+              {/* Say WHICH empty this is. A folder filter that hides everything
+                  must not read as "you have nothing to try". */}
+              {folderSel !== null ? (
+                <>
+                  <Text color="textMuted">
+                    Nothing to try in{' '}
+                    {folderSel === UNFILED ? 'Unfiled' : folderSel}.
+                  </Text>
+                  <Text color="textFaint">
+                    Pick “All folders” above to see the rest.
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text color="textMuted">Nothing to try yet.</Text>
+                  <Text color="textFaint">
+                    Flag a recipe to-try (the ⚐), or capture an idea, ingredient or link.
+                  </Text>
+                </>
+              )}
             </View>
           ) : null}
         </View>
@@ -648,6 +748,7 @@ export function RecipeLibrary({
 const styles = StyleSheet.create({
   showMore: { alignItems: 'center', paddingVertical: 16 },
   segments: { paddingBottom: 10 },
+  folderRow: { paddingBottom: 10 },
   search: { paddingBottom: 8 },
   controlRow: {
     flexDirection: 'row',

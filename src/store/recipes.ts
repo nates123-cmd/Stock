@@ -6,6 +6,7 @@ import { webPersist } from '@/lib/db/webStore';
 import { seedRecipes } from '@/lib/seed';
 import { deriveTags, reconcileTags } from '@/lib/recipeTags';
 import { deriveCuisine, reconcileCuisine } from '@/lib/cuisine';
+import { findDuplicate, type DupeReason } from '@/lib/recipeDupes';
 
 /**
  * App-facing source of truth for recipes (spec §6). Zustand holds the working
@@ -15,16 +16,38 @@ import { deriveCuisine, reconcileCuisine } from '@/lib/cuisine';
  */
 const NATIVE = Platform.OS !== 'web';
 
+/**
+ * What a save did. A refused save is NOT an error — it means this recipe is
+ * already in the library, and it hands back the copy that's already there so
+ * the caller can show it ("already saved") instead of silently doing nothing.
+ */
+export type SaveResult =
+  | { ok: true; recipe: Recipe }
+  | { ok: false; duplicateOf: Recipe; reason: DupeReason };
+
 type RecipeState = {
   recipes: Recipe[];
   hydrated: boolean;
   hydrate: () => Promise<void>;
   getById: (id: string) => Recipe | undefined;
-  save: (recipe: Recipe) => Promise<void>;
+  /**
+   * Persist a recipe. Refuses a NEW recipe that duplicates one already in the
+   * library; pass `allowDuplicate` to save it anyway (the "save it regardless"
+   * escape hatch on the capture screen).
+   */
+  save: (recipe: Recipe, opts?: { allowDuplicate?: boolean }) => Promise<SaveResult>;
   /** Flip a recipe's isFavorite flag and persist via the save path. */
   toggleFavorite: (id: string) => Promise<void>;
   /** Flip a recipe's isToTry flag and persist via the save path. */
   toggleToTry: (id: string) => Promise<void>;
+  /** File a recipe into a folder, or pass undefined to unfile it. */
+  setFolder: (id: string, folder: string | undefined) => Promise<void>;
+  /**
+   * Rename a folder across every recipe in it. Folders are derived from the
+   * recipes, so a rename IS this bulk edit — there is no folder record to
+   * update. Returns how many recipes moved.
+   */
+  renameFolder: (from: string, to: string) => Promise<number>;
   remove: (id: string) => Promise<void>;
   /**
    * Re-run the auto-tagger over the library (or one recipe).
@@ -95,7 +118,22 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
 
   getById: (id) => get().recipes.find((r) => r.id === id),
 
-  save: async (recipe) => {
+  save: async (recipe, opts) => {
+    // The duplicate stop-gap. Guards EVERY write path — capture, a paste
+    // import, a script driving the store — because the two batches that
+    // doubled ~10 recipes came in through different doors and neither checked
+    // the other ([[project_stock_recipe_import]]).
+    //
+    // Only a NEW id is screened: `findDuplicate` never matches a recipe
+    // against itself, so re-saving an existing recipe (an edit, a favourite
+    // toggle, the retag pass) is untouched.
+    if (!opts?.allowDuplicate) {
+      const existing = get().recipes.find((r) => r.id === recipe.id);
+      if (!existing) {
+        const hit = findDuplicate(recipe, get().recipes);
+        if (hit) return { ok: false as const, duplicateOf: hit.existing, reason: hit.reason };
+      }
+    }
     // Re-derive on every save so tags stay honest when you change the
     // ingredients or the time — and so a newly captured recipe is tagged the
     // moment it lands, not at the next boot. This cannot fight a tag edit: the
@@ -116,6 +154,7 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
         console.warn('[stock] recipe persist failed', e);
       }
     }
+    return { ok: true as const, recipe: tagged };
   },
 
   toggleFavorite: async (id) => {
@@ -128,6 +167,32 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
     const current = get().recipes.find((r) => r.id === id);
     if (!current) return;
     await get().save({ ...current, isToTry: !current.isToTry });
+  },
+
+  setFolder: async (id, folder) => {
+    const current = get().recipes.find((r) => r.id === id);
+    if (!current) return;
+    const next = { ...current, modifiedAt: new Date() };
+    // Undefined must DELETE the key, not store `undefined` — the row is
+    // JSON-serialised into the cloud, where an explicit null would read back
+    // as a folder named "null" rather than as unfiled.
+    if (folder) next.folder = folder;
+    else delete next.folder;
+    await get().save(next);
+  },
+
+  renameFolder: async (from, to) => {
+    const target = to.trim().replace(/\s+/g, ' ');
+    const same = (a: string | undefined) =>
+      !!a && a.trim().toLowerCase() === from.trim().toLowerCase();
+    const moving = get().recipes.filter((r) => same(r.folder));
+    for (const r of moving) {
+      const next = { ...r, modifiedAt: new Date() };
+      if (target) next.folder = target;
+      else delete next.folder;
+      await get().save(next);
+    }
+    return moving.length;
   },
 
   autoTag: async (id) => {
