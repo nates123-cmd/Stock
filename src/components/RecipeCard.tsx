@@ -2,6 +2,7 @@ import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { Card } from './Card';
 import { Text, Numeric } from './Text';
 import { SourceBadge, Pill } from './Badge';
+import { componentRefs, isDinner } from '@/lib/dinners';
 import { Glyph } from './Glyph';
 import { colors } from '@/design';
 import type { Recipe } from '@/types';
@@ -40,6 +41,14 @@ export function RecipeCard({
 }) {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
+  // A dinner is a recipe built from other recipes — say how many, so it reads
+  // as a spread rather than as a recipe with a suspiciously short ingredient
+  // list. Null for everything else, so the meta line is untouched.
+  const dinnerCount = componentRefs(recipe).length;
+  const dinnerLabel =
+    isDinner(recipe) && dinnerCount > 0
+      ? `dinner · ${dinnerCount} recipe${dinnerCount === 1 ? '' : 's'}`
+      : null;
 
   if (density === 'compact') {
     return (
@@ -60,6 +69,7 @@ export function RecipeCard({
             </Text>
             <Text color="textFaint" numberOfLines={1}>
               {[
+                dinnerLabel,
                 recipe.cuisine ? recipe.cuisine : null,
                 time ? `~${time}` : null,
                 recipe.cookCount > 0 ? `cooked ${recipe.cookCount}×` : null,
@@ -188,6 +198,7 @@ export function RecipeCard({
 
         <View style={styles.metaRow}>
           <SourceBadge source={recipe.source} />
+          {dinnerLabel ? <Pill label={dinnerLabel} tone="accent" /> : null}
           {mods > 0 ? <Pill label={`modified ${mods}`} tone="accent" /> : null}
         </View>
 

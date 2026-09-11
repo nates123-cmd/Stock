@@ -19,6 +19,7 @@ import { pushedKeysCovering, planWizardWrite } from '@/lib/activeList';
 import { PLAN_WIZARD } from '@/lib/shopping';
 import { useSynonymsStore } from '@/store/synonyms';
 import { dateKey } from '@/lib/week';
+import { expandRecipe } from '@/lib/dinners';
 import { matchKey, looksLikeSameItem } from '@/lib/pantry';
 import { formatAmount } from '@/lib/format';
 import { sumQtyStrings, parseQty, isMixedUnits } from '@/lib/qty';
@@ -94,11 +95,20 @@ export default function BuildListScreen() {
     for (const m of planMeals) {
       if ((m.status ?? 'planned') !== 'planned' || !keys.has(dateKey(m.date))) continue;
       for (const d of m.dishes) {
-        if (!d.recipeId || seen.has(d.recipeId)) continue;
+        if (!d.recipeId) continue;
         const r = byId.get(d.recipeId);
-        if (r) {
-          seen.add(r.id);
-          out.push(r);
+        if (!r) continue;
+        // A dinner is a recipe made of other recipes, so shop for the whole
+        // spread: expandRecipe returns the dish itself first, then everything
+        // it references (cycle-safe, deduped). A plain recipe expands to just
+        // itself, so this is a no-op for the normal case.
+        for (const { recipe } of expandRecipe(r, byId)) {
+          if (seen.has(recipe.id)) continue;
+          // A dinner with no ingredients of its own has nothing to shop for —
+          // its parts carry everything, and an empty section is just noise.
+          if (recipe.ingredients.length === 0) continue;
+          seen.add(recipe.id);
+          out.push(recipe);
         }
       }
     }

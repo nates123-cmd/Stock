@@ -50,6 +50,32 @@ export type Nutrition = {
   source: 'extracted' | 'estimated';
 };
 
+/**
+ * A reference from one recipe to another. Lets a recipe be built out of other
+ * recipes — a sub-recipe it uses ("the ginger-scallion oil"), or, when the
+ * whole recipe is mostly references, a **dinner**: a named spread that combines
+ * several recipes into one thing you can favorite, plan, shop for and cook.
+ *
+ * Deliberately a link and NOT a copy: the linked recipe stays the single source
+ * of truth, so editing it updates every dinner that uses it. `title` is only a
+ * display fallback for when the target has been deleted.
+ */
+export type RecipeRef = {
+  /** stable id for this reference row (not the target's id) */
+  id: string;
+  /** the referenced Recipe.id */
+  recipeId: string;
+  /** snapshot of the target's title at link time — fallback if it's deleted */
+  title?: string;
+  /** "make this the day before", "half batch" */
+  note?: string;
+  /**
+   * Multiply the referenced recipe's amounts when rolling up ingredients
+   * (2 = double batch). Absent reads as 1.
+   */
+  scale?: number;
+};
+
 export type Recipe = {
   id: string;
   title: string;
@@ -98,6 +124,20 @@ export type Recipe = {
    * idea entries. Auto-cleared when the recipe is cooked (see saveCook).
    */
   isToTry?: boolean;
+  /**
+   * Other recipes this one is built from. Any recipe may carry these (a roast
+   * that uses a separate sauce recipe); a recipe whose body is mostly these is
+   * a **dinner** — see `isDinner`. Rolled up into the shopping list and into a
+   * generated Cook Plan. Cycles are tolerated by every reader (see lib/dinners).
+   */
+  componentRecipes?: RecipeRef[];
+  /**
+   * Marks this recipe as a **dinner** — a spread that combines other recipes.
+   * Explicit rather than derived from `componentRecipes.length`, so a normal
+   * recipe that happens to link its sauce is not mislabelled. Same contract as
+   * `isFavorite` / `isToTry`: your choice wins and nothing sets it behind you.
+   */
+  isDinner?: true;
   /**
    * The folder this recipe is filed under, or undefined for Unfiled.
    *

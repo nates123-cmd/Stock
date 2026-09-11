@@ -20,7 +20,7 @@ export default function RecipesLibrary() {
   // O(n²) over the library, so it is memoised on the recipe list rather than
   // recomputed per render. At ~330 recipes that is a few ms once.
   const dupeCount = useMemo(() => findDuplicateCandidates(recipes).length, [recipes]);
-  /** The + sheet: recipe, idea, or a cook plan. */
+  /** The + sheet: recipe, idea, dinner, or a cook plan. */
   const [addOpen, setAddOpen] = useState(false);
 
   return (
@@ -86,6 +86,18 @@ export default function RecipesLibrary() {
             <Text variant="bodyStrong">Idea</Text>
             <Text color="textFaint">
               A half-baked idea — a dish, an ingredient, a link. Lands in To Try.
+            </Text>
+          </Pressable>
+          <Pressable
+            style={styles.addChoice}
+            accessibilityRole="button"
+            onPress={() => {
+              setAddOpen(false);
+              router.push('/dinner-capture');
+            }}>
+            <Text variant="bodyStrong">Dinner</Text>
+            <Text color="textFaint">
+              Several recipes served together — plan, shop and cook it as one.
             </Text>
           </Pressable>
           <Pressable

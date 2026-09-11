@@ -176,6 +176,10 @@ export default function RootLayout() {
               name="cook-plan-capture"
               options={{ headerShown: false, presentation: 'modal' }}
             />
+            <Stack.Screen
+              name="dinner-capture"
+              options={{ headerShown: false, presentation: 'modal' }}
+            />
           </Stack>
           {/* Cart-fill status — mounted at the ROOT so the progress bar + result
               float over EVERY screen (tabs and modals), not just the tab bar. */}

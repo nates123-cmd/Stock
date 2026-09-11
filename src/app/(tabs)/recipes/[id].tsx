@@ -22,6 +22,8 @@ import { useCookStore } from '@/store/cooks';
 import { useSyncStatusStore } from '@/store/syncStatus';
 import { dayTag, isSameDay } from '@/lib/week';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
+import { DinnerComponents } from '@/components/DinnerComponents';
+import { indexRecipes, ingredientGroups } from '@/lib/dinners';
 import { uid } from '@/lib/id';
 import { pickRecipePhoto } from '@/lib/photo';
 import type { Ingredient, MealType, Recipe, Step, Unit } from '@/types';
@@ -156,6 +158,11 @@ export default function RecipeDetail() {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
   const steps = [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal);
+  // Ingredients the LINKED recipes bring, shown under this recipe's own so a
+  // dinner's shopping reality is visible without opening each dish. The root
+  // group is dropped — it is already rendered above, unscaled.
+  const recipeIndex = indexRecipes(allRecipes);
+  const linkedGroups = ingredientGroups(recipe, recipeIndex).filter((g) => !g.isRoot);
 
   const SPLIT_OPTIONS: { key: MealType | null; label: string }[] = [
     { key: null, label: 'Any meal' },
@@ -407,6 +414,12 @@ export default function RecipeDetail() {
           </Text>
         ) : null}
 
+        <DinnerComponents
+          recipe={recipe}
+          onSave={(r) => void save(r)}
+          onHint={setHint}
+        />
+
         <View style={wide ? styles.twoCol : undefined}>
           <View style={wide ? styles.colLeft : undefined}>
             <SectionHeader label="Ingredients" onEdit={() => setEditing(true)} />
@@ -453,6 +466,28 @@ export default function RecipeDetail() {
                 );
               })}
             </View>
+
+            {linkedGroups.map((group) => (
+              <View key={group.recipeId} style={styles.linkedGroup}>
+                <SectionLabel color="textFaint">{group.title}</SectionLabel>
+                <View style={styles.ingredients}>
+                  {group.ingredients.map((ing) => (
+                    <View key={`${group.recipeId}_${ing.id}`} style={styles.ingRow}>
+                      <IngredientAmount
+                        ing={ing}
+                        style={[styles.amount, clean && styles.cleanAmount]}
+                      />
+                      <View style={styles.ingText}>
+                        <IngredientName
+                          ing={ing}
+                          style={clean ? styles.cleanBody : undefined}
+                        />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
           </View>
 
           <View style={wide ? styles.colRight : undefined}>
@@ -1088,6 +1123,7 @@ const styles = StyleSheet.create({
   titleFlag: { paddingTop: 5 },
   folderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 8 },
   title: { fontSize: 26, lineHeight: 32, paddingTop: 6 },
+  linkedGroup: { marginTop: 16, gap: 6 },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',

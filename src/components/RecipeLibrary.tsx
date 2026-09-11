@@ -5,6 +5,7 @@ import { SearchBar } from './SearchBar';
 import { FilterChip, ChipRow } from './Chip';
 import { RecipeCard } from './RecipeCard';
 import { SegmentedControl } from './SegmentedControl';
+import { indexRecipes, isDinner, rollupIngredients } from '@/lib/dinners';
 import { Pill } from './Badge';
 import { CookPlanCard } from './CookPlanCard';
 import { SectionLabel } from './Text';
@@ -21,7 +22,7 @@ import { canMakeNow, recipeCoverage } from '@/lib/pantry';
 import { folderCounts, inFolder, unfiledCount, UNFILED } from '@/lib/recipeFolders';
 import type { CookPlan, PipelineIdea, Recipe } from '@/types';
 
-const BASE_FILTERS = ['All', 'Cook plans', 'Have it', 'Modified'] as const;
+const BASE_FILTERS = ['All', 'Dinners', 'Cook plans', 'Have it', 'Modified'] as const;
 type Filter = (typeof BASE_FILTERS)[number];
 
 /* ------------------------------------------------------------------ *
@@ -231,6 +232,10 @@ export function RecipeLibrary({
     };
   }, [recipes]);
 
+  // Resolving a dinner's references needs a by-id lookup; built once per
+  // library change rather than per filtered row.
+  const recipeIndex = useMemo(() => indexRecipes(recipes), [recipes]);
+
   const filtered = useMemo(() => {
     return recipes.filter((r) => {
       // Every search term must match something (title / tag / ingredient), so
@@ -238,8 +243,14 @@ export function RecipeLibrary({
       // to tags. See lib/recipeTags.ts.
       if (!matchesQuery(r, query)) return false;
       if (filter === 'Modified' && !isModified(r)) return false;
-      if (filter === 'Have it' && !canMakeNow(recipeCoverage(r.ingredients, pantry)))
-        return false;
+      if (filter === 'Dinners' && !isDinner(r)) return false;
+      // A dinner holds few ingredients of its own — what it needs is whatever
+      // the recipes it references need, so coverage has to run on the rollup or
+      // every dinner reads as "have it".
+      if (filter === 'Have it') {
+        const needs = isDinner(r) ? rollupIngredients(r, recipeIndex) : r.ingredients;
+        if (!canMakeNow(recipeCoverage(needs, pantry))) return false;
+      }
       // Chips are AND-ed: "vegetarian" + "quick" means both.
       if (activeTags.length) {
         const mine = new Set(r.tags.map(norm));
@@ -252,7 +263,7 @@ export function RecipeLibrary({
       }
       return true;
     });
-  }, [recipes, query, filter, activeTags, activeCuisines, pantry]);
+  }, [recipes, query, filter, activeTags, activeCuisines, pantry, recipeIndex]);
 
   const byNewest = (a: Recipe, b: Recipe) =>
     b.createdAt.getTime() - a.createdAt.getTime();
