@@ -22,6 +22,7 @@ import {
   SegmentedControl,
   StoreCompareSheet,
   PushToCartSheet,
+  SubSheet,
   type CartTarget,
 } from '@/components';
 import { colors, fonts, layout } from '@/design';
@@ -278,6 +279,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   /** The row the long-press sheet is open on. Holds the whole row (not just a
    *  name) so the sheet can edit the item itself, not only its metadata. */
   const [menu, setMenu] = useState<FlatRow | null>(null);
+
+  /** The row Sub is open on. Kept at screen level, NOT inside the detail sheet:
+   *  both are Modals, and a Modal inside a Modal does not reliably render. */
+  const [subRow, setSubRow] = useState<FlatRow | null>(null);
 
   /** The Instacart fill we're waiting on. The Beelink agent claims the queued
    *  job and drives a real browser, so it takes a minute or two — poll it and
@@ -2327,6 +2332,23 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
         ) : null}
       </ScrollView>
 
+      {/* Sub — "I'm out of buttermilk" at the store. Accepting rewrites the row
+          through the SAME save path as an inline edit, so extras write through
+          and recipe rows take an override, exactly as a hand edit would. */}
+      <SubSheet
+        visible={subRow !== null}
+        name={subRow?.name ?? ''}
+        amount={subRow ? parseQty(subRow.qty).amount : null}
+        unit={subRow ? parseQty(subRow.qty).unit : null}
+        onClose={() => setSubRow(null)}
+        onApply={(sub) => {
+          if (subRow) {
+            saveRowEdit(subRow, sub.name, formatAmount(sub.amount, sub.unit) || '');
+          }
+          setSubRow(null);
+        }}
+      />
+
       <Overlay visible={menu !== null} onClose={() => setMenu(null)}>
         {menu ? (
           <RowDetailSheet
@@ -2344,6 +2366,10 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             // Picking a store is a discrete action, so close the sheet on it.
             onSetStore={(store) => {
               setShopMeta(menu.baseName, { store });
+              setMenu(null);
+            }}
+            onSub={() => {
+              setSubRow(menu);
               setMenu(null);
             }}
             onSetField={(patch) => setShopMeta(menu.baseName, patch)}
@@ -3009,6 +3035,7 @@ function RowDetailSheet({
   onSetStore,
   onSetField,
   onToggleAlways,
+  onSub,
   onSplit,
   onDelete,
   onClose,
@@ -3022,6 +3049,8 @@ function RowDetailSheet({
   onSetStore: (store: StoreId | null) => void;
   onSetField: (patch: ShopMeta) => void;
   onToggleAlways: () => void;
+  /** Open Sub on this row. */
+  onSub: () => void;
   /** Only set on a merged row. */
   onSplit?: () => void;
   onDelete: () => void;
@@ -3068,6 +3097,15 @@ function RowDetailSheet({
             onPress={() => onSaveEdit(draftName, draftQty)}
           />
         ) : null}
+
+        {/* Out of it, standing in the aisle: swap the row for something you
+            can actually buy, without leaving the list. */}
+        <Button
+          label="Sub"
+          glyph="bench"
+          variant="secondary"
+          onPress={onSub}
+        />
 
         <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
           Store

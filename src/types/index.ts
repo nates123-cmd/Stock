@@ -310,6 +310,13 @@ export type PlanComponent = {
   bakersPercent?: { anchorIngredientId: string };
   /** optional link to a standalone Recipe if this component was promoted */
   recipeId?: string;
+  /**
+   * Multiplier applied to the source recipe when this component was built (a
+   * dinner may call for a double batch of one dish). Kept so a reader can
+   * re-apply it to the LIVE recipe instead of trusting `ingredients`, which is
+   * only a snapshot — see lib/stepAmounts.
+   */
+  scale?: number;
 };
 
 export type CookPlan = {

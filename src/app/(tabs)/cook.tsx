@@ -84,6 +84,13 @@ export default function CookScreen() {
 
   const isToday = relevant ? isSameDay(relevant.meal.date, new Date()) : false;
 
+  /** Dishes that actually have a picture. Not every recipe does, and an empty
+   *  grey box tells you nothing — so they're filtered out, not placeholdered. */
+  const photos = useMemo(
+    () => (relevant?.dishes ?? []).filter((d) => !!d.recipe.imageUrl),
+    [relevant],
+  );
+
   const launch = (id: string) =>
     router.push({ pathname: '/cook/[id]', params: { id } } as never);
 
@@ -100,13 +107,32 @@ export default function CookScreen() {
       <SectionLabel style={styles.label}>{isToday ? 'Tonight' : 'Up next'}</SectionLabel>
       {relevant ? (
         <Card bordered style={styles.mealCard}>
-          {/* Thumbnail of tonight's recipe (the first dish's, for a combined meal). */}
-          {relevant.dishes[0]?.recipe.imageUrl ? (
-            <Image
-              source={{ uri: relevant.dishes[0].recipe.imageUrl }}
-              style={styles.heroThumb}
-              resizeMode="cover"
-            />
+          {/* Every dish's photo, not just the first — a meal is more than one
+              thing, and the point of the picture is recognising WHICH thing.
+              One photo keeps the old full-width hero; two or more tile, each
+              captioned and tappable straight into its own cook. */}
+          {photos.length > 0 ? (
+            <View style={styles.photoRow}>
+              {photos.map(({ dish, recipe }) => (
+                <Pressable
+                  key={dish.id}
+                  style={[styles.photoTile, photos.length === 1 && styles.photoSolo]}
+                  onPress={() => launch(recipe.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Cook ${recipe.title}`}>
+                  <Image
+                    source={{ uri: recipe.imageUrl }}
+                    style={[styles.photoImg, photos.length === 1 && styles.photoImgSolo]}
+                    resizeMode="cover"
+                  />
+                  {photos.length > 1 ? (
+                    <Text color="textFaint" numberOfLines={1} style={styles.photoCaption}>
+                      {recipe.title}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              ))}
+            </View>
           ) : null}
           <View style={styles.mealHead}>
             <Text variant="recipeTitle">
@@ -191,7 +217,12 @@ const styles = StyleSheet.create({
   },
   label: { paddingTop: 8, paddingBottom: 10 },
   mealCard: { gap: 12, borderColor: colors.line },
-  heroThumb: { width: '100%', height: 160, borderRadius: 10, backgroundColor: colors.bg2 },
+  photoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  photoTile: { flexBasis: '48%', flexGrow: 1, gap: 4 },
+  photoSolo: { flexBasis: '100%' },
+  photoImg: { width: '100%', height: 104, borderRadius: 10, backgroundColor: colors.bg2 },
+  photoImgSolo: { height: 160 },
+  photoCaption: { paddingHorizontal: 2 },
   mealHead: {
     flexDirection: 'row',
     alignItems: 'baseline',

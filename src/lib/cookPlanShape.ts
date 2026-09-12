@@ -193,6 +193,7 @@ export function componentsFromRecipes(recipes: { recipe: Recipe; scale: number }
       scale !== 1 && i.amount != null ? { ...i, amount: i.amount * scale } : i,
     ),
     recipeId: recipe.id,
+    ...(scale !== 1 ? { scale } : {}),
     ...(recipe.myNotes ? { notes: recipe.myNotes } : {}),
   }));
 }

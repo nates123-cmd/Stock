@@ -23,6 +23,8 @@ import { useSyncStatusStore } from '@/store/syncStatus';
 import { dayTag, isSameDay } from '@/lib/week';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { DinnerComponents } from '@/components/DinnerComponents';
+import { SubSheet, type AppliedSub } from '@/components/SubSheet';
+import { applySubToIngredient } from '@/lib/substitutions';
 import { indexRecipes, ingredientGroups } from '@/lib/dinners';
 import { uid } from '@/lib/id';
 import { pickRecipePhoto } from '@/lib/photo';
@@ -54,6 +56,8 @@ export default function RecipeDetail() {
   const removeRecipe = useRecipeStore((s) => s.remove);
   const autoTag = useRecipeStore((s) => s.autoTag);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** The ingredient a long-press opened Sub on. Null = sheet closed. */
+  const [subFor, setSubFor] = useState<Ingredient | null>(null);
   // Autocomplete source for the tag editor — every tag used anywhere in the
   // library, deduped case-insensitively (spec §6 tag editor).
   const allTagsAcrossLibrary = useMemo(() => {
@@ -420,6 +424,31 @@ export default function RecipeDetail() {
           onHint={setHint}
         />
 
+        {/* Sub — opened by long-pressing an ingredient above. Accepting turns
+            the ingredient INTO the swap, recorded as a modification so the
+            original still shows struck through. */}
+        <SubSheet
+          visible={!!subFor}
+          name={subFor?.canonicalName ?? ''}
+          amount={subFor?.amount ?? null}
+          unit={subFor?.unit ?? null}
+          onClose={() => setSubFor(null)}
+          onApply={(sub: AppliedSub) => {
+            const target = subFor;
+            if (!target) return;
+            const updated = applySubToIngredient(target, sub);
+            void save({
+              ...recipe,
+              ingredients: recipe.ingredients.map((i) =>
+                i.id === target.id ? updated : i,
+              ),
+              modifiedAt: new Date(),
+            });
+            setSubFor(null);
+            setHint(`Swapped in ${sub.name}.`);
+          }}
+        />
+
         <View style={wide ? styles.twoCol : undefined}>
           <View style={wide ? styles.colLeft : undefined}>
             <SectionHeader label="Ingredients" onEdit={() => setEditing(true)} />
@@ -430,21 +459,10 @@ export default function RecipeDetail() {
                   <Pressable
                     key={ing.id}
                     style={styles.ingRow}
-                    // Long-press → the folded-in Bench (Sub), amount pre-loaded
-                    // (spec §9). Bench is no longer its own tab (redesign Phase
-                    // C): it opens as a sheet on the Cook surface.
-                    onLongPress={() =>
-                      router.push({
-                        pathname: '/(tabs)/cook',
-                        params: {
-                          bench: '1',
-                          tab: 'sub',
-                          sub: ing.canonicalName,
-                          amount: ing.amount != null ? String(ing.amount) : '',
-                          unit: ing.unit ?? '',
-                        },
-                      } as never)
-                    }>
+                    // Long-press → Sub, right here. It used to deep-link to the
+                    // Bench tab, which told you the answer and left you to
+                    // retype it; accepting a swap now rewrites the ingredient.
+                    onLongPress={() => setSubFor(ing)}>
                     <IngredientAmount
                       ing={ing}
                       style={[styles.amount, clean && styles.cleanAmount]}

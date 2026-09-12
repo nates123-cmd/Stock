@@ -15,6 +15,8 @@ import {
 import { colors, layout } from '@/design';
 import { useCookPlanStore } from '@/store/cookPlans';
 import { phaseWindows, fmtWindow, totalSteps } from '@/lib/planSchedule';
+import { useRecipeStore } from '@/store/recipes';
+import { liveIngredients, stepAmountLine } from '@/lib/stepAmounts';
 import type { CookPlan, PlanComponent } from '@/types';
 
 export default function CookPlanDetail() {
@@ -32,6 +34,15 @@ export default function CookPlanDetail() {
     () => new Map((plan?.components ?? []).map((c) => [c.id, c])),
     [plan],
   );
+
+  /** Live ingredients per component — see lib/stepAmounts on why not the snapshot. */
+  const recipes = useRecipeStore((s) => s.recipes);
+  const ingredientsByComp = useMemo(() => {
+    const lookup = (rid: string) => recipes.find((r) => r.id === rid);
+    const m = new Map<string, ReturnType<typeof liveIngredients>>();
+    for (const c of plan?.components ?? []) m.set(c.id, liveIngredients(c, lookup));
+    return m;
+  }, [plan, recipes]);
 
   if (!plan) {
     return (
@@ -135,6 +146,10 @@ export default function CookPlanDetail() {
                 </View>
                 {phase.steps.map((step) => {
                   const comp = step.componentId ? compById.get(step.componentId) : undefined;
+                  const amountLine = stepAmountLine(
+                    step.text,
+                    comp ? (ingredientsByComp.get(comp.id) ?? []) : [],
+                  );
                   return (
                     <View key={step.id} style={styles.stepRow}>
                       <Text color="textFaint" style={styles.stepNum}>
@@ -147,9 +162,15 @@ export default function CookPlanDetail() {
                             {timerLabel(step.timer)}
                           </Text>
                         ) : null}
-                        {comp ? (
+                        {/* The amounts this step actually calls for, read
+                            live off the recipe so a re-scale lands here too. */}
+                        {amountLine ? (
+                          <Text color="accent" variant="sectionLabel">
+                            {amountLine}
+                          </Text>
+                        ) : comp ? (
                           <Text color="textFaint" variant="sectionLabel">
-                            {comp.ingredients.length} ingredients
+                            {comp.name}
                           </Text>
                         ) : null}
                       </View>

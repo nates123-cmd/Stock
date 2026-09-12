@@ -14,6 +14,8 @@ import {
 } from '@/lib/usePlanAlarms';
 import { fmtClock } from '@/lib/useCookTimers';
 import { phaseWindows, fmtWindow } from '@/lib/planSchedule';
+import { useRecipeStore } from '@/store/recipes';
+import { liveIngredients, stepAmountLine } from '@/lib/stepAmounts';
 import type { PlanStep, PlanTimer } from '@/types';
 
 export default function CookPlanRun() {
@@ -32,6 +34,19 @@ export default function CookPlanRun() {
     () => new Map((plan?.components ?? []).map((c) => [c.id, c])),
     [plan],
   );
+
+  /**
+   * Amounts come from the LIVE recipe, not the component's snapshot, so scaling
+   * or converting a recipe shows up here with no rebuild. Memoised per
+   * component id because it is read once per step.
+   */
+  const recipes = useRecipeStore((s) => s.recipes);
+  const ingredientsByComp = useMemo(() => {
+    const lookup = (rid: string) => recipes.find((r) => r.id === rid);
+    const m = new Map<string, ReturnType<typeof liveIngredients>>();
+    for (const c of plan?.components ?? []) m.set(c.id, liveIngredients(c, lookup));
+    return m;
+  }, [plan, recipes]);
 
   if (!plan) {
     return (
@@ -130,6 +145,13 @@ export default function CookPlanRun() {
               {phase.steps.map((step) => {
                 const isDone = done.has(step.id);
                 const comp = step.componentId ? compById.get(step.componentId) : undefined;
+                // Only the amounts THIS step names. Printing every ingredient
+                // under every step is noise you learn to skip, and skipping it
+                // is how you miss the one number that mattered.
+                const amountLine = stepAmountLine(
+                  step.text,
+                  comp ? (ingredientsByComp.get(comp.id) ?? []) : [],
+                );
                 return (
                   <View key={step.id} style={styles.stepRow}>
                     <Pressable
@@ -142,11 +164,9 @@ export default function CookPlanRun() {
                       <Text style={[isDone && styles.strike]} color={isDone ? 'textMuted' : 'text'}>
                         {step.text}
                       </Text>
-                      {comp && comp.ingredients.length > 0 ? (
-                        <Text color="textFaint" variant="sectionLabel" style={styles.ingLine}>
-                          {comp.ingredients
-                            .map((i) => (i.amount != null ? `${i.amount}${i.unit ?? ''} ${i.canonicalName}` : i.canonicalName))
-                            .join(' · ')}
+                      {amountLine ? (
+                        <Text color="accent" variant="sectionLabel" style={styles.ingLine}>
+                          {amountLine}
                         </Text>
                       ) : null}
                     </Pressable>

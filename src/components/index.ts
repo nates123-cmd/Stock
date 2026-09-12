@@ -21,6 +21,8 @@ export type { ProgressStep, ProgressState } from './ProgressStepList';
 export { RecipeCard } from './RecipeCard';
 export { RecipeLibrary } from './RecipeLibrary';
 export { DinnerComponents } from './DinnerComponents';
+export { SubSheet } from './SubSheet';
+export type { AppliedSub } from './SubSheet';
 export { CartFillBanner } from './CartFillBanner';
 export { CookPlanCard } from './CookPlanCard';
 export { IngredientAmount, IngredientName } from './IngredientLine';
