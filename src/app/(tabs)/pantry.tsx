@@ -11,6 +11,7 @@ import {
   Pill,
   Glyph,
   Overlay,
+  SearchBar,
 } from '@/components';
 import { colors } from '@/design';
 import { usePantryStore } from '@/store/pantry';
@@ -101,6 +102,7 @@ export default function PantryScreen() {
   const [pushedToShop, setPushedToShop] = useState<number | null>(null);
 
   // Manual single-item add (spec §10 — was paste-only; this is the in-tab path).
+  const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);
   const [addName, setAddName] = useState('');
   const [addLocation, setAddLocation] = useState<PantryLocation>('pantry');
@@ -134,10 +136,30 @@ export default function PantryScreen() {
     setNoteDraft('');
   };
 
+  /**
+   * The search filter. Every term has to match something, so "olive oil"
+   * narrows instead of widening — same rule as the recipe library's search.
+   * Matches the item's name and its note, since "the one from the trip" is a
+   * real way to look for a thing.
+   *
+   * Filters what you SEE, never what bulk actions act on: "Push out to
+   * shopping" below still reads the full pantry, or searching would silently
+   * shrink it.
+   */
+  const visible = useMemo(() => {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return items;
+    return items.filter((i) => {
+      const hay = `${i.canonicalName} ${i.statusNote ?? ''}`.toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    });
+  }, [items, query]);
+  const searching = query.trim().length > 0;
+
   // Cross-section running-low view (spec §10). Shows everything `low` or
   // `out` at the top of the pantry, sorted: out first, then low, alpha within.
   const lowOrOut = useMemo(() => {
-    return items
+    return visible
       .filter((i) => i.status === 'low' || i.status === 'out')
       .sort((a, b) => {
         const ra = a.status === 'out' ? 0 : 1;
@@ -145,7 +167,7 @@ export default function PantryScreen() {
         if (ra !== rb) return ra - rb;
         return a.canonicalName.localeCompare(b.canonicalName);
       });
-  }, [items]);
+  }, [visible]);
 
   const pushOutToShopping = () => {
     const outs = items.filter((i) => i.status === 'out');
@@ -190,7 +212,7 @@ export default function PantryScreen() {
     [lowOrOut],
   );
   const categorized = useMemo(() => {
-    const rest = items.filter((i) => !inLowOrOut.has(i.id));
+    const rest = visible.filter((i) => !inLowOrOut.has(i.id));
     const groups = new Map<PantryCategory, typeof rest>();
     for (const it of rest) {
       // A manual reassignment always beats the keyword guess.
@@ -206,7 +228,7 @@ export default function PantryScreen() {
         items: sortByStatus(groups.get(c)!),
       }),
     );
-  }, [items, inLowOrOut]);
+  }, [visible, inLowOrOut]);
 
   return (
     <View style={styles.root}>
@@ -214,9 +236,22 @@ export default function PantryScreen() {
         <View style={styles.header}>
           <Heading variant="screenTitle">Pantry</Heading>
           <View style={styles.headerRight}>
-            <Text color="textMuted">{items.length} tracked</Text>
+            <Text color="textMuted">
+              {searching ? `${visible.length} of ${items.length}` : `${items.length} tracked`}
+            </Text>
             <Button label="Add" glyph="add" onPress={openAdd} />
           </View>
+        </View>
+
+        {/* Search sits above everything, so it narrows Running-low AND the
+            category sections at once — the pantry is long enough that scrolling
+            for "cumin" is the slow way. */}
+        <View style={styles.search}>
+          <SearchBar
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search the pantry"
+          />
         </View>
 
         {addToast ? (
@@ -281,6 +316,21 @@ export default function PantryScreen() {
             <Text color="textFaint">Add an item to fill the pantry.</Text>
             <View style={styles.emptyActions}>
               <Button label="Add item" glyph="add" onPress={openAdd} />
+            </View>
+          </View>
+        ) : visible.length === 0 ? (
+          <View style={styles.empty}>
+            <Text color="textMuted">Nothing matches “{query.trim()}”.</Text>
+            <Text color="textFaint">
+              Not in the pantry? Add it, or clear the search.
+            </Text>
+            <View style={styles.emptyActions}>
+              <Button label="Add item" glyph="add" onPress={openAdd} />
+              <Button
+                label="Clear search"
+                variant="secondary"
+                onPress={() => setQuery('')}
+              />
             </View>
           </View>
         ) : null}
@@ -634,6 +684,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   flexShrink: { flexShrink: 1 },
+  search: { paddingBottom: 12 },
   header: {
     flexDirection: 'row',
     alignItems: 'baseline',
