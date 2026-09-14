@@ -1371,6 +1371,72 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     setAddQty('');
   };
 
+  /**
+   * Move a row between Active and Staples — the long-press menu's "Move to
+   * Staples" / "Move to Active".
+   *
+   * Which list a hand-added row lives on is recorded ON THE EXTRA
+   * (MANUAL_ACTIVE / MANUAL_STAPLE), so this is an origin change, not a
+   * delete-and-re-add: the row keeps its qty, store tag, brand and note. A
+   * merged row moves every member, or the visible line would move and its
+   * members would pop straight back out.
+   *
+   * Moving to Staples also pins it always-have — the same thing adding while on
+   * Staples does, because that is what a staple IS in the pantry. Moving to
+   * Active deliberately does NOT un-pin: a manual Active row is excluded from
+   * Staples by its origin (manualActiveKeys), so it cannot show up twice, and
+   * "I keep this AND need to buy it this week" is a real state worth keeping.
+   */
+  const moveRowTo = (row: FlatRow, dest: 'active' | 'staples') => {
+    const origin = dest === 'staples' ? MANUAL_STAPLE : MANUAL_ACTIVE;
+    const ids = row.members
+      ? row.members.map((m) => m.extraId).filter((x): x is string => !!x)
+      : row.extraId
+        ? [row.extraId]
+        : [];
+
+    // Landing on Active means clearing the same sticky state a fresh add
+    // clears. `checked` in have.ts is PERMANENT, so a name bought once before
+    // would be swallowed the instant it arrived — the "I can't add pine nuts"
+    // bug reached through a different door.
+    if (dest === 'active') {
+      unmarkHave(row.baseName);
+      unsuppress(row.baseName);
+      for (const key of pushedKeysCovering(row.baseName, pushedItems)) {
+        restorePushed(key);
+      }
+      setDismissed((prev) => {
+        const next = new Set(prev);
+        next.delete(`item:${row.baseName}`);
+        return next;
+      });
+    }
+
+    if (ids.length > 0) {
+      for (const id of ids) updateExtra(id, { originId: origin });
+    } else {
+      // A Staples row with no extra behind it (a bare pin, or a pantry staple
+      // surfaced because it ran low) has no origin to change — give it a real
+      // row to live on instead.
+      addExtra([
+        {
+          canonicalName: row.baseName,
+          amount: null,
+          unit: null,
+          originLabel: 'moved by you',
+          originId: origin,
+        },
+      ]);
+    }
+
+    if (dest === 'staples') pinStaple(row.baseName, true);
+    setHint(
+      dest === 'staples'
+        ? `Moved ${row.baseName} to Staples.`
+        : `Moved ${row.baseName} to Active.`,
+    );
+  };
+
   /** Delete ONE row. A merged row deletes every row folded into it, or you'd
    *  delete the visible line and its members would pop straight back out.
    *  On Staples, "delete" means "don't need to buy now" (clears the low/out
@@ -2372,6 +2438,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
               setSubRow(menu);
               setMenu(null);
             }}
+            moveLabel={listView === 'staples' ? 'Move to Active' : 'Move to Staples'}
+            onMove={() => {
+              moveRowTo(menu, listView === 'staples' ? 'active' : 'staples');
+              setMenu(null);
+            }}
             onSetField={(patch) => setShopMeta(menu.baseName, patch)}
             onToggleAlways={() => {
               const turningOn = !isExactAlwaysHave(menu.baseName, alwaysHaveMap);
@@ -3036,6 +3107,8 @@ function RowDetailSheet({
   onSetField,
   onToggleAlways,
   onSub,
+  onMove,
+  moveLabel,
   onSplit,
   onDelete,
   onClose,
@@ -3051,6 +3124,10 @@ function RowDetailSheet({
   onToggleAlways: () => void;
   /** Open Sub on this row. */
   onSub: () => void;
+  /** Send this row to the other list (Active <-> Staples). */
+  onMove: () => void;
+  /** "Move to Staples" / "Move to Active", depending where you are. */
+  moveLabel: string;
   /** Only set on a merged row. */
   onSplit?: () => void;
   onDelete: () => void;
@@ -3105,6 +3182,15 @@ function RowDetailSheet({
           glyph="bench"
           variant="secondary"
           onPress={onSub}
+        />
+
+        {/* Wrong list. Keeps the row and everything on it — qty, store, note —
+            and just changes which list it lives on. */}
+        <Button
+          label={moveLabel}
+          glyph="next"
+          variant="secondary"
+          onPress={onMove}
         />
 
         <SectionLabel color="textMuted" style={styles.detailFieldLabel}>
