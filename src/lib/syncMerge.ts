@@ -10,14 +10,27 @@
  *      Keep the existing local object by reference — that's what makes a
  *      once-a-minute resync free (no re-render, no echo push back to cloud).
  *   2. A cloud row that is new or whose `updated_at` moved WINS. Revive it.
- *   3. A local row the cloud didn't return, that we have CONFIRMED was in the
- *      cloud, was deleted on another device. Drop it.
- *   4. A local row the cloud didn't return that was NEVER confirmed is one
- *      whose upload hasn't landed (new, or written while offline). KEEP it —
+ *   3. A local row the cloud didn't return was deleted on another device (or
+ *      is a leftover from a session whose delete never reached this device).
+ *      Drop it.
+ *   4. Exception to 3: a local row whose UPLOAD IS STILL PENDING (new, or
+ *      written while offline) is legitimately absent from the cloud. KEEP it —
  *      dropping it is how a sync layer eats work the user just did.
- *   5. Exception to 4: the first pull for someone joining another person's
- *      household is an ADOPTION, not a merge. Their local-only rows are theirs,
- *      not the kitchen's, so they don't get carried in.
+ *   5. A cloud row whose DELETE IS STILL PENDING on this device (we removed it,
+ *      the delete hasn't landed) must not be revived, or every pull would
+ *      resurrect the thing the user just removed until the delete gets through.
+ *   6. The first pull for someone joining another person's household is an
+ *      ADOPTION, not a merge. Their local-only rows are theirs, not the
+ *      kitchen's, so they don't get carried in — pending or not.
+ *
+ * WHY "pending" AND NOT "confirmed": the first version of rule 3 only dropped
+ * rows this SESSION had seen in the cloud, and kept everything else as a
+ * presumed pending upload. That set lived in memory, so every reload started
+ * with nothing confirmed, and every locally-persisted row the cloud no longer
+ * held was kept forever — a delete made on the phone never reached a laptop
+ * that had been reloaded since. One device held 52 shopping rows against 33
+ * in the cloud. Tracking the (small, persisted) set of uploads that have NOT
+ * landed answers the same question the right way round.
  *
  * The pull is two-phase, which is why stamps and bodies are separate inputs: a
  * recipe row carries an embedded photo, so re-downloading `data` for the whole
@@ -41,15 +54,18 @@ export type MergePlan<T> = {
 /**
  * Which rows do we actually need the body of? Exactly those the cloud has that
  * we're missing locally, plus those whose version moved since our last pull.
+ * Rows we are in the middle of deleting are never worth fetching.
  */
 export function idsNeedingFetch<T extends { id: string }>(
   local: T[],
   stamps: CloudStamp[],
   seen: Map<string, string>,
+  pendingDeletes: ReadonlySet<string> = new Set(),
 ): string[] {
   const localIds = new Set(local.map((x) => x.id));
   const out: string[] = [];
   for (const s of stamps) {
+    if (pendingDeletes.has(s.id)) continue;
     if (localIds.has(s.id) && seen.get(s.id) === s.updated_at) continue;
     out.push(s.id);
   }
@@ -64,21 +80,32 @@ export function planMerge<T extends { id: string }>(opts: {
   bodies: Map<string, unknown>;
   /** id → the updated_at last pulled for it. Mutated in place. */
   seen: Map<string, string>;
-  /** Ids known to exist in the cloud. Mutated in place. */
-  confirmed: Set<string>;
+  /** Ids whose local write has not been confirmed by the cloud yet. */
+  pending: ReadonlySet<string>;
+  /** Ids this device deleted whose cloud delete has not landed yet. */
+  pendingDeletes?: ReadonlySet<string>;
   revive: (raw: unknown) => T;
   /** Member's first pull of someone else's kitchen: drop local-only rows. */
   adoptOnly?: boolean;
 }): MergePlan<T> {
-  const { local, stamps, bodies, seen, confirmed, revive, adoptOnly = false } = opts;
+  const {
+    local,
+    stamps,
+    bodies,
+    seen,
+    pending,
+    pendingDeletes = new Set<string>(),
+    revive,
+    adoptOnly = false,
+  } = opts;
 
   const localById = new Map(local.map((x) => [x.id, x]));
-  const cloudIds = new Set(stamps.map((s) => s.id));
   const changedIds: string[] = [];
   const droppedIds: string[] = [];
   const nextById = new Map<string, T>();
 
   for (const s of stamps) {
+    if (pendingDeletes.has(s.id)) continue; // rule 5 — our delete is in flight
     const existing = localById.get(s.id);
     if (existing && seen.get(s.id) === s.updated_at) {
       nextById.set(s.id, existing); // rule 1 — same ref, deliberately
@@ -94,19 +121,17 @@ export function planMerge<T extends { id: string }>(opts: {
     }
     const item = revive(raw); // rule 2
     seen.set(s.id, s.updated_at);
-    confirmed.add(s.id);
     nextById.set(s.id, item);
     changedIds.push(s.id);
   }
 
   for (const item of local) {
-    if (cloudIds.has(item.id)) continue;
-    if (confirmed.has(item.id) || adoptOnly) {
-      droppedIds.push(item.id); // rules 3 and 5
-      confirmed.delete(item.id);
-      seen.delete(item.id);
-    } else {
+    if (nextById.has(item.id)) continue;
+    if (pending.has(item.id) && !adoptOnly) {
       nextById.set(item.id, item); // rule 4
+    } else {
+      droppedIds.push(item.id); // rules 3 and 6 (and 5, for a row we deleted)
+      seen.delete(item.id);
     }
   }
 

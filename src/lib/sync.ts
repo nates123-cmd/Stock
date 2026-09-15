@@ -32,6 +32,7 @@ import { create } from 'zustand';
 import { supabase, SUPABASE_AVAILABLE } from './supabase';
 import { resolveOwnerId } from './household';
 import { idsNeedingFetch, planMerge, type CloudStamp } from './syncMerge';
+import { webPersist } from './db/webStore';
 import { useAuthStore } from '@/store/auth';
 import { useRecipeStore } from '@/store/recipes';
 import { usePlanStore } from '@/store/plan';
@@ -467,12 +468,22 @@ const seenUpdatedAt: Record<CloudTable, Map<string, string>> = {
 };
 
 /**
- * Ids CONFIRMED to exist in the cloud (a pull returned them, or our upsert came
- * back without an error). Only these may be dropped locally when they go
- * missing from a pull — an item whose upsert failed (offline) is absent from
- * the cloud too, and dropping it would destroy work the user just did.
+ * Ids whose local write has NOT been confirmed by the cloud yet: an upsert that
+ * is in flight, or one that failed (offline). These are the ONLY local rows a
+ * pull may keep when the cloud doesn't return them — everything else that's
+ * missing upstream was deleted on another device and gets dropped.
+ *
+ * PERSISTED per device and per kitchen (`stock:sync-pending:<ownerId>`), which
+ * is the whole point. The previous design tracked the inverse — ids this
+ * session had CONFIRMED in the cloud — in memory only, so a reload started
+ * with nothing confirmed and treated every locally-persisted row the cloud no
+ * longer had as a presumed pending upload, forever. A row deleted on the phone
+ * never left a laptop that had been reloaded since (52 local shopping rows vs
+ * 33 in the cloud, 2026-09-14). The pending set is small, survives reloads,
+ * and is also what lets a failed upload be retried on the next sync instead
+ * of being silently lost.
  */
-const confirmed: Record<CloudTable, Set<string>> = {
+const pending: Record<CloudTable, Set<string>> = {
   recipes: new Set(),
   plan_entries: new Set(),
   pantry_items: new Set(),
@@ -483,6 +494,87 @@ const confirmed: Record<CloudTable, Set<string>> = {
   extras: new Set(),
   pushed: new Set(),
 };
+
+/**
+ * Ids this device deleted whose cloud DELETE has not landed. Without this, a
+ * delete made offline (or one that simply failed) is undone by the very next
+ * pull: the cloud still has the row, so the merge revives it, and the user
+ * deletes the same thing again — "shallot keeps popping up".
+ */
+const pendingDeletes: Record<CloudTable, Set<string>> = {
+  recipes: new Set(),
+  plan_entries: new Set(),
+  pantry_items: new Set(),
+  pipeline_ideas: new Set(),
+  cooks: new Set(),
+  cook_plans: new Set(),
+  have_records: new Set(),
+  extras: new Set(),
+  pushed: new Set(),
+};
+
+const CLOUD_TABLES = Object.keys(pending) as CloudTable[];
+
+type PersistedPending = {
+  upserts: Partial<Record<CloudTable, string[]>>;
+  deletes: Partial<Record<CloudTable, string[]>>;
+};
+
+const pendingKey = (ownerId: string) => `sync-pending:${ownerId}`;
+let pendingSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function savePendingNow(ownerId: string): Promise<void> {
+  if (pendingSaveTimer) {
+    clearTimeout(pendingSaveTimer);
+    pendingSaveTimer = null;
+  }
+  const snapshot: PersistedPending = { upserts: {}, deletes: {} };
+  for (const t of CLOUD_TABLES) {
+    if (pending[t].size) snapshot.upserts[t] = Array.from(pending[t]);
+    if (pendingDeletes[t].size) snapshot.deletes[t] = Array.from(pendingDeletes[t]);
+  }
+  return webPersist.save(pendingKey(ownerId), snapshot);
+}
+
+/** Write the pending sets through to IndexedDB, coalescing a burst of edits. */
+function schedulePendingSave(): void {
+  if (pendingSaveTimer) return;
+  pendingSaveTimer = setTimeout(() => {
+    pendingSaveTimer = null;
+    if (activeOwnerId) void savePendingNow(activeOwnerId);
+  }, 150);
+}
+
+async function loadPending(ownerId: string): Promise<void> {
+  for (const t of CLOUD_TABLES) {
+    pending[t].clear();
+    pendingDeletes[t].clear();
+  }
+  const saved = await webPersist.load<PersistedPending>(pendingKey(ownerId));
+  if (!saved) return;
+  for (const t of CLOUD_TABLES) {
+    for (const id of saved.upserts?.[t] ?? []) pending[t].add(id);
+    for (const id of saved.deletes?.[t] ?? []) pendingDeletes[t].add(id);
+  }
+}
+
+function markPending(table: CloudTable, id: string): void {
+  pending[table].add(id);
+  pendingDeletes[table].delete(id);
+  schedulePendingSave();
+}
+
+function markPendingDelete(table: CloudTable, id: string): void {
+  pendingDeletes[table].add(id);
+  pending[table].delete(id);
+  schedulePendingSave();
+}
+
+function clearPending(table: CloudTable, id: string): void {
+  const had = pending[table].delete(id);
+  const hadDel = pendingDeletes[table].delete(id);
+  if (had || hadDel) schedulePendingSave();
+}
 
 // Echo guard: when Realtime (or a merge) applies a cloud change, we add its id
 // to suppress before applying. The store-subscribe then sees the new ref, looks
@@ -500,6 +592,9 @@ async function cloudUpsert(
   item: Item,
 ): Promise<void> {
   if (!supabase) return;
+  // Pending from before the request leaves: if it fails (or the tab dies
+  // mid-flight) the next sync retries it instead of dropping the row.
+  markPending(table, item.id);
   const { error } = await supabase
     .from(table)
     .upsert({ id: item.id, user_id: userId, data: item });
@@ -510,7 +605,7 @@ async function cloudUpsert(
   }
   // It really is up there now, so a later pull that doesn't return it means
   // another device deleted it — safe to mirror that deletion locally.
-  confirmed[table].add(item.id);
+  clearPending(table, item.id);
 }
 
 async function cloudDelete(
@@ -518,14 +613,41 @@ async function cloudDelete(
   id: string,
 ): Promise<void> {
   if (!supabase) return;
+  // Same shape as the upsert: remembered before the request, so a delete that
+  // never lands is retried rather than undone by the next pull.
+  markPendingDelete(table, id);
   const { error } = await supabase.from(table).delete().eq('id', id);
   if (error) {
     console.warn('[stock/sync] delete failed', table, error.message);
     useSyncStatus.setState({ phase: 'error', lastError: error.message });
     return;
   }
-  confirmed[table].delete(id);
+  clearPending(table, id);
   seenUpdatedAt[table].delete(id);
+}
+
+/**
+ * Retry whatever this device still owes the cloud for one table: uploads that
+ * failed or never left (offline, tab closed mid-flight) and deletes that
+ * didn't land. Runs after every merge, so a write made on the subway goes up
+ * the next time the app syncs instead of living on one device forever.
+ */
+async function flushPending(c: Collection, userId: string): Promise<void> {
+  const dels = Array.from(pendingDeletes[c.table]);
+  for (const id of dels) await cloudDelete(c.table, id);
+
+  const ups = Array.from(pending[c.table]);
+  if (ups.length === 0) return;
+  const byId = new Map(c.read().map((x) => [x.id, x]));
+  for (const id of ups) {
+    const item = byId.get(id);
+    if (!item) {
+      // Removed locally before its upload ever landed — nothing to send.
+      clearPending(c.table, id);
+      continue;
+    }
+    await cloudUpsert(c.table, userId, item);
+  }
 }
 
 /* ---------- Local → cloud (per-store subscribe) ---------- */
@@ -581,7 +703,7 @@ function applyRealtime(c: Collection, payload: ChangePayload): void {
   if (payload.eventType === 'DELETE') {
     const id = payload.old?.id;
     if (!id) return;
-    confirmed[c.table].delete(id);
+    clearPending(c.table, id);
     seenUpdatedAt[c.table].delete(id);
     suppress.add(suppressKey(c.table, id));
     c.replace(cur.filter((x) => x.id !== id));
@@ -596,7 +718,7 @@ function applyRealtime(c: Collection, payload: ChangePayload): void {
     return;
   }
   const item = c.revive(payload.new.data);
-  confirmed[c.table].add(item.id);
+  clearPending(c.table, item.id);
   suppress.add(suppressKey(c.table, item.id));
   const i = cur.findIndex((x) => x.id === item.id);
   const next =
@@ -624,10 +746,10 @@ const STAMP_PAGE = 500;
  *
  * Cloud wins for any row whose `updated_at` moved since we last saw it; rows
  * that didn't move keep their existing object ref, so a no-op resync causes no
- * re-render and no echo push. Local rows the cloud has never confirmed are kept
- * (they're new, or their upload failed) and get pushed by the store listener.
- * Local rows the cloud HAS confirmed but no longer returns were deleted on
- * another device, so they're dropped here too.
+ * re-render and no echo push. Local rows whose upload is still PENDING are kept
+ * (they're new, or their upload failed) and retried by flushPending. Every
+ * other local row the cloud no longer returns was deleted on another device,
+ * so it's dropped here too — including leftovers from before this reload.
  */
 async function mergeTable(
   c: Collection,
@@ -665,8 +787,7 @@ async function mergeTable(
         .upsert(local.map((item) => ({ id: item.id, user_id: userId, data: item })));
       if (upErr) {
         console.warn('[stock/sync] migration upload failed', c.table, upErr.message);
-      } else {
-        for (const item of local) confirmed[c.table].add(item.id);
+        for (const item of local) markPending(c.table, item.id);
       }
     }
     // A member joining someone's kitchen is ADOPTING it, not merging into it —
@@ -677,7 +798,7 @@ async function mergeTable(
 
   // Phase two: bodies, but only for the rows that actually moved.
   const seen = seenUpdatedAt[c.table];
-  const wanted = idsNeedingFetch(local, stamps, seen);
+  const wanted = idsNeedingFetch(local, stamps, seen, pendingDeletes[c.table]);
   const bodies = new Map<string, unknown>();
   for (let i = 0; i < wanted.length; i += BODY_BATCH) {
     const batch = wanted.slice(i, i + BODY_BATCH);
@@ -697,7 +818,8 @@ async function mergeTable(
     stamps,
     bodies,
     seen,
-    confirmed: confirmed[c.table],
+    pending: pending[c.table],
+    pendingDeletes: pendingDeletes[c.table],
     revive: c.revive,
     adoptOnly: mode === 'initial' && isMember,
   });
@@ -735,6 +857,8 @@ export async function syncNow(
       if (!c.hydrated()) continue;
       await mergeTable(c, userId, mode, isMember);
       if (activeOwnerId !== userId) return; // signed out / switched mid-pass
+      await flushPending(c, userId);
+      if (activeOwnerId !== userId) return;
     }
     useSyncStatus.setState({
       phase: 'idle',
@@ -905,6 +1029,12 @@ async function start(signedInUserId: string, email: string | null): Promise<void
   activeOwnerId = ownerId;
   lastOwnerCheckAt = Date.now();
 
+  // 0b) What does this device still owe the cloud? Must be known BEFORE the
+  //     first merge, or a row whose upload never landed reads as one another
+  //     device deleted.
+  await loadPending(ownerId);
+  if (activeUserId !== signedInUserId) return;
+
   // 1) Let the local stores finish loading, THEN pull. Merging against a store
   //    that hasn't hydrated reads it as empty and would delete the kitchen.
   await waitForHydration();
@@ -928,10 +1058,15 @@ async function start(signedInUserId: string, email: string | null): Promise<void
 
 async function stop(): Promise<void> {
   while (unsubscribers.length) unsubscribers.pop()?.();
+  // The pending sets are this device's unfinished business with the kitchen
+  // and persist under the owner's key. Land any coalesced save first, then
+  // drop only the in-memory copy; start() reloads it for whoever signs in.
+  if (activeOwnerId) await savePendingNow(activeOwnerId);
   for (const c of collections) {
     refCache[c.table].clear();
     seenUpdatedAt[c.table].clear();
-    confirmed[c.table].clear();
+    pending[c.table].clear();
+    pendingDeletes[c.table].clear();
   }
   suppress.clear();
   if (pollTimer) {
