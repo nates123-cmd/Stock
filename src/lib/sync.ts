@@ -584,6 +584,30 @@ const suppress = new Set<string>(); // `${table}:${id}`
 
 const suppressKey = (table: CloudTable, id: string) => `${table}:${id}`;
 
+/**
+ * Write a cloud-sourced change into a store without the local→cloud listener
+ * echoing it back up. The listener consumes its suppress key SYNCHRONOUSLY
+ * inside `replace` (zustand notifies subscribers inline), so any key still
+ * present afterwards had no listener to consume it — the sign-in merge runs
+ * before the listeners are registered, and a row whose ref didn't actually
+ * change never reaches the listener at all. Left behind, such a key swallows
+ * the NEXT genuine local edit to that id as an "echo".
+ *
+ * That stale key is why the first delete / move-to-Staples of any existing
+ * row after a page load silently never left the device (2026-09-15): a fresh
+ * session's first merge touches EVERY row, so every row was poisoned once.
+ * New rows (no key) synced fine, which is what made it look random.
+ */
+function replaceFromCloud(c: Collection, next: Item[], ids: string[]): void {
+  const keys = ids.map((id) => suppressKey(c.table, id));
+  for (const k of keys) suppress.add(k);
+  try {
+    c.replace(next);
+  } finally {
+    for (const k of keys) suppress.delete(k);
+  }
+}
+
 /* ---------- Cloud I/O ---------- */
 
 async function cloudUpsert(
@@ -705,8 +729,7 @@ function applyRealtime(c: Collection, payload: ChangePayload): void {
     if (!id) return;
     clearPending(c.table, id);
     seenUpdatedAt[c.table].delete(id);
-    suppress.add(suppressKey(c.table, id));
-    c.replace(cur.filter((x) => x.id !== id));
+    replaceFromCloud(c, cur.filter((x) => x.id !== id), [id]);
     return;
   }
   // Realtime drops the record body when the row exceeds the channel's
@@ -719,11 +742,10 @@ function applyRealtime(c: Collection, payload: ChangePayload): void {
   }
   const item = c.revive(payload.new.data);
   clearPending(c.table, item.id);
-  suppress.add(suppressKey(c.table, item.id));
   const i = cur.findIndex((x) => x.id === item.id);
   const next =
     i >= 0 ? cur.map((x, idx) => (idx === i ? item : x)) : [item, ...cur];
-  c.replace(next);
+  replaceFromCloud(c, next, [item.id]);
 }
 
 /* ---------- The merge ---------- */
@@ -826,9 +848,7 @@ async function mergeTable(
 
   if (!plan.next) return; // nothing moved: don't touch the store at all
 
-  for (const id of plan.changedIds) suppress.add(suppressKey(c.table, id));
-  for (const id of plan.droppedIds) suppress.add(suppressKey(c.table, id));
-  c.replace(plan.next);
+  replaceFromCloud(c, plan.next, [...plan.changedIds, ...plan.droppedIds]);
 }
 
 /**
@@ -1042,7 +1062,11 @@ async function start(signedInUserId: string, email: string | null): Promise<void
 
   await syncNow('sign-in', { mode: 'initial', force: true });
 
-  // 2) Snapshot so the first subscribe pass sees no spurious diff.
+  // 2) Snapshot so the first subscribe pass sees no spurious diff. Nothing
+  //    was listening during the pull above, so no suppress key from it was
+  //    consumed; drop them all rather than let one swallow the user's first
+  //    real edit (replaceFromCloud already purges, this is the belt).
+  suppress.clear();
   for (const c of collections) seedCache(c);
 
   // 3) Register local → cloud subscribers.
