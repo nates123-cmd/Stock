@@ -15,7 +15,9 @@ export type Segment =
 
 const TEMP = String.raw`\d{2,3}\s?°\s?F|\d{2,3}\s?°F|\d{2,3}\s?°|\d{2,3}\s?degrees(?:\s?F)?`;
 const DURATION = String.raw`\d+(?:\s?[–-]\s?\d+)?\s?(?:seconds?|secs?|minutes?|mins?|min|hours?|hrs?|hr)\b`;
-const AMOUNT = String.raw`\d+(?:[.,/]\d+)?\s?[½¼¾⅓⅔⅛]?\s?(?:g|kg|mg|ml|l|cups?|tbsp|tablespoons?|tsp|teaspoons?|oz|lb)\b|[½¼¾⅓⅔⅛]\s?(?:g|kg|ml|l|cups?|tbsp|tsp|oz|lb)\b`;
+const UNIT = String.raw`(?:g|kg|mg|ml|l|cups?|tbsp|tablespoons?|tsp|teaspoons?|oz|lbs?|pounds?|ounces?)\b`;
+// "1 1/2 cups" | "1/2 cup" | "1.5 cups" | "1½ cups" | "½ cup" | "500g"
+const AMOUNT = String.raw`\d+ \d+/\d+\s?${UNIT}|\d+(?:[.,/]\d+)?\s?[½¼¾⅓⅔⅛⅜⅝⅞]?\s?${UNIT}|[½¼¾⅓⅔⅛⅜⅝⅞]\s?${UNIT}`;
 
 const MASTER = new RegExp(`(${TEMP})|(${DURATION})|(${AMOUNT})`, 'gi');
 

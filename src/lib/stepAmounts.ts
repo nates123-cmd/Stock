@@ -37,7 +37,7 @@ function norm(text: string): string {
 }
 
 /** Singular/plural-tolerant stem so "lemons" in a step finds "lemon". */
-function stem(word: string): string {
+export function stem(word: string): string {
   if (word.length > 3 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
   if (word.length > 3 && word.endsWith('es')) return word.slice(0, -2);
   if (word.length > 2 && word.endsWith('s')) return word.slice(0, -1);

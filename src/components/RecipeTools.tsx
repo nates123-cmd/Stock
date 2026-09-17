@@ -17,6 +17,7 @@ import { colors } from '@/design';
 import { convertToGrams } from '@/lib/parsing';
 import { formatAmount, toFraction } from '@/lib/format';
 import { scaleIngredientAmounts, scaledServes } from '@/lib/recipe';
+import { scaleSteps } from '@/lib/scaleText';
 import type { Ingredient, Recipe } from '@/types';
 
 /**
@@ -167,6 +168,7 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
     await onSave({
       ...recipe,
       ingredients: scaleIngredientAmounts(recipe.ingredients, ratioValue),
+      steps: scaleSteps(recipe.steps, ratioValue, recipe.ingredients),
       yield: { ...recipe.yield, serves: scaledServes(recipe.yield.serves, ratioValue) },
       modifiedAt: new Date(),
     });
@@ -183,6 +185,7 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
     await onSave({
       ...recipe,
       ingredients: scaleIngredientAmounts(recipe.ingredients, ratio),
+      steps: scaleSteps(recipe.steps, ratio, recipe.ingredients),
       yield: { ...recipe.yield, serves: scalingTo },
       modifiedAt: new Date(),
     });
@@ -210,6 +213,7 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
     await onSave({
       ...recipe,
       ingredients: scaleIngredientAmounts(recipe.ingredients, ratio),
+      steps: scaleSteps(recipe.steps, ratio, recipe.ingredients),
       yield: { ...recipe.yield, serves: scaledServes(recipe.yield.serves, ratio) },
       modifiedAt: new Date(),
     });
