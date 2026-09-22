@@ -65,8 +65,9 @@ given. The caller multiplies. Reference points:
 all-purpose flour 125, granulated sugar 200, brown sugar packed 213,
 butter 227, water 240, milk 245, olive oil 218, honey 340, kosher salt 145,
 table salt 288, baking powder 192, chopped raw vegetables 130-160,
-leafy greens packed 60-90, shredded cheese 100, cooked rice 185.
-Every real food lands between 50 and 380 grams per cup.
+leafy greens loose 20-30 / packed 60-90, fresh herbs 15-40, shredded
+cheese 100, cooked rice 185. Every real food lands between 12 and 380
+grams per cup.
 
 SKIP (do NOT include in output):
 - items counted as discrete units (1 lemon, 2 eggs, 3 cloves garlic)

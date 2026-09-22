@@ -57,11 +57,12 @@ export const ML_PER_CUP = 236.6;
 
 /**
  * Plausibility band for ANY kitchen ingredient measured by volume, in g/mL.
- * Nothing you scoop with a measuring cup is lighter than shredded coconut /
- * puffed cereal (~0.25) or heavier than molasses / honey (~1.45). Anything
- * outside this band is a model error, not a real food.
+ * Nothing you scoop with a measuring cup is lighter than loose leafy greens
+ * / fresh herbs (~0.08, arugula is 20 g a cup) or heavier than molasses /
+ * honey (~1.45). Anything outside this band is a model error, not a real
+ * food. The floor catches "5 g/cup"-style nonsense, not real salad.
  */
-export const MIN_G_PER_ML = 0.2;
+export const MIN_G_PER_ML = 0.05;
 export const MAX_G_PER_ML = 1.6;
 
 /**
@@ -109,7 +110,7 @@ export const DENSITY: DensityEntry[] = [
   d('(peanut|almond|cashew|sunflower|nut) butter', 260, 'nut butter'),
   d('butter|margarine|ghee', 227, 'butter'),
   d('shortening|lard|coconut oil', 205, 'solid fat'),
-  d('(olive |vegetable |canola |avocado |sesame |peanut |sunflower |grapeseed |neutral |cooking |corn |toasted sesame )?oil', 218, 'oil'),
+  d('(olive |vegetable |canola |avocado |sesame |peanut |sunflower |grapeseed |neutral |cooking |corn |toasted sesame |extra[- ]virgin olive )?oil(?![- ]packed)', 218, 'oil'),
   // ---- water-like liquids ----
   d('water|stock|broth|coffee|tea|juice|cider|wine|beer|sake|mirin|vinegar|soy sauce|shoyu|tamari|fish sauce|worcestershire( sauce)?|lemon juice|lime juice', 240, 'thin liquid'),
   d('(whole |skim |2% |oat |almond |soy |coconut )?milk|half[- ]and[- ]half|buttermilk|(heavy |whipping |light |double |single )?cream|yogurt|yoghurt|sour cream|crème fraîche|creme fraiche|kefir', 245, 'dairy'),
@@ -117,7 +118,7 @@ export const DENSITY: DensityEntry[] = [
   d('mayonnaise|mayo|aioli', 220, 'mayonnaise'),
   d('ketchup|catsup|tomato paste|tomato purée|tomato puree|hoisin( sauce)?|oyster sauce|gochujang|miso|tahini', 260, 'thick sauce or paste'),
   d('vanilla( extract)?|(almond |lemon |peppermint |orange )?extract', 208, 'extract'),
-  d('(crushed |diced |chopped )?tomatoes|tomato sauce|passata|marinara', 245, 'tomato sauce'),
+  d('(canned|crushed|diced|whole peeled) tomatoes|tomato sauce|passata|marinara', 245, 'canned tomatoes'),
   // ---- salt, leaveners, dry seasonings ----
   d('kosher salt|flaky salt|flake salt|sea salt flakes|maldon', 145, 'kosher salt'),
   d('(sea |table |fine |pickling |iodized )?salt', 288, 'table salt'),

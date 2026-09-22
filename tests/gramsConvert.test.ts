@@ -88,6 +88,10 @@ describe('density table — the regression and its neighbours', () => {
     expect(densityFor('tofu')).toBeNull();
     expect(densityFor('cooked boneless chicken breast')).toBeNull();
     expect(densityFor('fresh ginger')).toBeNull();
+    expect(densityFor('cherry or grape tomatoes, halved')).toBeNull();
+    expect(densityFor('arugula leaves')).toBeNull();
+    expect(densityFor('oil-packed sun-dried tomatoes')).toBeNull();
+    expect(densityFor('extra-virgin olive oil')!.label).toBe('oil');
   });
 
   it('routes nut butter and buttermilk away from the butter row', () => {
@@ -188,5 +192,8 @@ describe('Claude path — density in, arithmetic here', () => {
     expect(plausibleDensity(-1)).toBe(false);
     expect(plausibleDensity(NaN)).toBe(false);
     expect(plausibleDensity(5)).toBe(false);
+    // loose arugula (20 g/cup) and packed herbs are real; 5 g/cup is not
+    expect(plausibleDensity(20 / 236.6)).toBe(true);
+    expect(plausibleDensity(5 / 236.6)).toBe(false);
   });
 });
