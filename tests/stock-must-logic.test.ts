@@ -29,7 +29,7 @@ import {
   cycleEstimateDays,
   isCycleStable,
 } from '@/lib/pantry';
-import { isModified, modCount } from '@/lib/recipe';
+import { isModified, modCount, normalizeRecipeShape } from '@/lib/recipe';
 import { durationToSeconds, tokenizeStep } from '@/lib/cookText';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -188,6 +188,39 @@ describe('CAP-09 · modification detection', () => {
     const r = { title: 'Tweaked', ingredients: [modIng('flour', [{ type: 'amount', before: 150, after: 200, date: new Date() }])], steps: [] } as any;
     expect(isModified(r)).toBe(true);
     expect(modCount(r)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// 22 Sep 2026: a step added by hand in the capture review step was saved as
+// `{id, ordinal, body}` — no modificationHistory — and the first RecipeCard to
+// call modCount threw, blanking the library on every device the row synced to.
+describe('malformed rows do not blank the library', () => {
+  const bareStep = { id: 'stp_x', ordinal: 2, body: 'Cook chicken.' } as any;
+
+  it('modCount tolerates a step or ingredient with no modificationHistory', () => {
+    const r = recipe('Salad', ['lettuce']);
+    r.steps.push(bareStep);
+    (r.ingredients[0] as any).modificationHistory = undefined;
+    expect(() => modCount(r)).not.toThrow();
+    expect(modCount(r)).toBe(0);
+    expect(isModified(r)).toBe(false);
+  });
+
+  it('normalizeRecipeShape fills the missing arrays and leaves good rows alone', () => {
+    const good = { ...recipe('Plain', ['egg']), tags: [] };
+    expect(normalizeRecipeShape(good)).toBe(good);
+
+    const bad = recipe('Salad', ['lettuce']);
+    bad.steps.push({ ...bareStep });
+    const fixed = normalizeRecipeShape(bad);
+    expect(fixed).not.toBe(bad);
+    const last = fixed.steps[fixed.steps.length - 1]!;
+    expect(last.body).toBe('Cook chicken.');
+    expect(last.title).toBe('');
+    expect(last.modificationHistory).toEqual([]);
+    expect(last.parsedTimers).toEqual([]);
+    expect(last.parsedAmounts).toEqual([]);
+    expect(modCount(fixed)).toBe(0);
   });
 });
 

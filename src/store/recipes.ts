@@ -7,6 +7,7 @@ import { seedRecipes } from '@/lib/seed';
 import { deriveTags, reconcileTags } from '@/lib/recipeTags';
 import { deriveCuisine, reconcileCuisine } from '@/lib/cuisine';
 import { findDuplicate, type DupeReason } from '@/lib/recipeDupes';
+import { normalizeRecipeShape } from '@/lib/recipe';
 
 /**
  * App-facing source of truth for recipes (spec §6). Zustand holds the working
@@ -113,7 +114,10 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
       }
     }
     const saved = await webPersist.load<Recipe[]>('recipes');
-    set({ recipes: saved ?? seedRecipes(), hydrated: true });
+    // IndexedDB round-trips objects verbatim, so a malformed row (a step with
+    // no modificationHistory) comes back malformed. Heal it here — the SQLite
+    // and cloud paths do the same inside reviveRecipeDates.
+    set({ recipes: (saved ?? seedRecipes()).map(normalizeRecipeShape), hydrated: true });
   },
 
   getById: (id) => get().recipes.find((r) => r.id === id),
@@ -139,7 +143,8 @@ export const useRecipeStore = create<RecipeState>((set, get) => ({
     // moment it lands, not at the next boot. This cannot fight a tag edit: the
     // editor records what the edit MEANT (applyTagEdit) before calling save,
     // and reconcileTags honours that. Cheap, local, deterministic.
-    const tagged = retag(recipe) ?? recipe;
+    const shaped = normalizeRecipeShape(recipe);
+    const tagged = retag(shaped) ?? shaped;
     set((s) => {
       const i = s.recipes.findIndex((r) => r.id === tagged.id);
       const recipes = [...s.recipes];

@@ -15,6 +15,7 @@ import type {
 } from '@/types';
 import { getDb } from './client';
 import { dateKey } from '@/lib/week';
+import { normalizeRecipeShape } from '@/lib/recipe';
 
 /** JSON round-trips Dates to ISO strings; restore the §4 Date fields. */
 function reviveModDates(mods: Modification[] | undefined): void {
@@ -23,7 +24,10 @@ function reviveModDates(mods: Modification[] | undefined): void {
   });
 }
 
-export function reviveRecipeDates(r: Recipe): Recipe {
+export function reviveRecipeDates(raw: Recipe): Recipe {
+  // Also the shape guard for every row that comes in from SQLite or the cloud
+  // (sync.ts uses this as its `revive`). See normalizeRecipeShape.
+  const r = normalizeRecipeShape(raw);
   r.createdAt = new Date(r.createdAt as unknown as string);
   r.modifiedAt = new Date(r.modifiedAt as unknown as string);
   r.ingredients.forEach((i) => reviveModDates(i.modificationHistory));

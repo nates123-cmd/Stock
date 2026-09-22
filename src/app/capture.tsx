@@ -796,7 +796,19 @@ function ReviewStep({
     onPatch({
       steps: renumber([
         ...steps,
-        { id: uid('step'), ordinal: steps.length + 1, body: '' } as RecipeStep,
+        // The FULL Step shape. A hand-added step used to be `{id, ordinal,
+        // body}` cast to Step — no modificationHistory — and the first
+        // RecipeCard to count modifications threw, blanking the whole
+        // library on every device the row synced to (22 Sep 2026).
+        {
+          id: uid('stp'),
+          ordinal: steps.length + 1,
+          title: '',
+          body: '',
+          parsedTimers: [],
+          parsedAmounts: [],
+          modificationHistory: [],
+        } satisfies RecipeStep,
       ]),
     });
 
