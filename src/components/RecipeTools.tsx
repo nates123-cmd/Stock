@@ -112,22 +112,26 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
     }
     setConverting(true);
     try {
-      const results = await convertToGrams(chosen);
+      const { results, rejected } = await convertToGrams(chosen);
+      const skipped = rejected.map((r) => `${r.name} (${r.reason})`).join(', ');
       if (results.length === 0) {
-        onHint('Couldn’t convert those — try again.');
+        onHint(skipped ? `Left unconverted: ${skipped}.` : 'Couldn’t convert those — try again.');
         return;
       }
       const byId = new Map(results.map((r) => [r.id, r.grams]));
       // Pure data update — unit conversion is a transformation, not an edit,
-      // so don't push a Modification (no strikethrough diff).
+      // so don't push a Modification (no strikethrough diff). originalText
+      // keeps the source amount, so a bad number is always recoverable.
       const updated = recipe.ingredients.map((ing) => {
         const grams = byId.get(ing.id);
         if (grams == null) return ing;
         return { ...ing, amount: grams, unit: 'g' };
       });
       await onSave({ ...recipe, ingredients: updated, modifiedAt: new Date() });
+      const n = results.length;
       onHint(
-        `Converted ${results.length} ${results.length === 1 ? 'ingredient' : 'ingredients'} to grams.`,
+        `Converted ${n} ${n === 1 ? 'ingredient' : 'ingredients'} to grams.` +
+          (skipped ? ` Left unconverted: ${skipped}.` : ''),
       );
       setConvertPreview(null);
     } catch (e) {

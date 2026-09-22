@@ -189,8 +189,10 @@ export function ConvertTool({ initialText }: { initialText: string }): ReactNode
       }
       const needClaude = ings.filter((i) => !baseGrams.has(i.id));
       if (needClaude.length > 0) {
-        const converted = await convertToGrams(needClaude);
-        for (const c of converted) baseGrams.set(c.id, c.grams);
+        // Local density table first, Claude only for what it doesn't know,
+        // implausible densities dropped (row shows no grams).
+        const { results } = await convertToGrams(needClaude);
+        for (const c of results) baseGrams.set(c.id, c.grams);
       }
 
       const flourGrams = ings.reduce((sum, ing) => {

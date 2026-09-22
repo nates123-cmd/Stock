@@ -24,6 +24,7 @@ export {
 } from './cookPlan';
 export type { ParsedCookPlanDraft } from './cookPlan';
 export { convertToGrams, findSubstitutes, localGramsFromUnit } from './units';
+export { localGramsFromVolume, densityFor, volumeMl, plausibleDensity } from './density';
 export { parseIngredientLine } from './freeText';
 export type { ParsedLine } from './freeText';
-export type { ConvertedIngredient, GramResult, Substitute } from './units';
+export type { ConvertedIngredient, GramResult, GramRejection, GramsOutcome, Substitute } from './units';
