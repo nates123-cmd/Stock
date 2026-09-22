@@ -18,6 +18,7 @@ import { convertToGrams } from '@/lib/parsing';
 import { formatAmount, toFraction } from '@/lib/format';
 import { scaleIngredientAmounts, scaledServes } from '@/lib/recipe';
 import { scaleSteps } from '@/lib/scaleText';
+import { convertSteps } from '@/lib/convertText';
 import type { Ingredient, Recipe } from '@/types';
 
 /**
@@ -127,7 +128,14 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
         if (grams == null) return ing;
         return { ...ing, amount: grams, unit: 'g' };
       });
-      await onSave({ ...recipe, ingredients: updated, modifiedAt: new Date() });
+      // Steps carry the amounts as prose ("whisk in 5 tablespoons sugar");
+      // rewrite them from the PRE-conversion rows so they agree with the list.
+      const conversions = recipe.ingredients.flatMap((ing) => {
+        const grams = byId.get(ing.id);
+        return grams == null ? [] : [{ ingredient: ing, grams }];
+      });
+      const steps = convertSteps(recipe.steps, conversions);
+      await onSave({ ...recipe, ingredients: updated, steps, modifiedAt: new Date() });
       const n = results.length;
       onHint(
         `Converted ${n} ${n === 1 ? 'ingredient' : 'ingredients'} to grams.` +
