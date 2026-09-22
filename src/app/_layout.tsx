@@ -1,6 +1,7 @@
 import '../../global.css';
 
 import { useEffect } from 'react';
+import { Pressable, View } from 'react-native';
 import { DefaultTheme, ThemeProvider, type Theme } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -10,7 +11,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 import { colors } from '@/design';
-import { CartFillBanner } from '@/components';
+import { CartFillBanner, Heading, Text } from '@/components';
 import { useRecipeStore } from '@/store/recipes';
 import { usePlanStore } from '@/store/plan';
 import { usePantryStore } from '@/store/pantry';
@@ -34,6 +35,33 @@ export const unstable_settings = {
 };
 
 const queryClient = new QueryClient();
+
+/**
+ * Root route boundary (Expo Router picks up this export). Catches a render
+ * error from ANY screen that has no boundary of its own, so one bad row shows
+ * a message and a retry instead of blanking the whole app — which is exactly
+ * what happened on 22 Sep 2026 when a malformed recipe step took out the
+ * Recipes tab on every device. Deliberately plain: no providers are mounted
+ * above this, so it uses the design tokens directly.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => void }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        padding: 24,
+        gap: 12,
+        backgroundColor: colors.bg,
+        justifyContent: 'center',
+      }}>
+      <Heading variant="screenTitle">Stock hit an error</Heading>
+      <Text color="textMuted">{String(error?.message ?? error)}</Text>
+      <Pressable onPress={retry} hitSlop={12}>
+        <Text color="accent">Tap to retry</Text>
+      </Pressable>
+    </View>
+  );
+}
 
 // Light-only navigation theme mapped to the parchment palette (spec §2/§12).
 const navTheme: Theme = {
