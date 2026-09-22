@@ -2,11 +2,52 @@ import type { Ingredient, Modification, Recipe } from '@/types';
 import { monthShort } from './format';
 import { uid } from './id';
 
-/** Total modifications across ingredients + steps (spec §6 "modified" pill). */
+/** Total modifications across ingredients + steps (spec §6 "modified" pill).
+ *  Tolerates a row missing its arrays: this runs inside every RecipeCard, so
+ *  one malformed recipe must not blank the library. */
 export function modCount(r: Recipe): number {
-  const ing = r.ingredients.reduce((n, i) => n + i.modificationHistory.length, 0);
-  const stp = r.steps.reduce((n, s) => n + s.modificationHistory.length, 0);
+  const ing = (r.ingredients ?? []).reduce((n, i) => n + (i.modificationHistory?.length ?? 0), 0);
+  const stp = (r.steps ?? []).reduce((n, s) => n + (s.modificationHistory?.length ?? 0), 0);
   return ing + stp;
+}
+
+/**
+ * Fill in the array fields a Recipe's ingredients and steps are required to
+ * carry. Rows can arrive without them — an old build cast a partial object to
+ * Step, and a cloud row could have been written by any client — and code all
+ * over the app indexes into these without checking. Returns the same object
+ * when nothing is missing, so callers can key on identity.
+ */
+export function normalizeRecipeShape(r: Recipe): Recipe {
+  let changed = false;
+  const ingredients = (r.ingredients ?? []).map((i) => {
+    if (Array.isArray(i.modificationHistory)) return i;
+    changed = true;
+    return { ...i, modificationHistory: [] };
+  });
+  const steps = (r.steps ?? []).map((s) => {
+    if (
+      Array.isArray(s.modificationHistory) &&
+      Array.isArray(s.parsedTimers) &&
+      Array.isArray(s.parsedAmounts) &&
+      typeof s.title === 'string'
+    ) {
+      return s;
+    }
+    changed = true;
+    return {
+      ...s,
+      title: typeof s.title === 'string' ? s.title : '',
+      parsedTimers: Array.isArray(s.parsedTimers) ? s.parsedTimers : [],
+      parsedAmounts: Array.isArray(s.parsedAmounts) ? s.parsedAmounts : [],
+      modificationHistory: Array.isArray(s.modificationHistory) ? s.modificationHistory : [],
+    };
+  });
+  if (!Array.isArray(r.ingredients) || !Array.isArray(r.steps) || !Array.isArray(r.tags)) {
+    changed = true;
+  }
+  if (!changed) return r;
+  return { ...r, ingredients, steps, tags: Array.isArray(r.tags) ? r.tags : [] };
 }
 
 export function isModified(r: Recipe): boolean {
