@@ -4,6 +4,7 @@
 import convert from 'convert-units';
 import type { Unit } from '@/types';
 import { CLAUDE_AVAILABLE, claudeText } from '@/lib/api/claudeBridge';
+import { ML_PER_CUP, localGramsFromVolume, plausibleDensity, volumeMl } from './density';
 
 /**
  * Stock unit code → convert-units identifier, for the units convert-units
@@ -46,26 +47,49 @@ export type ConvertedIngredient = {
   bakersPercent?: number;
 };
 
-export type GramResult = { id: string; grams: number };
+export type GramResult = {
+  id: string;
+  grams: number;
+  /** 'table' = deterministic local density, 'claude' = model density × local math */
+  source: 'table' | 'claude';
+};
 
-const CONVERT_SYSTEM = `You convert recipe ingredient amounts to grams using
-typical kitchen-density values (all-purpose flour ~ 125g/cup, granulated
-sugar ~ 200g/cup, brown sugar packed ~ 213g/cup, butter 1 stick = 113g,
-water 1 cup = 240g, milk 1 cup = 240g, olive oil ~ 218g/cup, honey ~ 340g/cup,
-kosher salt 1 tsp ~ 3g, table salt 1 tsp ~ 6g, baking powder 1 tsp ~ 4g).
-Use your best gram estimate for ingredients not in those examples.
+/** An ingredient we refused to convert, and why — surfaced in the hint line. */
+export type GramRejection = { id: string; name: string; reason: string };
+
+export type GramsOutcome = { results: GramResult[]; rejected: GramRejection[] };
+
+const CONVERT_SYSTEM = `You are a kitchen-density reference. For each ingredient
+return its DENSITY as grams per US cup (236.6 mL) — NOT the grams for the amount
+given. The caller multiplies. Reference points:
+all-purpose flour 125, granulated sugar 200, brown sugar packed 213,
+butter 227, water 240, milk 245, olive oil 218, honey 340, kosher salt (Morton) 240,
+table salt 288, baking powder 192, chopped raw vegetables 130-160,
+leafy greens loose 20-30 / packed 60-90, fresh herbs 15-40, shredded
+cheese 100, cooked rice 185. Every real food lands between 12 and 380
+grams per cup.
 
 SKIP (do NOT include in output):
-- items already in grams or kilograms or milligrams
-- items counted as discrete units (1 lemon, 2 eggs, 3 cloves garlic, 1 stalk celery)
+- items counted as discrete units (1 lemon, 2 eggs, 3 cloves garlic)
 - items with no amount or amounts like "to taste" / "a pinch"
-- items with no unit when the amount is a whole-item count
 
 STRICT JSON, no prose, no markdown.
-Schema: {"items":[{"id":string,"grams":number}]}
+Schema: {"items":[{"id":string,"gramsPerCup":number}]}
 where id matches the input. Output ONLY the JSON object.`;
 
-/** §11.4 — convert non-gram amounts to grams via Claude. */
+/**
+ * §11.4 — convert non-gram amounts to grams.
+ *
+ * Order of trust (see density.ts for why):
+ *   1. mass unit → grams, local
+ *   2. volume unit × known ingredient → grams, local density table
+ *   3. volume unit × unknown ingredient → Claude gives grams/cup, we multiply,
+ *      and reject any density outside the plausible band
+ *   4. anything Claude can't or won't price is left untouched, never guessed
+ *
+ * Never throws for a single bad item: the caller gets both lists and decides
+ * what to show. Throws only when Claude is unreachable or returns no JSON.
+ */
 export async function convertToGrams(
   ingredients: {
     id: string;
@@ -73,29 +97,52 @@ export async function convertToGrams(
     amount: number | null;
     unit: string | null;
   }[],
-): Promise<GramResult[]> {
-  if (!CLAUDE_AVAILABLE) {
-    throw new Error(
-      'Conversion to grams needs Claude — sign-in not required, just configure your key or the proxy.',
-    );
-  }
-  const candidates = ingredients.filter(
-    (i) =>
-      i.amount != null &&
-      i.amount > 0 &&
-      i.unit &&
-      !/^(g|kg|mg)$/i.test(i.unit.trim()),
-  );
-  if (candidates.length === 0) return [];
+): Promise<GramsOutcome> {
+  const results: GramResult[] = [];
+  const rejected: GramRejection[] = [];
+  const needClaude: typeof ingredients = [];
 
-  const payload = candidates.map((i) => ({
+  for (const i of ingredients) {
+    if (i.amount == null || !(i.amount > 0) || !i.unit) continue;
+    if (/^(g|kg|mg|gram|grams)$/i.test(i.unit.trim())) continue;
+    const mass = localGramsFromUnit(i.amount, i.unit);
+    if (mass != null) {
+      results.push({ id: i.id, grams: Math.round(mass), source: 'table' });
+      continue;
+    }
+    const local = localGramsFromVolume(i.canonicalName, i.amount, i.unit);
+    if (local) {
+      results.push({ id: i.id, grams: local.grams, source: 'table' });
+      continue;
+    }
+    if (volumeMl(i.unit) == null) {
+      rejected.push({
+        id: i.id,
+        name: i.canonicalName,
+        reason: `"${i.unit}" isn't a weight or volume unit`,
+      });
+      continue;
+    }
+    needClaude.push(i);
+  }
+
+  if (needClaude.length === 0) return { results, rejected };
+
+  if (!CLAUDE_AVAILABLE) {
+    for (const i of needClaude) {
+      rejected.push({ id: i.id, name: i.canonicalName, reason: 'needs Claude (proxy not configured)' });
+    }
+    return { results, rejected };
+  }
+
+  const payload = needClaude.map((i) => ({
     id: i.id,
     name: i.canonicalName,
     amount: i.amount,
     unit: i.unit,
   }));
   const out = await claudeText(
-    'bench-convert-grams',
+    'bench-convert-density',
     CONVERT_SYSTEM,
     JSON.stringify(payload),
   );
@@ -105,15 +152,35 @@ export async function convertToGrams(
   const e = cleaned.lastIndexOf('}');
   if (s < 0 || e < 0) throw new Error('Bench parse: no JSON in response');
   const parsed = JSON.parse(cleaned.slice(s, e + 1)) as {
-    items?: { id?: unknown; grams?: unknown }[];
+    items?: { id?: unknown; gramsPerCup?: unknown }[];
   };
   if (!Array.isArray(parsed.items)) throw new Error('Bench parse: no items array');
-  return parsed.items
-    .filter(
-      (x): x is GramResult =>
-        typeof x.id === 'string' && typeof x.grams === 'number' && x.grams > 0,
-    )
-    .map((x) => ({ id: x.id, grams: Math.round(x.grams) }));
+
+  const byId = new Map<string, number>();
+  for (const x of parsed.items) {
+    if (typeof x.id === 'string' && typeof x.gramsPerCup === 'number') byId.set(x.id, x.gramsPerCup);
+  }
+
+  for (const i of needClaude) {
+    const gPerCup = byId.get(i.id);
+    if (gPerCup == null) {
+      rejected.push({ id: i.id, name: i.canonicalName, reason: 'no density returned' });
+      continue;
+    }
+    const gPerMl = gPerCup / ML_PER_CUP;
+    if (!plausibleDensity(gPerMl)) {
+      rejected.push({
+        id: i.id,
+        name: i.canonicalName,
+        reason: `implausible density (${Math.round(gPerCup)} g/cup)`,
+      });
+      continue;
+    }
+    const ml = volumeMl(i.unit)!;
+    results.push({ id: i.id, grams: Math.round(i.amount! * ml * gPerMl), source: 'claude' });
+  }
+
+  return { results, rejected };
 }
 
 export type Substitute = {
