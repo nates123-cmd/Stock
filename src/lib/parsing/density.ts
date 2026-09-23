@@ -130,7 +130,10 @@ export const DENSITY: DensityEntry[] = [
   d('(canned|crushed|diced|whole peeled) tomatoes|tomato sauce|passata|marinara', 245, 'canned tomatoes'),
   d('pumpkin purée|pumpkin puree|canned pumpkin|(sweet potato|squash|butternut) purée|(sweet potato|squash|butternut) puree|applesauce|apple sauce', 230, 'purée'),
   // ---- salt, leaveners (KA) ----
-  d('kosher salt|flaky salt|flake salt|sea salt flakes|maldon', 145, 'kosher salt'),
+  // Nate's box is MORTON kosher (USDA: 4.8 g/tsp ≈ 230-240 g/cup). Diamond
+  // Crystal is 128 g/cup; if the box ever changes, change this one number.
+  d('kosher salt', 240, 'kosher salt (Morton)'),
+  d('flaky salt|flake salt|sea salt flakes|maldon', 145, 'flaky salt'),
   d('(sea |table |fine |pickling |iodized |garlic |celery |seasoned |flaky )?salt', 288, 'table salt'),
   d('baking soda|bicarbonate of soda|bicarb', 220, 'baking soda'),
   d('baking powder', 192, 'baking powder'),

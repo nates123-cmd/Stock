@@ -76,7 +76,10 @@ describe('density table — the regression and its neighbours', () => {
     expect(densityFor('all-purpose flour')!.label).toMatch(/all-purpose/);
     expect(densityFor('bread flour')!.label).toMatch(/bread/);
     expect(densityFor('almond flour')!.label).toMatch(/almond/);
-    expect(densityFor('kosher salt')!.label).toMatch(/kosher/);
+    expect(densityFor('kosher salt')!.label).toMatch(/Morton/);
+    // Morton kosher: 1 tsp ≈ 5 g, 1 tbsp ≈ 15 g
+    expect(localGramsFromVolume('kosher salt', 1, 'tsp')!.grams).toBe(5);
+    expect(localGramsFromVolume('kosher salt', 1, 'tbsp')!.grams).toBe(15);
     expect(densityFor('table salt')!.label).toMatch(/table/);
   });
 
