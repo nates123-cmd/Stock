@@ -4,7 +4,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
 import { Text, Numeric, Glyph, Button } from '@/components';
-import { colors, layout } from '@/design';
+import { colors, layout, palette, InkProvider } from '@/design';
+
+/** Cook surfaces are Matte Navy (DESIGN.md). */
+const cc = palette('cook');
 import { useCookPlanStore } from '@/store/cookPlans';
 import {
   usePlanAlarms,
@@ -19,6 +22,14 @@ import { liveIngredients, stepAmountLine } from '@/lib/stepAmounts';
 import type { PlanStep, PlanTimer } from '@/types';
 
 export default function CookPlanRun() {
+  return (
+    <InkProvider ink="cook">
+      <CookPlanRunInner />
+    </InkProvider>
+  );
+}
+
+function CookPlanRunInner() {
   useKeepAwake();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -244,7 +255,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginHorizontal: layout.screenPadding,
-    backgroundColor: colors.bg3,
+    backgroundColor: cc.bg3,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 9,
@@ -257,7 +268,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
+    borderBottomColor: cc.line,
   },
   stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12 },
   check: {
@@ -265,7 +276,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: colors.line,
+    borderColor: cc.line,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 1,
@@ -283,7 +294,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   tempPill: {
-    backgroundColor: colors.bg3,
+    backgroundColor: cc.bg3,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -296,14 +307,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPadding,
     paddingVertical: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
-    backgroundColor: colors.bg2,
+    borderTopColor: cc.line,
+    backgroundColor: cc.bg2,
   },
   alarmPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: colors.bg3,
+    backgroundColor: cc.bg3,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,

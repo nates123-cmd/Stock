@@ -1,5 +1,5 @@
 import { View, type ViewProps, StyleSheet } from 'react-native';
-import { colors, layout, type ColorToken } from '@/design';
+import { layout, useColors, type ColorToken } from '@/design';
 
 export type CardProps = ViewProps & {
   /** Surface tone. Default bg2 (standard card). bg3 for recessed/tag fills. */
@@ -12,12 +12,13 @@ export type CardProps = ViewProps & {
  * vertical stacks of these.
  */
 export function Card({ tone = 'bg2', bordered = false, style, ...rest }: CardProps) {
+  const colors = useColors();
   return (
     <View
       style={[
         styles.card,
         { backgroundColor: colors[tone] },
-        bordered && styles.bordered,
+        bordered && [styles.bordered, { borderColor: colors.line }],
         style,
       ]}
       {...rest}
@@ -30,10 +31,7 @@ const styles = StyleSheet.create({
     borderRadius: layout.cardRadius,
     padding: 16,
   },
-  bordered: {
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
+  bordered: { borderWidth: 1 },
 });
 
 export default Card;

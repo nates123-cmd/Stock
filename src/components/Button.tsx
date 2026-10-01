@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Text } from './Text';
 import { Glyph } from './Glyph';
-import { colors, type GlyphName } from '@/design';
+import { colors, useColors, type GlyphName } from '@/design';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
 
@@ -16,7 +16,7 @@ export type ButtonProps = {
   style?: StyleProp<ViewStyle>;
 };
 
-/** Primary action color is tomato (spec §2). */
+/** Primary action colour is Flame (DESIGN.md) — and nothing else is. */
 export function Button({
   label,
   onPress,
@@ -26,6 +26,7 @@ export function Button({
   flex,
   style,
 }: ButtonProps) {
+  const c = useColors();
   return (
     <Pressable
       accessibilityRole="button"
@@ -34,7 +35,7 @@ export function Button({
       style={({ pressed }) => [
         styles.base,
         variant === 'primary' && styles.primary,
-        variant === 'secondary' && styles.secondary,
+        variant === 'secondary' && [styles.secondary, { backgroundColor: c.bg2, borderColor: c.line }],
         variant === 'ghost' && styles.ghost,
         flex && styles.flex,
         pressed && !disabled && styles.pressed,
@@ -75,8 +76,8 @@ export function Fab({ onPress }: { onPress?: () => void }) {
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: 12,
-    paddingVertical: 13,
+    borderRadius: 10,
+    paddingVertical: 14,
     paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
@@ -84,11 +85,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   label: { textAlign: 'center' },
   primary: { backgroundColor: colors.accent },
-  secondary: {
-    backgroundColor: colors.bg2,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
+  secondary: { borderWidth: 1.5 },
   ghost: { backgroundColor: 'transparent' },
   flex: { flex: 1 },
   pressed: { opacity: 0.7 },

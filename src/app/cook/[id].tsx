@@ -19,7 +19,10 @@ import {
   IngredientName,
   RecipeTools,
 } from '@/components';
-import { colors, layout } from '@/design';
+import { colors, layout, palette, InkProvider } from '@/design';
+
+/** Cook mode draws on Matte Navy (DESIGN.md); sheets stay on `colors`. */
+const cc = palette('cook');
 import { useRecipeStore } from '@/store/recipes';
 import { useCookStore } from '@/store/cooks';
 import { usePlanStore } from '@/store/plan';
@@ -52,7 +55,20 @@ function contextLine(cookNumber: number): string {
 const stepHasTimer = (s: Step) =>
   s.parsedTimers.length > 0 || tokenizeStep(s.body).some((t) => t.type === 'timer');
 
+/**
+ * Cook mode is a navy surface. Wrapping here (rather than threading colours
+ * through every body component) lets Text / Glyph / Card / Button resolve
+ * their ordinary tokens to the cook palette; Overlay resets to light.
+ */
 export default function CookScreen() {
+  return (
+    <InkProvider ink="cook">
+      <CookScreenInner />
+    </InkProvider>
+  );
+}
+
+function CookScreenInner() {
   useKeepAwake();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -1057,7 +1073,7 @@ const styles = StyleSheet.create({
   },
   toggle: {
     flexDirection: 'row',
-    backgroundColor: colors.bg3,
+    backgroundColor: cc.bg3,
     borderRadius: 999,
     padding: 3,
   },
@@ -1085,14 +1101,14 @@ const styles = StyleSheet.create({
   notesHint: { fontStyle: 'italic', lineHeight: 18 },
   notesInput: {
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: cc.line,
     borderRadius: 10,
-    backgroundColor: colors.bg2,
+    backgroundColor: cc.bg2,
     paddingHorizontal: 12,
     paddingVertical: 10,
     minHeight: 180,
     fontSize: 15,
-    color: colors.text,
+    color: cc.text,
     textAlignVertical: 'top',
   },
   context: {
@@ -1106,13 +1122,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     alignSelf: 'center',
-    backgroundColor: colors.bg2,
+    backgroundColor: cc.bg2,
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 6,
     marginTop: 6,
   },
-  focusContent: { padding: layout.screenPadding, paddingTop: 22, gap: 18 },
+  focusContent: { padding: layout.screenPadding, paddingTop: 26, gap: 18 },
   focusBody: { paddingBottom: 20 },
   actionBar: {
     flexDirection: 'row',
@@ -1123,24 +1139,25 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   backCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: colors.line,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1.5,
+    borderColor: cc.line,
     alignItems: 'center',
     justifyContent: 'center',
   },
   dim: { opacity: 0.35 },
   glanceContent: { padding: layout.screenPadding, gap: 14, paddingBottom: 30 },
-  glanceHero: { width: '100%', height: 180, borderRadius: 12, backgroundColor: colors.bg2 },
+  glanceHero: { width: '100%', height: 180, borderRadius: 6, backgroundColor: cc.bg2 },
   glanceTitle: { fontSize: 22 },
   toolHint: { fontStyle: 'italic', lineHeight: 18 },
   lastNoteCard: { gap: 6 },
   lastNoteText: { lineHeight: 20, fontStyle: 'italic' },
   ingCard: { gap: 8 },
   ingGrid: { flexDirection: 'row', gap: 12, paddingVertical: 2 },
-  ingGridAmt: { minWidth: 58 },
+  // Same right-aligned gram column as the recipe page.
+  ingGridAmt: { width: 58, textAlign: 'right' },
   addIngRow: { paddingTop: 6, paddingBottom: 2 },
   editSheet: { gap: 12 },
   editHint: { fontStyle: 'italic', lineHeight: 18 },
@@ -1170,13 +1187,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
+    borderBottomWidth: 1,
+    borderBottomColor: cc.line,
   },
   glanceNum: { minWidth: 22, textAlign: 'center' },
   pills: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   pillNeutral: {
-    backgroundColor: colors.bg3,
+    backgroundColor: cc.bg3,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1188,7 +1205,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   glanceExpand: {
-    backgroundColor: colors.bg2,
+    backgroundColor: cc.bg2,
     marginHorizontal: -layout.screenPadding,
     paddingHorizontal: layout.screenPadding,
     paddingVertical: 14,
@@ -1231,13 +1248,13 @@ const styles = StyleSheet.create({
   postField: { width: '100%', gap: 8, paddingTop: 10 },
   noteInput: {
     borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 12,
-    backgroundColor: colors.bg2,
+    borderColor: cc.line,
+    borderRadius: 10,
+    backgroundColor: cc.bg2,
     padding: 14,
     minHeight: 90,
     fontSize: 15,
-    color: colors.text,
+    color: cc.text,
     textAlignVertical: 'top',
   },
   actionBarPad: {
@@ -1259,7 +1276,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: colors.line,
+    borderColor: cc.line,
     alignItems: 'center',
     justifyContent: 'center',
   },

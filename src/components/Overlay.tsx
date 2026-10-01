@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
-import { colors, layout } from '@/design';
+import { colors, layout, InkProvider } from '@/design';
 import { Glyph } from './Glyph';
 
 /**
@@ -45,7 +45,9 @@ export function Overlay({
   // the cook screen's bench tools) absoluteFill anchors to the scroll CONTENT,
   // so on a tall recipe the sheet overlapped the page and its panel scrolled
   // out of reach. `transparent` keeps our own dim backdrop.
+  // A sheet is always a warm-white surface, even over cook mode.
   return (
+    <InkProvider ink="light">
     <Modal
       visible
       transparent
@@ -81,11 +83,12 @@ export function Overlay({
         </View>
       </View>
     </Modal>
+    </InkProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(61,43,31,0.45)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(18,33,49,0.45)' },
   panelWrap: { flex: 1, justifyContent: 'flex-end' },
   center: { justifyContent: 'center', paddingHorizontal: layout.screenPadding },
   panel: {

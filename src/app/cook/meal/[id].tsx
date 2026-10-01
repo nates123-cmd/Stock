@@ -14,7 +14,10 @@ import {
   AwakeIndicator,
   BenchSheet,
 } from '@/components';
-import { colors, layout } from '@/design';
+import { colors, layout, palette, InkProvider } from '@/design';
+
+/** Cook surfaces are Matte Navy (DESIGN.md). */
+const cc = palette('cook');
 import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { dayTag } from '@/lib/week';
@@ -29,6 +32,14 @@ import type { Recipe } from '@/types';
  * Cooking a single dish still uses cook/[id]; Bench folds in as a sheet.
  */
 export default function MealCookScreen() {
+  return (
+    <InkProvider ink="cook">
+      <MealCookScreenInner />
+    </InkProvider>
+  );
+}
+
+function MealCookScreenInner() {
   useKeepAwake();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -267,7 +278,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
+    borderTopColor: cc.line,
   },
   stateCard: { alignItems: 'center', paddingVertical: 18 },
   fallbackNote: { lineHeight: 18, fontStyle: 'italic' },
@@ -280,9 +291,9 @@ const styles = StyleSheet.create({
     marginHorizontal: -12,
     borderRadius: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
+    borderBottomColor: cc.line,
   },
-  stepRowCurrent: { backgroundColor: colors.bg2 },
+  stepRowCurrent: { backgroundColor: cc.bg2 },
   stepOffsetCol: { minWidth: 54 },
   stepDish: { paddingTop: 2 },
   strike: { textDecorationLine: 'line-through' },

@@ -29,18 +29,22 @@ export default function RecipesLibrary() {
         <View style={styles.header}>
           <View>
             <Heading variant="screenTitle">Recipes</Heading>
-            <Text color="textMuted">{recipeCount} saved</Text>
-            {/* Only ever shown when there IS something to review, so it
-                disappears for good once the library is clean. */}
-            {dupeCount > 0 && (
-              <Pressable
-                onPress={() => router.push('/recipe-duplicates')}
-                accessibilityRole="button">
-                <Text color="accent">
-                  {dupeCount} possible duplicate{dupeCount === 1 ? '' : 's'} — review
-                </Text>
-              </Pressable>
-            )}
+            <View style={styles.subRow}>
+              <Text color="textMuted">{recipeCount} saved</Text>
+              {/* Only ever shown when there IS something to review, so it
+                  disappears for good once the library is clean. */}
+              {dupeCount > 0 && (
+                <Pressable
+                  onPress={() => router.push('/recipe-duplicates')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Review ${dupeCount} possible duplicates`}>
+                  <Text variant="bodyStrong" color="accent">
+                    {' · '}
+                    {dupeCount} possible duplicate{dupeCount === 1 ? '' : 's'}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
           </View>
         </View>
 
@@ -130,8 +134,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
     paddingTop: 8,
-    paddingBottom: 14,
+    paddingBottom: 16,
   },
+  subRow: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', marginTop: 6 },
   addSheet: { gap: 4, paddingBottom: 8 },
   addChoice: {
     paddingVertical: 14,

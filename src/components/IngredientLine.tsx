@@ -26,7 +26,8 @@ export function IngredientAmount({
     );
   }
   return (
-    <Numeric color="accent" style={style}>
+    // Nectar, not Flame: a modified amount is information, not an action.
+    <Numeric color="warn" style={style}>
       <Text color="textFaint" style={styles.strike}>
         {formatAmount(prior.amount, prior.unit) || '—'}
       </Text>

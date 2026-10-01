@@ -5,14 +5,14 @@ import { colors } from '@/design';
 export type Segment = {
   key: string;
   label: string;
-  /** optional count badge shown after the label */
+  /** optional count shown after the label */
   count?: number;
 };
 
 /**
- * Reusable 2-3 way segmented control. Filled-pill active state — the promoted
- * version of the Bench Convert/Sub TabButton pair (spec redesign §nav). Token-
- * clean: active pill = accent, inactive = bg2/line.
+ * Reusable 2-3 way segmented control — Enamel (DESIGN.md): text tabs on a
+ * hairline with a Flame underline under the active one, NYT Cooking style.
+ * No filled pills; the count is a quieter weight of the same line.
  */
 export function SegmentedControl({
   segments,
@@ -34,9 +34,13 @@ export function SegmentedControl({
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
             style={[styles.seg, active && styles.segActive]}>
-            <Text variant="bodyStrong" color={active ? 'bg' : 'textMuted'}>
+            <Text variant="bodyStrong" color={active ? 'text' : 'textFaint'}>
               {seg.label}
-              {seg.count != null ? ` ${seg.count}` : ''}
+              {seg.count != null ? (
+                <Text color={active ? 'textMuted' : 'textFaint'} style={styles.count}>
+                  {` ${seg.count}`}
+                </Text>
+              ) : null}
             </Text>
           </Pressable>
         );
@@ -46,21 +50,21 @@ export function SegmentedControl({
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 8 },
+  row: {
+    flexDirection: 'row',
+    gap: 22,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
   seg: {
-    flex: 1,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: colors.bg2,
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
+    paddingTop: 6,
+    paddingBottom: 10,
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'transparent',
+    marginBottom: -1,
   },
-  segActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
+  segActive: { borderBottomColor: colors.accent },
+  count: { fontWeight: '500', fontVariant: ['tabular-nums'] },
 });
 
 export default SegmentedControl;

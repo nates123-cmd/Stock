@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AppState,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -33,6 +32,7 @@ import {
   Overlay,
   BottomActionBar,
   SegmentedControl,
+  EnamelTile,
 } from '@/components';
 import { colors, layout } from '@/design';
 import ShoppingList from '@/app/shopping';
@@ -691,18 +691,15 @@ function DishRow({
     : '';
   return (
     <GHPressable onPress={onPress} style={[styles.dish, stateStyle]}>
-      {/* Thumbnail when the recipe has one; a quiet placeholder when it doesn't,
+      {/* The photo, or the recipe's cuisine enamel when it has none (DESIGN.md),
           so rows don't jump around between recipes with and without photos. */}
       {recipe ? (
-        recipe.imageUrl ? (
-          <Image
-            source={{ uri: recipe.imageUrl }}
-            style={styles.dishThumb}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={[styles.dishThumb, styles.dishThumbEmpty]} />
-        )
+        <EnamelTile
+          seed={recipe.id}
+          cuisine={recipe.cuisine}
+          imageUrl={recipe.imageUrl}
+          style={styles.dishThumb}
+        />
       ) : null}
       <View style={styles.dishBody}>
         <Text
@@ -1085,7 +1082,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: colors.bg2,
   },
-  dishThumbEmpty: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
   dishBody: { flex: 1, gap: 1 },
   dishTitle: { flex: 1, minWidth: 0 },
   strike: { textDecorationLine: 'line-through' },

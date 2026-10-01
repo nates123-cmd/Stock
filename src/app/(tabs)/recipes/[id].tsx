@@ -13,7 +13,7 @@ import { Overlay } from '@/components';
 import { FolderPicker } from '@/components/FolderPicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow, RecipeTools } from '@/components';
+import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow, RecipeTools, EnamelTile } from '@/components';
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -191,17 +191,53 @@ export default function RecipeDetail() {
       />
 
       <ScrollView contentContainerStyle={styles.content}>
-        {recipe.imageUrl ? (
-          <Image
-            source={{ uri: recipe.imageUrl }}
-            style={styles.hero}
-            resizeMode="cover"
-          />
-        ) : null}
+        {/* Hero (DESIGN.md): the photo, or the recipe's cuisine enamel when
+            there is none — the title sits on it either way, ChefSteps-style. */}
+        <EnamelTile
+          seed={recipe.id}
+          cuisine={recipe.cuisine}
+          imageUrl={recipe.imageUrl}
+          style={styles.hero}>
+          <View style={styles.heroText}>
+            {recipe.cuisine ? (
+              <Text variant="sectionLabel" color="onAccent" style={styles.heroKicker}>
+                {cuisineLabel(recipe.cuisine)}
+              </Text>
+            ) : null}
+            <Heading variant="screenTitle" color="onAccent" style={styles.title}>
+              {recipe.title}
+            </Heading>
+          </View>
+        </EnamelTile>
+
+        {/* Facts strip — the numbers you scan before deciding to cook. */}
+        <View style={styles.facts}>
+          <View style={styles.fact}>
+            <Numeric style={styles.factVal}>{time ? `~${time}` : '—'}</Numeric>
+            <SectionLabel color="textFaint">Time</SectionLabel>
+          </View>
+          <View style={[styles.fact, styles.factMid]}>
+            <Numeric style={styles.factVal}>{recipe.yield.serves}</Numeric>
+            <SectionLabel color="textFaint">Serves</SectionLabel>
+          </View>
+          <View style={styles.fact}>
+            <Numeric style={styles.factVal}>{recipe.cookCount}×</Numeric>
+            <SectionLabel color="textFaint">Cooked</SectionLabel>
+          </View>
+        </View>
+
         <View style={styles.titleRow}>
-          <Heading variant="screenTitle" style={styles.title}>
-            {recipe.title}
-          </Heading>
+          <Pressable
+            style={styles.folderRow}
+            onPress={() => setPickFolder(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Change folder">
+            <Glyph name="next" size={13} color="textFaint" />
+            <Text color={recipe.folder ? 'accent' : 'textFaint'}>
+              {recipe.folder ?? 'Unfiled'}
+            </Text>
+          </Pressable>
+          <View style={styles.titleSpacer} />
           <Pressable
             onPress={() => void toggleToTry(recipe.id)}
             hitSlop={10}
@@ -233,18 +269,8 @@ export default function RecipeDetail() {
           </Pressable>
         </View>
 
-        {/* Folder is shared across To Try / Favorites / All, so it belongs on
-            the recipe itself rather than under either flag. */}
-        <Pressable
-          style={styles.folderRow}
-          onPress={() => setPickFolder(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Change folder">
-          <Glyph name="next" size={13} color="textFaint" />
-          <Text color={recipe.folder ? 'accent' : 'textFaint'}>
-            {recipe.folder ?? 'Unfiled'}
-          </Text>
-        </Pressable>
+        {/* Folder is shared across To Try / Favorites / All, so it sits on
+            the recipe itself (row above, beside the flags). */}
 
         {pickFolder && (
           <FolderPicker
@@ -268,13 +294,10 @@ export default function RecipeDetail() {
             <SourceBadge source={recipe.source} />
           </Pressable>
           {mods > 0 ? (
-            <Numeric color="accent">
+            <Numeric color="warn">
               {mods} {mods === 1 ? 'mod' : 'mods'}
             </Numeric>
           ) : null}
-          <Numeric color="textMuted">serves {recipe.yield.serves}</Numeric>
-          {time ? <Numeric color="textMuted">~{time}</Numeric> : null}
-          <Numeric color="textMuted">cooked {recipe.cookCount}×</Numeric>
         </View>
 
         {editingSource ? (
@@ -395,9 +418,11 @@ export default function RecipeDetail() {
           />
         ) : null}
 
+        {/* Secondary on purpose: Cook (below) is the one Flame action here. */}
         <Button
           label="Add to plan"
           glyph="plan"
+          variant="secondary"
           flex
           onPress={() => setPlanning(true)}
         />
@@ -469,13 +494,13 @@ export default function RecipeDetail() {
                     />
                     <View style={styles.ingText}>
                       <View style={styles.ingNameRow}>
-                        <IngredientName ing={ing} style={clean ? styles.cleanBody : undefined} />
+                        <IngredientName ing={ing} style={[styles.ingName, clean && styles.cleanBody]} />
                         {ing.inlineNote ? (
-                          <Text color="textFaint">{`  · ${ing.inlineNote}`}</Text>
+                          <Text color="textFaint" style={styles.ingNote}>{`  ${ing.inlineNote}`}</Text>
                         ) : null}
                       </View>
                       {annotation ? (
-                        <Text color="accent" style={styles.annotation}>
+                        <Text color="warn" style={styles.annotation}>
                           {annotation}
                         </Text>
                       ) : null}
@@ -498,7 +523,7 @@ export default function RecipeDetail() {
                       <View style={styles.ingText}>
                         <IngredientName
                           ing={ing}
-                          style={clean ? styles.cleanBody : undefined}
+                          style={[styles.ingName, clean && styles.cleanBody]}
                         />
                       </View>
                     </View>
@@ -513,9 +538,9 @@ export default function RecipeDetail() {
             <View style={styles.method}>
               {steps.map((s) => (
                 <View key={s.id} style={styles.stepRow}>
-                  <Text variant="recipeTitle" color="accent" style={styles.stepNum}>
-                    {s.ordinal}
-                  </Text>
+                  <View style={styles.stepNum}>
+                    <Numeric style={styles.stepNumText}>{s.ordinal}</Numeric>
+                  </View>
                   <Text style={[styles.stepBody, clean && styles.cleanBody]}>
                     {s.body}
                   </Text>
@@ -883,10 +908,12 @@ const tagStyles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 6,
   },
+  // Machine-assigned: dashed ink outline (was Flame — tags are not actions).
   chipAuto: {
-    backgroundColor: colors.bg2,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.accentSoft,
+    borderColor: colors.textFaint,
+    borderStyle: 'dashed',
   },
   addChip: {
     flexDirection: 'row',
@@ -1048,7 +1075,7 @@ function NotesEditor({
 function SectionHeader({ label, onEdit }: { label: string; onEdit: () => void }) {
   return (
     <View style={styles.sectionHeader}>
-      <SectionLabel style={styles.sectionLabel}>{label}</SectionLabel>
+      <Heading variant="recipeTitle" style={styles.sectionLabel}>{label}</Heading>
       <Pressable onPress={onEdit} hitSlop={8}>
         <Text variant="bodyStrong" color="accent">
           Edit
@@ -1137,10 +1164,22 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
   },
-  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  titleFlag: { paddingTop: 5 },
-  folderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 8 },
-  title: { fontSize: 26, lineHeight: 32, paddingTop: 6 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: 12 },
+  titleSpacer: { flex: 1 },
+  titleFlag: {},
+  folderRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  title: { fontSize: 34, lineHeight: 36 },
+  heroText: { position: 'absolute', left: 20, right: 20, bottom: 20, gap: 8 },
+  heroKicker: { opacity: 0.85 },
+  facts: {
+    flexDirection: 'row',
+    marginHorizontal: -layout.screenPadding,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  fact: { flex: 1, paddingVertical: 12, paddingLeft: layout.screenPadding, gap: 2 },
+  factMid: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: colors.line },
+  factVal: { fontSize: 22, lineHeight: 28, fontWeight: '700' },
   linkedGroup: { marginTop: 16, gap: 6 },
   metaRow: {
     flexDirection: 'row',
@@ -1152,7 +1191,7 @@ const styles = StyleSheet.create({
   },
   toolbar: { flexDirection: 'row', gap: 10 },
   hint: { paddingTop: 8, fontStyle: 'italic' },
-  sectionLabel: { paddingTop: 24, paddingBottom: 12 },
+  sectionLabel: { paddingTop: 28, paddingBottom: 8, fontSize: 24, lineHeight: 30, fontWeight: '800' },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1161,17 +1200,36 @@ const styles = StyleSheet.create({
   twoCol: { flexDirection: 'row', gap: 36, alignItems: 'flex-start' },
   colLeft: { flex: 4, minWidth: 0 },
   colRight: { flex: 6, minWidth: 0 },
-  ingredients: { gap: 10 },
-  ingRow: { flexDirection: 'row', gap: 12 },
+  // ChefSteps gram column: amounts right-aligned in a fixed column, names in
+  // italic, every row on a hairline.
+  ingredients: { gap: 0 },
+  ingRow: {
+    flexDirection: 'row',
+    gap: 14,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
   ingNameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline' },
-  amount: { minWidth: 64, paddingTop: 1 },
-  cleanAmount: { fontSize: 14 },
+  ingName: { fontStyle: 'italic', fontWeight: '500', fontSize: 16 },
+  ingNote: { fontStyle: 'italic', fontSize: 14 },
+  amount: { width: 76, textAlign: 'right', fontSize: 16, lineHeight: 21 },
+  cleanAmount: { fontSize: 18 },
   ingText: { flex: 1, gap: 2 },
   annotation: { fontStyle: 'italic', fontSize: 13 },
-  method: { gap: 16 },
+  method: { gap: 18, paddingTop: 6 },
   stepRow: { flexDirection: 'row', gap: 14 },
-  stepNum: { minWidth: 20, textAlign: 'center' },
-  stepBody: { flex: 1, lineHeight: 21 },
+  stepNum: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    borderColor: colors.text,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumText: { fontSize: 14 },
+  stepBody: { flex: 1, fontSize: 16, lineHeight: 24 },
   cleanBody: { fontSize: 17, lineHeight: 26 },
   notes: { marginTop: 24, gap: 8 },
   cuisineBlock: { marginTop: 18, gap: 8 },
@@ -1291,12 +1349,12 @@ const styles = StyleSheet.create({
     gap: 18,
     paddingTop: 2,
   },
+  // Full-bleed: pulls out of the content padding on three sides.
   hero: {
-    width: '100%',
-    height: 200,
-    borderRadius: layout.cardRadius,
-    marginBottom: 4,
-    backgroundColor: colors.bg2,
+    height: 280,
+    marginHorizontal: -layout.screenPadding,
+    marginTop: -layout.screenPadding,
+    borderRadius: 0,
   },
   nutri: { marginTop: 16, gap: 10 },
   nutriHead: {

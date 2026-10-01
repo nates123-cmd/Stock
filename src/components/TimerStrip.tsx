@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text, Numeric, SectionLabel } from './Text';
 import { Glyph } from './Glyph';
-import { colors } from '@/design';
+import { useColors } from '@/design';
 import { fmtClock, type CookTimer } from '@/lib/useCookTimers';
 
 /** Active timers strip (spec §7). Always visible while ≥1 timer runs. */
@@ -12,9 +12,10 @@ export function TimerStrip({
   timers: CookTimer[];
   onClear: (id: string) => void;
 }) {
+  const c = useColors();
   if (timers.length === 0) return null;
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, { borderTopColor: c.line, backgroundColor: c.bg2 }]}>
       <SectionLabel color="textMuted">Active · {timers.length}</SectionLabel>
       {timers.map((t) => (
         <View key={t.id} style={styles.row}>
@@ -44,8 +45,6 @@ export function TimerStrip({
 const styles = StyleSheet.create({
   wrap: {
     borderTopWidth: 1,
-    borderTopColor: colors.line,
-    backgroundColor: colors.bg2,
     paddingHorizontal: 16,
     paddingVertical: 12,
     gap: 10,

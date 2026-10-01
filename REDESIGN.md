@@ -109,7 +109,7 @@ Touched: `app/(tabs)/index.tsx` (embed + reorder + default), `app/shopping.tsx`
 (applyPaste selector, `buying` state, `openBuy`/`commitBuy`/`skipBuy`, 4 buy-row
 check-offs rerouted, `BuySheet` + `locForName`). NOT browser-verified — see PR.
 
-## Visual (note 8) — DEFERRED to its own session
+## Visual (note 8) — DONE 2026-09-30, see DESIGN.md ("Enamel")
 Nate: "less Claude-y." Current parchment-cream + serif + tomato IS the AI-default cliché.
 This restructure keeps existing tokens as-is but is built **token-clean** (no hardcoded
 colors/fonts; everything via `@/design`) so a later visual session is a `colors.ts` /

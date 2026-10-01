@@ -1,5 +1,5 @@
 import { Text as RNText, type TextProps as RNTextProps } from 'react-native';
-import { colors, type, type ColorToken, type TypeToken } from '@/design';
+import { type, useColors, type ColorToken, type TypeToken } from '@/design';
 
 export type AppTextProps = RNTextProps & {
   /** Type-scale token from spec §2. Defaults to body. */
@@ -10,21 +10,23 @@ export type AppTextProps = RNTextProps & {
 
 /**
  * The single text primitive. All on-screen text should go through this so the
- * serif/sans/mono split and the type scale stay enforced (spec §2).
+ * type scale stays enforced (DESIGN.md — one face, Figtree).
  *
  * Numerics (amounts, times, temps, gram weights, baker's %) MUST use
- * variant="numeric" so they render in mono.
+ * variant="numeric" so they render with tabular figures and line up.
  */
 export function Text({ variant = 'body', color = 'text', style, ...rest }: AppTextProps) {
-  return <RNText style={[type[variant], { color: colors[color] }, style]} {...rest} />;
+  // Resolved against the surface's ink, so `text` is cream inside cook mode.
+  const c = useColors();
+  return <RNText style={[type[variant], { color: c[color] }, style]} {...rest} />;
 }
 
-/** Serif heading shorthand. */
+/** Display heading shorthand. */
 export function Heading({ variant = 'screenTitle', ...rest }: AppTextProps) {
   return <Text variant={variant} {...rest} />;
 }
 
-/** Mono numeric shorthand — use for any number per spec §2. */
+/** Numeric shorthand (tabular figures) — use for any number. */
 export function Numeric({ color = 'text', style, ...rest }: AppTextProps) {
   return <Text variant="numeric" color={color} style={style} {...rest} />;
 }

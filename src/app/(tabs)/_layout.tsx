@@ -22,11 +22,11 @@ export const unstable_settings = {
  * reached from the new segmented headers and the Cook launcher. The global
  * capture FAB is gone — the shopping list's inline "Add an item" row is the
  * capture surface now.
- * Active state in --accent, 10px uppercase labels, glyph icons (no emoji,
- * no icon fonts — spec §2).
+ * Enamel (DESIGN.md): ink label for the active tab, Flame only on its glyph,
+ * 11px uppercase labels, glyph icons (no emoji, no icon fonts).
  */
 function TabGlyph({ name, focused }: { name: GlyphName; focused: boolean }) {
-  return <Glyph name={name} size={22} color={focused ? 'accent' : 'textMuted'} />;
+  return <Glyph name={name} size={22} color={focused ? 'accent' : 'textFaint'} />;
 }
 
 export default function TabLayout() {
@@ -41,10 +41,10 @@ export default function TabLayout() {
         screenOptions={{
           headerShown: false,
           tabBarButton: HapticTab,
-          tabBarActiveTintColor: colors.accent,
-          tabBarInactiveTintColor: colors.textMuted,
+          tabBarActiveTintColor: colors.text,
+          tabBarInactiveTintColor: colors.textFaint,
           tabBarStyle: {
-            backgroundColor: colors.bg2,
+            backgroundColor: colors.bg,
             borderTopColor: colors.line,
             height: 56 + bottomInset,
             paddingTop: 6,
@@ -52,10 +52,10 @@ export default function TabLayout() {
           },
           tabBarLabelStyle: {
             fontFamily: fonts.sans,
-            fontSize: 10,
-            fontWeight: '600',
+            fontSize: 11,
+            fontWeight: '700',
             textTransform: 'uppercase',
-            letterSpacing: 0.5,
+            letterSpacing: 1,
           },
         }}>
         {/* Visible: Recipes · Plan · Cook. */}

@@ -1,56 +1,69 @@
-import { Platform } from 'react-native';
+import { Platform, type TextStyle } from 'react-native';
 
 /**
- * Typography — spec §2.
+ * Typography — "Enamel" (DESIGN.md).
  *
- * - Serif (Iowan Old Style → Palatino → Georgia) for titles, recipe names,
- *   step titles, day numbers.
- * - System sans for body, UI controls, navigation.
- * - Mono for ALL numerics — amounts, times, temperatures, gram weights,
- *   baker's %.
+ * ONE face: Figtree, a geometric sans standing in for ChefSteps' Circular.
+ * Stock is read with wet hands at arm's length, so hierarchy comes from SIZE
+ * and WEIGHT (11 → 40px, 400 → 800), never from switching to a serif.
  *
- * Real font files (Iowan fallbacks, JetBrains Mono) live in /assets/fonts and
- * are loaded via expo-font in the root layout when added. Until then we map to
- * the closest platform system faces so the hierarchy is already correct.
+ * Self-hosted from /public/fonts (global.css @font-face) so it works offline.
+ *
+ * The old keys survive as aliases so nothing had to be renamed:
+ *   serif → display face (Figtree, heavy)
+ *   mono  → Figtree with tabular numerals. Numbers still get their own
+ *           variant so columns of grams line up; they just no longer change
+ *           typeface to do it.
  */
+const FIGTREE = Platform.select({
+  web: 'Figtree, -apple-system, system-ui, sans-serif',
+  default: 'System',
+}) as string;
+
 export const fonts = {
-  serif: Platform.select({
-    ios: 'Iowan Old Style',
-    android: 'serif',
-    default: 'Iowan Old Style, Palatino, Georgia, serif',
-  }),
-  sans: Platform.select({
-    ios: 'System',
-    android: 'sans-serif',
-    default: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
-  }),
-  mono: Platform.select({
-    ios: 'Menlo',
-    android: 'monospace',
-    default: '"SF Mono", "JetBrains Mono", Menlo, monospace',
-  }),
+  display: FIGTREE,
+  sans: FIGTREE,
+  serif: FIGTREE,
+  mono: FIGTREE,
 } as const;
 
-/**
- * Type scale from spec §2. `family` selects which font stack; numeric uses
- * mono, headings use serif, everything else sans.
- */
+/** Lines up digits in a column — the ChefSteps gram column depends on it. */
+const tabular: TextStyle = { fontVariant: ['tabular-nums'] };
+
 export const type = {
-  wordmark: { fontFamily: fonts.serif, fontSize: 31, fontWeight: '600' },
-  screenTitle: { fontFamily: fonts.serif, fontSize: 25, fontWeight: '600' },
-  recipeTitle: { fontFamily: fonts.serif, fontSize: 19, fontWeight: '600' },
+  wordmark: { fontFamily: fonts.display, fontSize: 40, fontWeight: '800', letterSpacing: -1 },
+  screenTitle: {
+    fontFamily: fonts.display,
+    fontSize: 36,
+    lineHeight: 40,
+    fontWeight: '800',
+    letterSpacing: -0.9,
+  },
+  recipeTitle: {
+    fontFamily: fonts.display,
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
   sectionLabel: {
     fontFamily: fonts.sans,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 1.5,
+    letterSpacing: 1.4,
   },
-  body: { fontFamily: fonts.sans, fontSize: 14, fontWeight: '400' },
-  bodyStrong: { fontFamily: fonts.sans, fontSize: 14, fontWeight: '500' },
-  cookBody: { fontFamily: fonts.sans, fontSize: 20, fontWeight: '400' },
-  cookStepTitle: { fontFamily: fonts.serif, fontSize: 28, fontWeight: '600' },
-  numeric: { fontFamily: fonts.mono, fontSize: 12.5, fontWeight: '700' },
-} as const;
+  body: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 21, fontWeight: '400' },
+  bodyStrong: { fontFamily: fonts.sans, fontSize: 15, lineHeight: 21, fontWeight: '600' },
+  cookBody: { fontFamily: fonts.sans, fontSize: 21, lineHeight: 30, fontWeight: '400' },
+  cookStepTitle: {
+    fontFamily: fonts.display,
+    fontSize: 32,
+    lineHeight: 36,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+  },
+  numeric: { fontFamily: fonts.mono, fontSize: 13, fontWeight: '700', ...tabular },
+} as const satisfies Record<string, TextStyle>;
 
 export type TypeToken = keyof typeof type;

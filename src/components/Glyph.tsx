@@ -1,5 +1,5 @@
 import { Text as RNText, type StyleProp, type TextStyle } from 'react-native';
-import { colors, glyph, type ColorToken, type GlyphName } from '@/design';
+import { glyph, useColors, type ColorToken, type GlyphName } from '@/design';
 
 export type GlyphProps = {
   name: GlyphName;
@@ -13,6 +13,7 @@ export type GlyphProps = {
  * This is the ONLY sanctioned icon mechanism — no emoji, no icon fonts.
  */
 export function Glyph({ name, size = 18, color = 'text', style }: GlyphProps) {
+  const colors = useColors();
   return (
     <RNText
       accessibilityElementsHidden

@@ -1,16 +1,35 @@
+/*
+ * Figtree, self-hosted (DESIGN.md). Variable font, one file per style; the
+ * /Stock base path matches app.json experiments.baseUrl.
+ */
+@font-face {
+  font-family: 'Figtree';
+  src: url('/Stock/fonts/Figtree.ttf') format('truetype');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Figtree';
+  src: url('/Stock/fonts/Figtree-Italic.ttf') format('truetype');
+  font-weight: 300 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /*
- * Parchment backdrop on the html + body so the overscroll area (iOS Safari
+ * Ground backdrop on the html + body so the overscroll area (iOS Safari
  * elastic bounce + the strip behind the address bar before scroll) doesn't
  * flash white. Matches design token --bg (spec §2). Without this, scrolling
  * the Plan view past the top exposed the browser-default white body bg.
  */
 html,
 body {
-  background-color: #F5EDDD;
+  background-color: #FBF9F4;
 }
 
 /*

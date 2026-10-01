@@ -1,13 +1,15 @@
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Card } from './Card';
 import { Text, Numeric } from './Text';
 import { SourceBadge, Pill } from './Badge';
 import { componentRefs, isDinner } from '@/lib/dinners';
 import { Glyph } from './Glyph';
+import { EnamelTile } from './EnamelTile';
 import { colors } from '@/design';
 import type { Recipe } from '@/types';
 import { modCount } from '@/lib/recipe';
 import { formatMinutes } from '@/lib/format';
+import { cuisineLabel } from '@/lib/cuisine';
 
 /** Library / list recipe card (spec §6 "Recipe cards"). */
 export function RecipeCard({
@@ -54,20 +56,17 @@ export function RecipeCard({
     return (
       <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
         <View style={styles.row}>
-          {recipe.imageUrl ? (
-            <Image
-              source={{ uri: recipe.imageUrl }}
-              style={styles.rowThumb}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.rowThumb} />
-          )}
+          <EnamelTile
+            seed={recipe.id}
+            cuisine={recipe.cuisine}
+            imageUrl={recipe.imageUrl}
+            size={52}
+          />
           <View style={styles.rowText}>
-            <Text variant="bodyStrong" numberOfLines={1}>
+            <Text variant="bodyStrong" numberOfLines={1} style={styles.rowTitle}>
               {recipe.title}
             </Text>
-            <Text color="textFaint" numberOfLines={1}>
+            <Text color="textFaint" numberOfLines={1} style={styles.rowMeta}>
               {[
                 dinnerLabel,
                 recipe.cuisine ? recipe.cuisine : null,
@@ -75,7 +74,8 @@ export function RecipeCard({
                 recipe.cookCount > 0 ? `cooked ${recipe.cookCount}×` : null,
               ]
                 .filter(Boolean)
-                .join('  ·  ') || `serves ${recipe.yield.serves}`}
+                .map((s) => (s === recipe.cuisine ? cuisineLabel(s as string) : s))
+                .join(' · ') || `serves ${recipe.yield.serves}`}
             </Text>
           </View>
           {onToggleToTry ? (
@@ -132,13 +132,12 @@ export function RecipeCard({
   return (
     <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressed}>
       <Card style={styles.card}>
-        {recipe.imageUrl ? (
-          <Image
-            source={{ uri: recipe.imageUrl }}
-            style={styles.thumb}
-            resizeMode="cover"
-          />
-        ) : null}
+        <EnamelTile
+          seed={recipe.id}
+          cuisine={recipe.cuisine}
+          imageUrl={recipe.imageUrl}
+          style={styles.thumb}
+        />
         <View style={styles.headerRow}>
           <Text variant="recipeTitle" style={styles.title}>
             {recipe.title}
@@ -239,24 +238,60 @@ export function RecipeCard({
   );
 }
 
+/**
+ * NYT-style shelf card for the library's horizontal rows: a big square tile
+ * and exactly two scannable facts (time, cook count). Nothing else — the
+ * shelves are for browsing; flags and stars live on the list rows below.
+ */
+export function ShelfCard({ recipe, onPress }: { recipe: Recipe; onPress?: () => void }) {
+  const time = formatMinutes(recipe.yield.totalMinutes);
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [shelf.card, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={recipe.title}>
+      <EnamelTile
+        seed={recipe.id}
+        cuisine={recipe.cuisine}
+        imageUrl={recipe.imageUrl}
+        size={148}
+      />
+      <Text variant="bodyStrong" numberOfLines={2} style={shelf.title}>
+        {recipe.title}
+      </Text>
+      <Text color="textFaint" numberOfLines={1} style={shelf.meta}>
+        {time ? <Text color="textMuted" style={shelf.meta}>~{time}</Text> : null}
+        {time ? ' · ' : ''}
+        {recipe.cookCount > 0 ? `cooked ${recipe.cookCount}×` : 'new'}
+      </Text>
+    </Pressable>
+  );
+}
+
+const shelf = StyleSheet.create({
+  card: { width: 148 },
+  title: { marginTop: 8, lineHeight: 19 },
+  meta: { fontSize: 13, fontWeight: '500', marginTop: 3, fontVariant: ['tabular-nums'] },
+});
+
 const styles = StyleSheet.create({
-  card: { gap: 10 },
-  thumb: { width: '100%', height: 124, borderRadius: 10, backgroundColor: colors.bg2 },
+  // Enamel: no card chrome — the tile and a hairline do the grouping.
+  card: { gap: 10, backgroundColor: 'transparent', padding: 0, paddingBottom: 16 },
+  thumb: { width: '100%', height: 168 },
   pressed: { opacity: 0.6 },
   /* --- compact row --- */
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: colors.bg2,
-    borderWidth: 1,
-    borderColor: colors.line,
+    gap: 14,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
     minWidth: 0,
   },
-  rowThumb: { width: 44, height: 44, borderRadius: 7, backgroundColor: colors.bg3 },
+  rowTitle: { fontSize: 16 },
+  rowMeta: { fontSize: 13, fontWeight: '500', marginTop: 2 },
   // minWidth:0 is load-bearing on web: without it a long title refuses to
   // ellipsize and stretches the row past the viewport instead.
   rowText: { flex: 1, minWidth: 0, gap: 1 },
@@ -289,7 +324,7 @@ const styles = StyleSheet.create({
   statRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   tagRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 },
   tag: {
-    backgroundColor: colors.bg3,
+    backgroundColor: colors.bg2,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,

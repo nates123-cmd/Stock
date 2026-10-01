@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text } from './Text';
 import { SearchBar } from './SearchBar';
 import { FilterChip, ChipRow } from './Chip';
-import { RecipeCard } from './RecipeCard';
+import { RecipeCard, ShelfCard } from './RecipeCard';
 import { SegmentedControl } from './SegmentedControl';
 import { indexRecipes, isDinner, rollupIngredients } from '@/lib/dinners';
 import { Pill } from './Badge';
@@ -430,6 +430,46 @@ export function RecipeLibrary({
           density,
         };
 
+  /**
+   * NYT Cooking-style shelves (DESIGN.md) — horizontal rows above the full
+   * list, only on the plain All view. The moment you search, filter, pick a
+   * folder or are adding to the plan, they get out of the way: those are
+   * "find a specific thing" modes, the shelves are for browsing.
+   *
+   * Capped at 4 shelves x 8 cards so the extra mounted cards stay well under
+   * the paging budget above (the 163-card Safari crash).
+   */
+  const SHELF = 8;
+  const showShelves =
+    !addMode &&
+    segment === 'all' &&
+    !query.trim() &&
+    activeFilterCount === 0 &&
+    folderSel === null;
+  const shelves = useMemo(() => {
+    if (!showShelves) return [];
+    const live = recipes.filter((r) => r.status !== 'archived');
+    const out: { key: string; title: string; count: number; items: Recipe[]; seeAll?: () => void }[] = [];
+    const cooked = live
+      .filter((r) => lastCookedAt.has(r.id))
+      .sort((a, b) => (lastCookedAt.get(b.id) ?? 0) - (lastCookedAt.get(a.id) ?? 0));
+    if (cooked.length >= 2)
+      out.push({ key: 'cooked', title: 'Cooked lately', count: cooked.length, items: cooked.slice(0, SHELF), seeAll: () => chooseSort('cooked') });
+    const toTry = live.filter((r) => r.isToTry).sort(byNewest);
+    if (toTry.length >= 2)
+      out.push({ key: 'totry', title: 'To try', count: toTry.length, items: toTry.slice(0, SHELF), seeAll: () => setSegment('totry') });
+    const favs = live.filter((r) => r.isFavorite).sort(byNewest);
+    if (favs.length >= 2)
+      out.push({ key: 'favs', title: 'Favorites', count: favs.length, items: favs.slice(0, SHELF), seeAll: () => setSegment('favorites') });
+    for (const c of cuisinesInUse.filter((c) => c !== 'other').slice(0, 2)) {
+      const mine = live.filter((r) => r.cuisine && normCuisine(r.cuisine) === c).sort(byNewest);
+      if (mine.length >= 2)
+        out.push({ key: `c:${c}`, title: cuisineLabel(c), count: mine.length, items: mine.slice(0, SHELF), seeAll: () => setActiveCuisines([c]) });
+    }
+    return out.slice(0, 4);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showShelves, recipes, lastCookedAt, cuisinesInUse]);
+
   const sortLabel = SORTS.find((s) => s.key === sort)?.label ?? 'Recently added';
   const compact = density === 'compact';
 
@@ -547,6 +587,36 @@ export function RecipeLibrary({
               placeholder="Search title, tag or ingredient"
             />
           </View>
+
+          {shelves.map((sh) => (
+            <View key={sh.key} style={styles.shelf}>
+              <View style={styles.shelfHead}>
+                <SectionLabel color="text">{sh.title}</SectionLabel>
+                {sh.seeAll ? (
+                  <Pressable onPress={sh.seeAll} hitSlop={8} accessibilityRole="button">
+                    <Text variant="bodyStrong" color="accent" style={styles.shelfAll}>
+                      All {sh.count}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.shelfScroll}
+                contentContainerStyle={styles.shelfRow}>
+                {sh.items.map((r) => (
+                  <ShelfCard key={r.id} recipe={r} onPress={() => onSelectRecipe(r)} />
+                ))}
+              </ScrollView>
+            </View>
+          ))}
+
+          {shelves.length > 0 ? (
+            <View style={styles.allHead}>
+              <SectionLabel color="text">All recipes</SectionLabel>
+            </View>
+          ) : null}
 
           {/* One control line: Filters (with a live count) · Sort · Density.
               The chip rows below it are COLLAPSED by default — they used to be
@@ -758,7 +828,24 @@ export function RecipeLibrary({
 
 const styles = StyleSheet.create({
   showMore: { alignItems: 'center', paddingVertical: 16 },
-  segments: { paddingBottom: 10 },
+  segments: { paddingBottom: 14 },
+  shelf: { paddingTop: 18 },
+  shelfHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
+  shelfAll: { fontSize: 13 },
+  // Bleed the row to the screen edges so cards scroll off the side, NYT-style.
+  shelfScroll: { marginHorizontal: -20 },
+  shelfRow: { gap: 12, paddingHorizontal: 20, paddingTop: 12 },
+  allHead: {
+    marginTop: 28,
+    paddingTop: 12,
+    paddingBottom: 10,
+    borderTopWidth: 2,
+    borderTopColor: colors.text,
+  },
   folderRow: { paddingBottom: 10 },
   search: { paddingBottom: 8 },
   controlRow: {
@@ -769,26 +856,24 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   control: {
-    paddingVertical: 5,
-    paddingHorizontal: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 11,
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.line,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
     backgroundColor: colors.bg2,
   },
-  controlOpen: { borderColor: colors.accent },
+  controlOpen: { borderColor: colors.text },
   // Compact rows are a single column with a hairline gap — the web wrap grid
   // (cardCell, flexBasis 320) would put two thin rows side by side, which
   // reads as a broken table rather than a list.
-  rowBody: { gap: 6 },
+  rowBody: { gap: 0 },
   chips: { marginHorizontal: -20, paddingHorizontal: 20, paddingBottom: 6 },
   list: { paddingTop: 4, gap: 12 },
   ideaRow: {
-    backgroundColor: colors.bg2,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    paddingVertical: 14,
     gap: 6,
     minWidth: 0,
   },

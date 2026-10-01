@@ -1,29 +1,41 @@
 /**
- * Stock palette — spec §2 "Identity & design system".
+ * Stock palette — "Enamel" (DESIGN.md, 2026-09-30).
  * Single source of truth for color. The same values are mirrored into the
  * Tailwind theme (tailwind.config.js) so NativeWind class names stay in sync.
  *
- * Light mode only for v1 (spec §12).
+ * Token NAMES are kept from the parchment era so every screen picked up the
+ * new look without a rename; the values and roles below are what changed.
+ *
+ *  - Ground is a warm white, not parchment. Ink is Le Creuset Matte Navy.
+ *  - Flame is the ONE action colour. Nothing decorative may use it.
+ *  - Enamel colours (./enamel.ts) mark cuisine and nothing else.
  */
 export const colors = {
-  bg: '#F5EDDD', // parchment, primary background
-  bg2: '#EDE2CC', // card background, one shade deeper
-  bg3: '#E4D7BB', // recessed surfaces, tag fills
-  bgCook: '#F8F1E2', // cook-mode background, slightly warmer
+  bg: '#FBF9F4', // warm white, primary ground
+  bg2: '#F2EEE5', // recessed: search field, segment track, sheets
+  bg3: '#E8E2D5', // deeper recess: tag fills, empty thumbs
+  bgCook: '#122131', // cook mode ground — Matte Navy, read at arm's length
 
-  accent: '#CC3D2E', // tomato, primary action color
-  accentDeep: '#A52E22', // hover/pressed states
-  accentSoft: '#E16252', // light highlights when needed
+  accent: '#CE3A07', // Flame — actions only
+  accentDeep: '#A82F05', // pressed
+  accentSoft: '#E8714A', // light highlight
 
-  text: '#3D2B1F', // espresso, primary text
-  textMuted: '#8A6F5C', // secondary text, labels
-  textFaint: '#B19981', // tertiary, placeholders
+  text: '#122131', // Matte Navy ink
+  textMuted: '#4A5563', // secondary prose
+  textFaint: '#79818B', // data/chrome tier: meta lines, placeholders
 
-  line: '#DCC9A8', // borders, dividers
-  lineSoft: '#E4D5B8', // lighter dividers within cards
+  line: '#E3DDD0', // hairlines
+  lineSoft: '#ECE7DC', // rules inside a group
 
-  ok: '#5C7A3E', // olive, success states
-  warn: '#C28B2B', // amber, attention/experimental
+  ok: '#2F6B4F', // Artichaut-leaning green, success
+  warn: '#B86F00', // Nectar, darkened for text contrast
+
+  // Cook-mode ink (on bgCook). Separate tokens so cook screens never have to
+  // hardcode a light colour.
+  cookText: '#F4F1EA',
+  cookMuted: '#A9B1BC',
+  cookLine: '#2C3B4C',
+  onAccent: '#FFFFFF', // text/glyphs on a Flame or enamel fill
 } as const;
 
 export type ColorToken = keyof typeof colors;
