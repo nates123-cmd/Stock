@@ -23,7 +23,7 @@ export const unstable_settings = {
  * capture FAB is gone — the shopping list's inline "Add an item" row is the
  * capture surface now.
  * Enamel (DESIGN.md): ink label for the active tab, Flame only on its glyph,
- * 11px uppercase labels, glyph icons (no emoji, no icon fonts).
+ * 12px sentence-case labels matching the top tabs, glyph icons (no emoji, no icon fonts).
  */
 function TabGlyph({ name, focused }: { name: GlyphName; focused: boolean }) {
   return <Glyph name={name} size={22} color={focused ? 'accent' : 'textFaint'} />;
@@ -52,10 +52,11 @@ export default function TabLayout() {
           },
           tabBarLabelStyle: {
             fontFamily: fonts.sans,
-            fontSize: 11,
-            fontWeight: '700',
-            textTransform: 'uppercase',
-            letterSpacing: 1,
+            // Same treatment as the top segmented tabs: Figtree semibold,
+            // sentence case, no tracking.
+            fontSize: 12,
+            fontWeight: '600',
+            letterSpacing: 0,
           },
         }}>
         {/* Visible: Recipes · Plan · Cook. */}

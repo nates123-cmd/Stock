@@ -35,6 +35,7 @@ export type { CartTarget } from './PushToCartSheet';
 export { TimerStrip } from './TimerStrip';
 export { AwakeIndicator } from './AwakeIndicator';
 export { SegmentedControl } from './SegmentedControl';
+export { SortableList } from './SortableList';
 export type { Segment } from './SegmentedControl';
 export { CaptureSheet } from './CaptureSheet';
 export { GlobalCapture } from './GlobalCapture';

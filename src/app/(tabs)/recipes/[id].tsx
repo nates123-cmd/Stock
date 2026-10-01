@@ -13,7 +13,7 @@ import { Overlay } from '@/components';
 import { FolderPicker } from '@/components/FolderPicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow, RecipeTools, EnamelTile } from '@/components';
+import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow, RecipeTools, EnamelTile, SortableList } from '@/components';
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -32,6 +32,7 @@ import type { Ingredient, MealType, Recipe, Step, Unit } from '@/types';
 import { formatMinutes } from '@/lib/format';
 import { shortDate } from '@/lib/pantry';
 import { applyTagEdit, norm, type TagMeta } from '@/lib/recipeTags';
+import { moveItem } from '@/lib/sortable';
 import { CUISINES, cuisineLabel, normCuisine, setCuisineManually } from '@/lib/cuisine';
 import type { Nutrition, RecipeSource } from '@/types';
 
@@ -1442,6 +1443,10 @@ function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }
   const removeStep = (id: string) =>
     setSteps((rows) => rows.filter((r) => r.id !== id));
 
+  // Drag-to-reorder. Order IS the data: ingredients save in array order and
+  // steps are renumbered (ordinal = idx + 1) in onSave, so a move is just a
+  // splice in the draft (lib/sortable.ts moveItem).
+
   const parseAmount = (s: string): number | null => {
     const t = s.trim();
     if (t === '') return null;
@@ -1590,10 +1595,13 @@ function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }
           </View>
         </View>
 
-        <SectionLabel style={editStyles.heading}>Ingredients</SectionLabel>
-        <View style={editStyles.list}>
-          {ings.map((d) => (
-            <View key={d.id} style={editStyles.ingRow}>
+        <SectionLabel style={editStyles.heading}>Ingredients · drag to reorder</SectionLabel>
+        <SortableList
+          items={ings}
+          onReorder={(from, to) => setIngs((rows) => moveItem(rows, from, to))}
+          renderItem={(d, _i, grip) => (
+            <View style={editStyles.ingRow}>
+              {grip}
               <TextInput
                 value={d.amount}
                 onChangeText={(t) => setIng(d.id, { amount: t })}
@@ -1625,8 +1633,8 @@ function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }
                 <Glyph name="close" size={13} color="textFaint" />
               </Pressable>
             </View>
-          ))}
-        </View>
+          )}
+        />
         <Pressable onPress={addIng} style={editStyles.addRow}>
           <Glyph name="add" size={13} color="accent" />
           <Text variant="bodyStrong" color="accent">
@@ -1634,13 +1642,14 @@ function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }
           </Text>
         </Pressable>
 
-        <SectionLabel style={editStyles.heading}>Method</SectionLabel>
-        <View style={editStyles.list}>
-          {steps.map((d, idx) => (
-            <View key={d.id} style={editStyles.stepRow}>
-              <Text variant="recipeTitle" color="accent" style={editStyles.stepNum}>
-                {idx + 1}
-              </Text>
+        <SectionLabel style={editStyles.heading}>Method · drag to reorder</SectionLabel>
+        <SortableList
+          items={steps}
+          onReorder={(from, to) => setSteps((rows) => moveItem(rows, from, to))}
+          renderItem={(d, idx, grip) => (
+            <View style={editStyles.stepRow}>
+              {grip}
+              <Numeric style={editStyles.stepNum}>{idx + 1}</Numeric>
               <TextInput
                 value={d.body}
                 onChangeText={(t) => setStep(d.id, t)}
@@ -1657,8 +1666,8 @@ function EditRecipe({ recipe, onClose }: { recipe: Recipe; onClose: () => void }
                 <Glyph name="close" size={13} color="textFaint" />
               </Pressable>
             </View>
-          ))}
-        </View>
+          )}
+        />
         <Pressable onPress={addStep} style={editStyles.addRow}>
           <Glyph name="add" size={13} color="accent" />
           <Text variant="bodyStrong" color="accent">
@@ -1722,7 +1731,7 @@ const editStyles = StyleSheet.create({
     gap: 6,
     paddingVertical: 8,
   },
-  stepRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  stepNum: { minWidth: 18, textAlign: 'center', paddingTop: 8 },
+  stepRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+  stepNum: { minWidth: 18, textAlign: 'center', paddingTop: 11, fontSize: 15 },
   stepInput: { flex: 1, minHeight: 60, textAlignVertical: 'top' },
 });

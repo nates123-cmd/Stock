@@ -116,6 +116,11 @@ Do not reintroduce a serif or a monospace face.
 
 - **Hairline rows** to divide lists. Not bordered cards.
 - **Underline tabs** (`SegmentedControl`): ink label, Flame underline. No pills.
+- **Bottom tab bar** labels match the top tabs: Figtree 12/600, sentence case
+  ("Recipes", not "RECIPES"). Flame only on the active tab's glyph.
+- **Drag to reorder** (`SortableList`): a 2x3 dot grip at the start of the row
+  is the only drag handle (rows are full of inputs). The lifted row gets a
+  shadow, the one shadow besides the FAB; others slide aside to show the gap.
 - **The heavy ink rule** (2px `text`) above a major section ("All recipes").
 - **Shelves**: horizontal rows of 148px `ShelfCard`s, bled to the screen edge,
   "All N" link right. Only on the unfiltered All view; max 4 shelves x 8 cards.
@@ -132,7 +137,8 @@ Do not reintroduce a serif or a monospace face.
 - Bordered rounded cards as the default way to group a list.
 - Flame on anything that isn't an action.
 - An empty grey square where a recipe has no photo (use `EnamelTile`).
-- Drop shadows (the FAB keeps one), gradients, Unicode ★ as a rating.
+- Drop shadows (the FAB and a row being dragged keep one), gradients, Unicode ★ as a rating.
+- Uppercase tracked labels on navigation (fine for section labels, not tabs).
 - Inter / Roboto / Space Grotesk / Poppins / system stack as the face.
 
 ## Honesty rules that outrank the design
@@ -151,7 +157,12 @@ The web build seeds IndexedDB with three recipes on first run, no sign-in.
 2. Open `http://127.0.0.1:8089/Stock/` (deep links 404 on the plain server).
 3. Phone width: replace the page body with a same-origin 390x844 `<iframe>`
    of `/Stock/`, and drive it with JS `.click()` on elements found by text.
-4. Three seed recipes don't show shelves. For a realistic library, write
+4. The automation Chrome window reports `visibilityState: hidden`: no
+   animation frames and no ResizeObserver, so `onLayout` never fires and
+   Reanimated slides freeze. Judge gestures by outcome (order, saved data),
+   drive them with stepped `PointerEvent`s, and keep pure maths in
+   `src/lib/*` with unit tests (`tests/sortable.test.ts`).
+5. Three seed recipes don't show shelves. For a realistic library, write
    cloned recipes into idb-keyval (`keyval-store` / `keyval`, key
    `stock:recipes`, plus `stock:cooks` for "Cooked lately"). Set `cuisine`
    without `cuisineAuto`, or the tagger re-derives it.
