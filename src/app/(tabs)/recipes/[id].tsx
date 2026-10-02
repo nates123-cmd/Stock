@@ -29,6 +29,8 @@ import { indexRecipes, ingredientGroups } from '@/lib/dinners';
 import { uid } from '@/lib/id';
 import { pickRecipePhoto } from '@/lib/photo';
 import type { Ingredient, MealType, Recipe, Step, Unit } from '@/types';
+import { StepIngredients } from '@/components/StepIngredients';
+import { approxVolume, placeIngredients } from '@/lib/stepIngredients';
 import { formatMinutes } from '@/lib/format';
 import { shortDate } from '@/lib/pantry';
 import { applyTagEdit, norm, type TagMeta } from '@/lib/recipeTags';
@@ -163,6 +165,9 @@ export default function RecipeDetail() {
   const mods = modCount(recipe);
   const time = formatMinutes(recipe.yield.totalMinutes);
   const steps = [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal);
+  // ChefSteps blocks: each step opens with the ingredients it first names,
+  // read live off the list so a Scale / To grams shows up in every step.
+  const placement = placeIngredients(steps, recipe.ingredients);
   // Ingredients the LINKED recipes bring, shown under this recipe's own so a
   // dinner's shopping reality is visible without opening each dish. The root
   // group is dropped — it is already rendered above, unscaled.
@@ -496,6 +501,9 @@ export default function RecipeDetail() {
                     <View style={styles.ingText}>
                       <View style={styles.ingNameRow}>
                         <IngredientName ing={ing} style={[styles.ingName, clean && styles.cleanBody]} />
+                        {approxVolume(ing) ? (
+                          <Text color="textFaint" style={styles.ingNote}>{`  ${approxVolume(ing)}`}</Text>
+                        ) : null}
                         {ing.inlineNote ? (
                           <Text color="textFaint" style={styles.ingNote}>{`  ${ing.inlineNote}`}</Text>
                         ) : null}
@@ -537,14 +545,21 @@ export default function RecipeDetail() {
           <View style={wide ? styles.colRight : undefined}>
             <SectionHeader label="Method" onEdit={() => setEditing(true)} />
             <View style={styles.method}>
+              {/* Ingredients no step names, so they still have a home here. */}
+              {placement.unplaced.length > 0 ? (
+                <StepIngredients ingredients={placement.unplaced} />
+              ) : null}
               {steps.map((s) => (
                 <View key={s.id} style={styles.stepRow}>
                   <View style={styles.stepNum}>
                     <Numeric style={styles.stepNumText}>{s.ordinal}</Numeric>
                   </View>
-                  <Text style={[styles.stepBody, clean && styles.cleanBody]}>
-                    {s.body}
-                  </Text>
+                  <View style={styles.stepCol}>
+                    <StepIngredients ingredients={placement.byStep.get(s.id) ?? []} />
+                    <Text style={[styles.stepBody, clean && styles.cleanBody]}>
+                      {s.body}
+                    </Text>
+                  </View>
                 </View>
               ))}
             </View>
@@ -1230,7 +1245,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepNumText: { fontSize: 14 },
-  stepBody: { flex: 1, fontSize: 16, lineHeight: 24 },
+  stepCol: { flex: 1, gap: 10 },
+  stepBody: { fontSize: 16, lineHeight: 24 },
   cleanBody: { fontSize: 17, lineHeight: 26 },
   notes: { marginTop: 24, gap: 8 },
   cuisineBlock: { marginTop: 18, gap: 8 },

@@ -34,6 +34,8 @@ import { makeMod } from '@/lib/recipe';
 import { pushCookToTide } from '@/lib/tide';
 import { webPersist } from '@/lib/db/webStore';
 import type { Cook, Ingredient, Modification, Recipe, Step } from '@/types';
+import { StepIngredients } from '@/components/StepIngredients';
+import { placeIngredients } from '@/lib/stepIngredients';
 
 const NATIVE = Platform.OS !== 'web';
 // In-cook note draft (web). The note only lands on the Cook record when the
@@ -87,6 +89,12 @@ function CookScreenInner() {
   const steps = useMemo(
     () => (recipe ? [...recipe.steps].sort((a, b) => a.ordinal - b.ordinal) : []),
     [recipe],
+  );
+  // Each step's ChefSteps block, read live off the ingredients — an in-cook
+  // Scale or To grams shows up in the step you're on.
+  const placement = useMemo(
+    () => placeIngredients(steps, recipe?.ingredients ?? []),
+    [steps, recipe],
   );
   const cookNumber = (recipe?.cookCount ?? 0) + 1;
 
@@ -440,6 +448,7 @@ function CookScreenInner() {
           steps={steps}
           stepIndex={stepIndex}
           current={current}
+          stepIngredients={(current && placement.byStep.get(current.id)) ?? []}
           timers={timers}
           onStartTimer={(l, s) => startTimer(l, s, current?.ordinal ?? 1)}
           onClearTimer={clearTimer}
@@ -563,6 +572,7 @@ function FocusedBody({
   steps,
   stepIndex,
   current,
+  stepIngredients,
   timers,
   onStartTimer,
   onClearTimer,
@@ -573,6 +583,8 @@ function FocusedBody({
   steps: Step[];
   stepIndex: number;
   current: Step | undefined;
+  /** the current step's ChefSteps block, live amounts */
+  stepIngredients: Ingredient[];
   timers: ReturnType<typeof useCookTimers>['timers'];
   onStartTimer: (label: string, seconds: number) => void;
   onClearTimer: (id: string) => void;
@@ -592,6 +604,7 @@ function FocusedBody({
 
       <ScrollView contentContainerStyle={styles.focusContent}>
         <Heading variant="cookStepTitle">{current.title}</Heading>
+        <StepIngredients ingredients={stepIngredients} large />
         <View style={styles.focusBody}>
           <StepBody body={current.body} size={20} onStartTimer={onStartTimer} />
         </View>
@@ -652,6 +665,7 @@ function GlanceBody({
   onToolHint: (m: string | null) => void;
 }) {
   const time = formatMinutes(recipe.yield.totalMinutes);
+  const placement = placeIngredients(steps, recipe.ingredients);
   return (
     <View style={styles.flex}>
       <ScrollView contentContainerStyle={styles.glanceContent}>
@@ -747,6 +761,7 @@ function GlanceBody({
                 </Pressable>
                 {open ? (
                   <View style={styles.glanceExpand}>
+                    <StepIngredients ingredients={placement.byStep.get(s.id) ?? []} />
                     <StepBody
                       body={s.body}
                       size={16}
@@ -1209,6 +1224,7 @@ const styles = StyleSheet.create({
     marginHorizontal: -layout.screenPadding,
     paddingHorizontal: layout.screenPadding,
     paddingVertical: 14,
+    gap: 12,
   },
   markCooked: { marginTop: 22 },
   scrubList: { maxHeight: 360 },
