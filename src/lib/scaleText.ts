@@ -19,7 +19,7 @@
  *
  * Pure module — no store, no IO.
  */
-import { toFraction } from '@/lib/format';
+import { isMetricUnit, toDecimal, toFraction } from '@/lib/format';
 import { matchTerms, stem } from '@/lib/stepAmounts';
 import type { Ingredient, Step } from '@/types';
 
@@ -88,7 +88,9 @@ export function parseWrittenAmount(text: string): number | null {
  * Scaled number written the way the ingredient rows write it ("1 1/2"), or
  * in the source's own unicode style ("1½") when that is how it was written.
  */
-export function formatWrittenAmount(n: number, unicode = false): string {
+export function formatWrittenAmount(n: number, unicode = false, metric = false): string {
+  // "12.5g", never "12 1/2g": grams and millilitres read as decimals.
+  if (metric) return toDecimal(n);
   const s = toFraction(Math.round(n * 100) / 100);
   if (!unicode) return s;
   return s.replace(/ ?(\d\/\d)$/, (_, f: string) => ASCII_TO_UNICODE.get(f) ?? ` ${f}`);
@@ -200,9 +202,10 @@ export function scaleAmountsInText(text: string, ratio: number, ingredients: Ing
     const sa = Math.round(na * ratio * 100) / 100;
     const sb = nb != null ? Math.round(nb * ratio * 100) / 100 : null;
     const unicode = new RegExp(`[${FRACTION_CHARS}]`).test(a);
+    const metric = toks[head]?.kind === 'measure' && isMetricUnit(toks[head]?.word);
 
-    let piece = `${lead}${formatWrittenAmount(sa, unicode)}`;
-    if (sb != null) piece += `${sep}${formatWrittenAmount(sb, unicode)}`;
+    let piece = `${lead}${formatWrittenAmount(sa, unicode, metric)}`;
+    if (sb != null) piece += `${sep}${formatWrittenAmount(sb, unicode, metric)}`;
     let consumed = end;
     for (let j = 0; j <= head; j++) {
       const t = toks[j];

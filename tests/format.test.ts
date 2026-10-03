@@ -51,6 +51,13 @@ describe('formatAmount', () => {
     expect(formatAmount(2, 'pc')).toBe('2');
     expect(formatAmount(3, null)).toBe('3');
   });
+  it('shows metric amounts as decimals, never fractions', () => {
+    expect(formatAmount(12.5, 'g')).toBe('12.5g');
+    expect(formatAmount(0.75, 'g')).toBe('0.75g');
+    expect(formatAmount(333.333, 'g')).toBe('333.3g');
+    expect(formatAmount(1.5, 'kg')).toBe('1.5kg');
+    expect(formatAmount(22.5, 'ml')).toBe('22.5ml');
+  });
   it('spaces a fraction even with a short unit', () => {
     // tight requires no "/" and no " " in the number — 1/2 oz must get a space
     expect(formatAmount(0.5, 'oz')).toBe('1/2 oz');
