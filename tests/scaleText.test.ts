@@ -30,6 +30,14 @@ describe('parseWrittenAmount', () => {
   });
 });
 
+describe('scaleAmountsInText — metric decimals', () => {
+  it('halves grams and millilitres as decimals, not fractions', () => {
+    expect(half('Add 25g baking powder.')).toBe('Add 12.5g baking powder.');
+    expect(half('Pour in 45 ml oil.')).toBe('Pour in 22.5 ml oil.');
+    expect(half('Add 1 cup flour.')).toBe('Add 1/2 cup flour.');
+  });
+});
+
 describe('scaleAmountsInText — measures', () => {
   it('halves a cup amount and singularises the unit', () => {
     expect(half('Add 2 cups flour and stir.')).toBe('Add 1 cup flour and stir.');

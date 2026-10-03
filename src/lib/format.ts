@@ -55,10 +55,29 @@ export function toFraction(amount: number): string {
   return whole > 0 ? `${sign}${whole} ${a}/${b}` : `${sign}${a}/${b}`;
 }
 
-/** "200g", "2 pc", "3/4 cup", "1 1/2 cup", "" for null amount. */
+/**
+ * Metric units read as decimals: nobody weighs "12 1/2 g". Covers grams after
+ * a Scale (25 g halved → 12.5g) and anything To grams produced.
+ */
+const METRIC = new Set([
+  'g', 'gram', 'grams', 'kg', 'mg', 'ml', 'milliliter', 'milliliters',
+  'millilitre', 'millilitres', 'l', 'liter', 'liters', 'litre', 'litres',
+]);
+
+export function isMetricUnit(unit: string | null | undefined): boolean {
+  return !!unit && METRIC.has(unit.trim().toLowerCase());
+}
+
+/** 12.5 → "12.5", 0.75 → "0.75", 333.333 → "333.3", 300 → "300". */
+export function toDecimal(amount: number): string {
+  const places = Math.abs(amount) < 10 ? 2 : 1;
+  return String(Number(amount.toFixed(places)));
+}
+
+/** "200g", "12.5g", "2 pc", "3/4 cup", "1 1/2 cup", "" for null amount. */
 export function formatAmount(amount: number | null, unit: string | null): string {
   if (amount == null) return '';
-  const n = toFraction(amount);
+  const n = isMetricUnit(unit) ? toDecimal(amount) : toFraction(amount);
   if (!unit || unit === 'pc') return n;
   // Short units hug the number ("200g"); fractions/mixed always get a space.
   const tight = unit.length <= 2 && !n.includes('/') && !n.includes(' ');
