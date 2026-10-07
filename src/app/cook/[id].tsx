@@ -36,6 +36,14 @@ import { webPersist } from '@/lib/db/webStore';
 import type { Cook, Ingredient, Modification, Recipe, Step } from '@/types';
 import { StepIngredients } from '@/components/StepIngredients';
 import { placeIngredients } from '@/lib/stepIngredients';
+import { IngredientActionSheet } from '@/components/IngredientActionSheet';
+import { SubSheet, type AppliedSub } from '@/components/SubSheet';
+import { applySubToIngredient } from '@/lib/substitutions';
+import { usePantryStore } from '@/store/pantry';
+import { useExtrasStore } from '@/store/extras';
+import { MANUAL_ACTIVE } from '@/lib/shopping';
+import { ingredientPantryStatus } from '@/lib/ingredientPantry';
+import type { PantryItem } from '@/types';
 
 const NATIVE = Platform.OS !== 'web';
 // In-cook note draft (web). The note only lands on the Cook record when the
@@ -117,7 +125,12 @@ function CookScreenInner() {
   const [cookId] = useState(() => uid('cook'));
   const [pendingMods, setPendingMods] = useState<Modification[]>([]);
   const [editingIng, setEditingIng] = useState<Ingredient | null>(null);
+  /** Ingredient the action sheet handed to Sub. Null = Sub sheet closed. */
+  const [subFor, setSubFor] = useState<Ingredient | null>(null);
   const [addingIng, setAddingIng] = useState(false);
+  // Pantry status per Glance row (low / out tag) + one-off shopping adds.
+  const pantryItems = usePantryStore((s) => s.items);
+  const addExtra = useExtrasStore((s) => s.add);
   // Servings cooked (spec §7). Defaults to recipe.yield.serves; the stepper
   // in PostCook lets the user override before the Tide push is computed.
   const [servings, setServings] = useState<number>(0);
@@ -473,6 +486,7 @@ function CookScreenInner() {
           onClearTimer={clearTimer}
           onMarkCooked={finishCook}
           onEditIngredient={setEditingIng}
+          pantryItems={pantryItems}
           onAddIngredient={() => setAddingIng(true)}
           onSaveRecipe={(r) => void saveRecipe(r)}
           toolHint={toolHint}
@@ -543,18 +557,59 @@ function CookScreenInner() {
         </ScrollView>
       </Overlay>
 
-      {/* Edit ingredient (in-cook modification) */}
-      <Overlay visible={!!editingIng} onClose={() => setEditingIng(null)}>
-        {editingIng ? (
-          <EditIngredientSheet
-            ing={editingIng}
-            onSave={(next) => saveIngredientEdit(editingIng, next)}
-            onSkip={() => skipIngredientThisCook(editingIng)}
-            onRemove={() => removeIngredientForever(editingIng)}
-            onCancel={() => setEditingIng(null)}
-          />
-        ) : null}
-      </Overlay>
+      {/* Tap an ingredient in Glance → the same action sheet as the recipe
+          page (pantry Low / Out, always-have, Sub, Edit, Add to shopping,
+          Remove) plus the in-cook "Skip this cook". Edits stamp this cookId. */}
+      <IngredientActionSheet
+        ingredient={editingIng}
+        recipeTitle={recipe.title}
+        onClose={() => setEditingIng(null)}
+        onHint={setToolHint}
+        onSub={(ing) => {
+          setEditingIng(null);
+          setSubFor(ing);
+        }}
+        onEdit={(ing, next) => saveIngredientEdit(ing, next)}
+        onSkipThisCook={(ing) => skipIngredientThisCook(ing)}
+        onRemove={(ing) => removeIngredientForever(ing)}
+        onAddToShopping={(ing) => {
+          addExtra([
+            {
+              canonicalName: ing.canonicalName,
+              amount: ing.amount,
+              unit: ing.unit,
+              originLabel: `for ${recipe.title}`,
+              originId: MANUAL_ACTIVE,
+              recipes: [recipe.title],
+            },
+          ]);
+          setToolHint(`${ing.canonicalName} added to the shopping list.`);
+        }}
+      />
+
+      {/* Sub, handed off from the action sheet. The swap is recorded against
+          this cook like any other in-cook modification. */}
+      <SubSheet
+        visible={!!subFor}
+        name={subFor?.canonicalName ?? ''}
+        amount={subFor?.amount ?? null}
+        unit={subFor?.unit ?? null}
+        onClose={() => setSubFor(null)}
+        onApply={(sub: AppliedSub) => {
+          const target = subFor;
+          if (!target) return;
+          const updated = applySubToIngredient(target, sub, { cookId });
+          const newMods = updated.modificationHistory.slice(target.modificationHistory.length);
+          void saveRecipe({
+            ...recipe,
+            ingredients: recipe.ingredients.map((i) => (i.id === target.id ? updated : i)),
+            modifiedAt: new Date(),
+          });
+          setPendingMods((p) => [...p, ...newMods]);
+          setSubFor(null);
+          setToolHint(`Swapped in ${sub.name}.`);
+        }}
+      />
 
       {/* Add ingredient */}
       <Overlay visible={addingIng} onClose={() => setAddingIng(false)}>
@@ -643,6 +698,7 @@ function GlanceBody({
   onClearTimer,
   onMarkCooked,
   onEditIngredient,
+  pantryItems,
   onAddIngredient,
   onSaveRecipe,
   toolHint,
@@ -659,6 +715,8 @@ function GlanceBody({
   onClearTimer: (id: string) => void;
   onMarkCooked: () => void;
   onEditIngredient: (ing: Ingredient) => void;
+  /** For the low / out tag on each row. */
+  pantryItems: PantryItem[];
   onAddIngredient: () => void;
   onSaveRecipe: (r: Recipe) => Promise<void> | void;
   toolHint: string | null;
@@ -699,18 +757,31 @@ function GlanceBody({
         ) : null}
 
         <Card style={styles.ingCard}>
-          {recipe.ingredients.map((ing) => (
-            <Pressable
-              key={ing.id}
-              onPress={() => onEditIngredient(ing)}
-              style={styles.ingGrid}
-              hitSlop={4}>
-              <IngredientAmount ing={ing} style={styles.ingGridAmt} />
-              <View style={styles.flex}>
-                <IngredientName ing={ing} />
-              </View>
-            </Pressable>
-          ))}
+          {recipe.ingredients.map((ing) => {
+            const pantryStatus = ingredientPantryStatus(ing, pantryItems);
+            return (
+              <Pressable
+                key={ing.id}
+                onPress={() => onEditIngredient(ing)}
+                style={styles.ingGrid}
+                hitSlop={4}
+                accessibilityRole="button"
+                accessibilityLabel={`${ing.canonicalName}, options`}>
+                <IngredientAmount ing={ing} style={styles.ingGridAmt} />
+                <View style={[styles.flex, styles.ingGridName]}>
+                  <IngredientName ing={ing} />
+                  {pantryStatus !== 'fine' ? (
+                    <Text
+                      variant="sectionLabel"
+                      color={pantryStatus === 'out' ? 'accent' : 'warn'}
+                      style={styles.ingGridTag}>
+                      {pantryStatus}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            );
+          })}
           <Pressable
             onPress={onAddIngredient}
             style={styles.addIngRow}
@@ -934,80 +1005,6 @@ function PostCook({
 
 /* ---------- Ingredient edit + add (spec §6 Modification) ---------- */
 
-function EditIngredientSheet({
-  ing,
-  onSave,
-  onSkip,
-  onRemove,
-  onCancel,
-}: {
-  ing: Ingredient;
-  onSave: (next: { amount: number | null; unit: string | null; name: string }) => void;
-  onSkip: () => void;
-  onRemove: () => void;
-  onCancel: () => void;
-}) {
-  const [amount, setAmount] = useState(ing.amount != null ? String(ing.amount) : '');
-  const [unit, setUnit] = useState(ing.unit ?? '');
-  const [name, setName] = useState(ing.canonicalName);
-  const submit = () => {
-    const parsed = amount.trim() === '' ? null : Number(amount.replace(',', '.'));
-    onSave({
-      amount: parsed != null && Number.isFinite(parsed) ? parsed : null,
-      unit: unit.trim() || null,
-      name: name.trim() || ing.canonicalName,
-    });
-  };
-  return (
-    <View style={styles.editSheet}>
-      <Text variant="recipeTitle">Edit ingredient</Text>
-      <Text color="textFaint" style={styles.editHint}>
-        Saved on the recipe — and recorded against this cook. The history is
-        shown inline next time you view the recipe.
-      </Text>
-      <View style={styles.editRow}>
-        <TextInput
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="decimal-pad"
-          placeholder="amt"
-          placeholderTextColor={colors.textFaint}
-          style={[styles.editField, styles.editFieldNum]}
-        />
-        <TextInput
-          value={unit}
-          onChangeText={setUnit}
-          placeholder="unit"
-          placeholderTextColor={colors.textFaint}
-          autoCapitalize="none"
-          style={[styles.editField, styles.editFieldUnit]}
-        />
-      </View>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="ingredient"
-        placeholderTextColor={colors.textFaint}
-        style={styles.editField}
-      />
-      <View style={styles.editButtons}>
-        <Button label="Save" glyph="done" flex onPress={submit} />
-      </View>
-      <View style={styles.editSecondary}>
-        <Pressable onPress={onSkip} hitSlop={6}>
-          <Text color="textMuted">Skip this cook</Text>
-        </Pressable>
-        <Pressable onPress={onRemove} hitSlop={6}>
-          <Text color="warn">Remove from recipe</Text>
-        </Pressable>
-        <Pressable onPress={onCancel} hitSlop={6}>
-          <Text color="textMuted">Cancel</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 function AddIngredientSheet({
   onSave,
   onCancel,
@@ -1173,6 +1170,8 @@ const styles = StyleSheet.create({
   ingGrid: { flexDirection: 'row', gap: 12, paddingVertical: 2 },
   // Same right-aligned gram column as the recipe page.
   ingGridAmt: { width: 58, textAlign: 'right' },
+  ingGridName: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 },
+  ingGridTag: { fontSize: 10 },
   addIngRow: { paddingTop: 6, paddingBottom: 2 },
   editSheet: { gap: 12 },
   editHint: { fontStyle: 'italic', lineHeight: 18 },
@@ -1190,11 +1189,6 @@ const styles = StyleSheet.create({
   editFieldNum: { width: 90 },
   editFieldUnit: { flex: 1 },
   editButtons: { flexDirection: 'row', gap: 10, paddingTop: 4 },
-  editSecondary: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 8,
-  },
   modTag: { fontStyle: 'italic', fontSize: 12 },
   glanceSteps: { gap: 4 },
   glanceRow: {

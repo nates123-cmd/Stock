@@ -39,6 +39,7 @@ export function IngredientActionSheet({
   onEdit,
   onAddToShopping,
   onRemove,
+  onSkipThisCook,
   onHint,
 }: {
   ingredient: Ingredient | null;
@@ -48,6 +49,8 @@ export function IngredientActionSheet({
   onEdit: (ing: Ingredient, next: IngredientEdit) => void;
   onAddToShopping: (ing: Ingredient) => void;
   onRemove: (ing: Ingredient) => void;
+  /** Cook screen only: leave the recipe alone, note the skip on this cook. */
+  onSkipThisCook?: (ing: Ingredient) => void;
   onHint?: (msg: string) => void;
 }) {
   const items = usePantryStore((s) => s.items);
@@ -156,9 +159,23 @@ export function IngredientActionSheet({
               />
               <MenuItem
                 label="Edit"
-                hint="Amount, unit or name. The original stays struck through."
+                hint={
+                  onSkipThisCook
+                    ? 'Amount, unit or name. Saved on the recipe and recorded against this cook.'
+                    : 'Amount, unit or name. The original stays struck through.'
+                }
                 onPress={() => setMode('edit')}
               />
+              {onSkipThisCook ? (
+                <MenuItem
+                  label="Skip this cook"
+                  hint="Recipe unchanged; the cook log notes you left it out."
+                  onPress={() => {
+                    onSkipThisCook(ingredient);
+                    onClose();
+                  }}
+                />
+              ) : null}
               <MenuItem
                 label="Add to shopping list"
                 hint={`One-off, for ${recipeTitle}. Not a pantry change.`}
