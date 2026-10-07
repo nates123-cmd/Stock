@@ -13,6 +13,7 @@ import {
   defaultFreshnessDays,
   matchKey,
 } from '@/lib/pantry';
+import { newPantryRowFor, pantryRowFor } from '@/lib/ingredientPantry';
 
 /**
  * Pantry store (spec §10). Same platform-split persistence as the other
@@ -63,6 +64,13 @@ type PantryState = {
   setStatus: (id: string, status: PantryStatus, note?: string) => Promise<void>;
   /** Cycle fine → low → out → fine on tap. */
   cycleStatus: (id: string) => Promise<void>;
+  /**
+   * Flag a recipe ingredient by NAME (tap on a recipe row). Lands on the
+   * matching pantry row when there is one; otherwise creates a minimal,
+   * non-staple row carrying the status so the shopping list's restock scan
+   * picks it up. Returns the row touched.
+   */
+  flagIngredient: (canonicalName: string, status: PantryStatus) => Promise<PantryItem>;
   remove: (id: string) => Promise<void>;
 };
 
@@ -241,6 +249,18 @@ export const usePantryStore = create<PantryState>((set, get) => ({
     const item = get().items.find((p) => p.id === id);
     if (!item) return;
     await get().setStatus(id, NEXT_STATUS[item.status ?? 'fine']);
+  },
+
+  flagIngredient: async (canonicalName, status) => {
+    const existing = pantryRowFor({ canonicalName }, get().items);
+    if (existing) {
+      await get().setStatus(existing.id, status);
+      return get().items.find((p) => p.id === existing.id) ?? existing;
+    }
+    const item = newPantryRowFor({ canonicalName }, status, uid('pan'));
+    set((s) => ({ items: [...s.items, item] }));
+    await persist(item);
+    return item;
   },
 
   remove: async (id) => {

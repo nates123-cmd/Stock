@@ -24,7 +24,14 @@ import { dayTag, isSameDay } from '@/lib/week';
 import { modCount, ingredientAnnotation } from '@/lib/recipe';
 import { DinnerComponents } from '@/components/DinnerComponents';
 import { SubSheet, type AppliedSub } from '@/components/SubSheet';
+import { IngredientActionSheet, type IngredientEdit } from '@/components/IngredientActionSheet';
 import { applySubToIngredient } from '@/lib/substitutions';
+import { usePantryStore } from '@/store/pantry';
+import { useExtrasStore } from '@/store/extras';
+import { MANUAL_ACTIVE } from '@/lib/shopping';
+import { ingredientPantryStatus } from '@/lib/ingredientPantry';
+import { makeMod } from '@/lib/recipe';
+import type { Modification } from '@/types';
 import { indexRecipes, ingredientGroups } from '@/lib/dinners';
 import { uid } from '@/lib/id';
 import { pickRecipePhoto } from '@/lib/photo';
@@ -61,6 +68,11 @@ export default function RecipeDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   /** The ingredient a long-press opened Sub on. Null = sheet closed. */
   const [subFor, setSubFor] = useState<Ingredient | null>(null);
+  /** The ingredient a TAP opened the action sheet on (low / out / sub / edit…). */
+  const [actionFor, setActionFor] = useState<Ingredient | null>(null);
+  // Pantry status per row so a Low / Out flag shows right on the list.
+  const pantryItems = usePantryStore((s) => s.items);
+  const addExtra = useExtrasStore((s) => s.add);
   // Autocomplete source for the tag editor — every tag used anywhere in the
   // library, deduped case-insensitively (spec §6 tag editor).
   const allTagsAcrossLibrary = useMemo(() => {
@@ -480,16 +492,85 @@ export default function RecipeDetail() {
           }}
         />
 
+        {/* Tap an ingredient → everything you might do to it: pantry status
+            (Low / Out land on the shopping list), always-have, Sub, Edit,
+            one-off shopping add, Remove. Long-press is still the Sub shortcut. */}
+        <IngredientActionSheet
+          ingredient={actionFor}
+          recipeTitle={recipe.title}
+          onClose={() => setActionFor(null)}
+          onHint={setHint}
+          onSub={(ing) => {
+            setActionFor(null);
+            setSubFor(ing);
+          }}
+          onEdit={(ing, next: IngredientEdit) => {
+            const mods: Modification[] = [];
+            if (next.amount !== ing.amount || (next.unit ?? null) !== (ing.unit ?? null)) {
+              mods.push(
+                makeMod({
+                  type: 'amount',
+                  before: { amount: ing.amount, unit: ing.unit },
+                  after: { amount: next.amount, unit: next.unit },
+                }),
+              );
+            }
+            if (next.name.trim().toLowerCase() !== ing.canonicalName.trim().toLowerCase()) {
+              mods.push(makeMod({ type: 'name', before: ing.canonicalName, after: next.name }));
+            }
+            if (mods.length === 0) return;
+            const updated: Ingredient = {
+              ...ing,
+              amount: next.amount,
+              unit: next.unit,
+              canonicalName: next.name,
+              modificationHistory: [...ing.modificationHistory, ...mods],
+            };
+            void save({
+              ...recipe,
+              ingredients: recipe.ingredients.map((i) => (i.id === ing.id ? updated : i)),
+              modifiedAt: new Date(),
+            });
+            setHint(`Updated ${next.name}.`);
+          }}
+          onAddToShopping={(ing) => {
+            addExtra([
+              {
+                canonicalName: ing.canonicalName,
+                amount: ing.amount,
+                unit: ing.unit,
+                originLabel: `for ${recipe.title}`,
+                originId: MANUAL_ACTIVE,
+                recipes: [recipe.title],
+              },
+            ]);
+            setHint(`${ing.canonicalName} added to the shopping list.`);
+          }}
+          onRemove={(ing) => {
+            void save({
+              ...recipe,
+              ingredients: recipe.ingredients.filter((i) => i.id !== ing.id),
+              modifiedAt: new Date(),
+            });
+            setHint(`Removed ${ing.canonicalName}.`);
+          }}
+        />
+
         <View style={wide ? styles.twoCol : undefined}>
           <View style={wide ? styles.colLeft : undefined}>
             <SectionHeader label="Ingredients" onEdit={() => setEditing(true)} />
             <View style={styles.ingredients}>
               {recipe.ingredients.map((ing) => {
                 const annotation = clean ? null : ingredientAnnotation(ing);
+                const pantryStatus = ingredientPantryStatus(ing, pantryItems);
                 return (
                   <Pressable
                     key={ing.id}
                     style={styles.ingRow}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${ing.canonicalName}, options`}
+                    // Tap → the action sheet (low / out / sub / edit / remove).
+                    onPress={() => setActionFor(ing)}
                     // Long-press → Sub, right here. It used to deep-link to the
                     // Bench tab, which told you the answer and left you to
                     // retype it; accepting a swap now rewrites the ingredient.
@@ -506,6 +587,20 @@ export default function RecipeDetail() {
                         ) : null}
                         {ing.inlineNote ? (
                           <Text color="textFaint" style={styles.ingNote}>{`  ${ing.inlineNote}`}</Text>
+                        ) : null}
+                        {pantryStatus !== 'fine' ? (
+                          <View
+                            style={[
+                              styles.pantryPill,
+                              pantryStatus === 'out' && styles.pantryPillOut,
+                            ]}>
+                            <Text
+                              variant="sectionLabel"
+                              color={pantryStatus === 'out' ? 'accent' : 'warn'}
+                              style={styles.pantryPillText}>
+                              {pantryStatus}
+                            </Text>
+                          </View>
                         ) : null}
                       </View>
                       {annotation ? (
@@ -1233,6 +1328,17 @@ const styles = StyleSheet.create({
   cleanAmount: { fontSize: 18 },
   ingText: { flex: 1, gap: 2 },
   annotation: { fontStyle: 'italic', fontSize: 13 },
+  // Pantry low/out tag on a recipe row, same shape as the Pantry tab's pill.
+  pantryPill: {
+    marginLeft: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+    backgroundColor: colors.bg3,
+    alignSelf: 'center',
+  },
+  pantryPillOut: {},
+  pantryPillText: { fontSize: 10 },
   method: { gap: 18, paddingTop: 6 },
   stepRow: { flexDirection: 'row', gap: 14 },
   stepNum: {
