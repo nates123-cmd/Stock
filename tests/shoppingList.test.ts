@@ -8,6 +8,8 @@ import {
   planWizardWrite,
   pushedKeysCovering,
   releasePushedIds,
+  expiredPushed,
+  PUSHED_MAX_AGE_MS,
   upsertPushed,
   type ExtraRef,
   type PushedRef,
@@ -529,6 +531,84 @@ describe('plan wizard hand-off', () => {
     expect(k.active()).toEqual(['feta']);
     // lemons + paper towels are still pushed, under markers that still own them.
     expect(k.pushed.map((p) => p.key).sort()).toEqual(['lemons', 'paper towels']);
+  });
+});
+
+describe('pushed markers age out', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const T0 = new Date('2026-10-01T12:00:00Z');
+  const at = (days: number) => new Date(T0.getTime() + days * DAY);
+
+  /** shopping.tsx's sweep effect, handler for handler. */
+  const sweep = (k: Kitchen, now: Date) => {
+    const gone = expiredPushed(k.pushed, k.extras, now);
+    k.extras = k.extras.filter((e) => !gone.extraIds.includes(e.id));
+    for (const key of gone.keys) k.restorePushed(key);
+    return gone;
+  };
+
+  it('threshold is a week', () => {
+    expect(PUSHED_MAX_AGE_MS).toBe(7 * DAY);
+  });
+
+  it('a week after a push, marker AND its rows are gone — nothing floods back', () => {
+    const k = new Kitchen();
+    k.runWizard([wizardRow('feta', '4 oz', ['A']), wizardRow('lemons', '3', ['A'])]);
+    k.push(
+      k.extras.map((e) => ({ name: e.canonicalName, extraId: e.id })),
+    );
+    k.pushed = k.pushed.map((p) => ({ ...p, pushedAt: T0 }));
+    expect(k.active()).toEqual([]);
+
+    // Six days: untouched.
+    expect(sweep(k, at(6)).keys).toEqual([]);
+    expect(k.extras).toHaveLength(2);
+    expect(k.active()).toEqual([]);
+
+    // Eight days: cleared, and Active is STILL empty (the old 24h expiry
+    // dropped the marker alone, and the rows came back).
+    const gone = sweep(k, at(8));
+    expect(gone.keys.sort()).toEqual(['feta', 'lemons']);
+    expect(k.pushed).toEqual([]);
+    expect(k.extras).toEqual([]);
+    expect(k.active()).toEqual([]);
+  });
+
+  it('only old markers go; a newer push on the same list stays', () => {
+    const k = new Kitchen();
+    k.addManual('feta');
+    k.push([{ name: 'feta', extraId: k.extras[0]!.id }]);
+    k.pushed[0]!.pushedAt = T0;
+    k.addManual('lemons');
+    k.push([{ name: 'lemons', extraId: k.extras[1]!.id }]);
+    k.pushed[1]!.pushedAt = at(5);
+
+    sweep(k, at(8));
+    expect(k.pushed.map((p) => p.key)).toEqual(['lemons']);
+    expect(k.extras.map((e) => e.canonicalName)).toEqual(['lemons']);
+    expect(k.active()).toEqual([]);
+  });
+
+  it('a marker with no usable pushedAt counts as expired', () => {
+    const k = new Kitchen();
+    k.addManual('feta');
+    k.addManual('salt');
+    k.push([{ name: 'feta', extraId: k.extras[0]!.id }]);
+    // Legacy shapes seen in the cloud: no stamp at all, and an Invalid Date
+    // from reviving a null.
+    k.pushed[0]!.pushedAt = undefined;
+    k.pushed.push({ key: 'salt', name: 'salt', dest: 'wegmans', pushedAt: new Date(NaN) });
+    const gone = sweep(k, at(0));
+    expect(gone.keys.sort()).toEqual(['feta', 'salt']);
+    // The legacy name-matcher takes its name-matched row, like Clear does.
+    expect(k.extras).toEqual([]);
+  });
+
+  it('is a no-op on an empty or all-fresh list', () => {
+    expect(expiredPushed([], [], at(0))).toEqual({ keys: [], extraIds: [] });
+    const fresh = [{ key: 'feta', name: 'feta', extraIds: ['e1'], pushedAt: at(0) }];
+    expect(expiredPushed(fresh, [{ id: 'e1', canonicalName: 'feta', originId: null }], at(1)))
+      .toEqual({ keys: [], extraIds: [] });
   });
 });
 

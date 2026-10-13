@@ -30,6 +30,7 @@ import { usePlanStore } from '@/store/plan';
 import { useRecipeStore } from '@/store/recipes';
 import { useHaveStore } from '@/store/have';
 import { useExtrasStore, type ExtraItem } from '@/store/extras';
+import { useSyncStatus } from '@/lib/sync';
 import { usePantryStore } from '@/store/pantry';
 import { useShopMetaStore } from '@/store/shopMeta';
 import { usePushedStore } from '@/store/pushed';
@@ -44,6 +45,7 @@ import {
   extrasForAllPushed,
   isNamePushed,
   pushedKeysCovering,
+  expiredPushed,
 } from '@/lib/activeList';
 import {
   STORES,
@@ -158,10 +160,28 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
   const restorePushed = usePushedStore((s) => s.restore);
   const clearPushed = usePushedStore((s) => s.clear);
   const hydratePushed = usePushedStore((s) => s.hydrate);
+  const pushedHydrated = usePushedStore((s) => s.hydrated);
+  const extrasHydrated = useExtrasStore((s) => s.hydrated);
+  const syncPhase = useSyncStatus((s) => s.phase);
+  const lastSyncAt = useSyncStatus((s) => s.lastSyncAt);
   const startCartFill = useCartFillStore((s) => s.start);
   useEffect(() => {
     void hydratePushed();
   }, [hydratePushed]);
+  // Pushed markers age out after a week — "Clear" on a schedule, marker and
+  // the rows it owns together (see expiredPushed). Runs on entry and again
+  // after every sync (foreground, online, the on-screen timer), never before
+  // the first cloud pull: a stale device sweeping early would drop a marker
+  // without the extras it owns in the cloud, and they'd arrive un-hidden —
+  // the exact flood-back the old 24h self-expiry caused.
+  useEffect(() => {
+    if (!pushedHydrated || !extrasHydrated) return;
+    if (syncPhase !== 'off' && lastSyncAt == null) return;
+    const gone = expiredPushed(pushedItems, extras, new Date());
+    if (gone.keys.length === 0) return;
+    for (const id of gone.extraIds) removeExtra(id);
+    for (const key of gone.keys) restorePushed(key);
+  }, [pushedHydrated, extrasHydrated, syncPhase, lastSyncAt, pushedItems, extras, removeExtra, restorePushed]);
   // Pull the nightly Walmart refresh (cached copy first, then Supabase). Failing
   // is fine — the bundled catalog answers either way, just staler.
   useEffect(() => {
@@ -2332,6 +2352,11 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                 </Text>
               </Pressable>
             </View>
+            {pushedOpen ? (
+              <Text variant="sectionLabel" color="textFaint" style={styles.pushedHint}>
+                Clears itself a week after the push
+              </Text>
+            ) : null}
             {pushedOpen
               ? pushedItems.map((e) => (
                   <View key={`pushed:${e.key}`} style={styles.pushedRow}>
@@ -3590,6 +3615,7 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   pushedSection: { marginTop: 24 },
+  pushedHint: { paddingBottom: 6 },
   pushedHeader: {
     flexDirection: 'row',
     alignItems: 'center',

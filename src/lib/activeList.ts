@@ -39,6 +39,8 @@ export type PushedRef = {
   extraIds?: string[];
   /** Marker also excludes by name (restock rows; legacy markers). */
   nameMatch?: true;
+  /** When it went out. Absent/invalid on markers from before this was synced. */
+  pushedAt?: Date | null;
 };
 
 /** A marker with neither field set predates ids — keep its name behaviour. */
@@ -232,6 +234,55 @@ export function releasePushedIds<E extends PushedRef>(items: E[], extraIds: stri
     out.push({ ...p, extraIds: rest });
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * Pushed markers age out
+ * ------------------------------------------------------------------ */
+
+/** A push is an order. A week on, it has arrived and been eaten or put away. */
+export const PUSHED_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+const pushedAtMs = (p: PushedRef): number | null => {
+  const d = p.pushedAt;
+  if (!(d instanceof Date)) return null;
+  const t = d.getTime();
+  return Number.isNaN(t) ? null : t;
+};
+
+/**
+ * Which markers are older than {@link PUSHED_MAX_AGE_MS}, and which extras go
+ * with them.
+ *
+ * This is NOT the old 24-hour self-expiry coming back. That dropped the marker
+ * and nothing else, so every row it had hidden flooded straight back onto
+ * Active — "groceries I already ordered are on my list again". Expiry here is
+ * "Clear" on a schedule: the marker AND the rows it owns (`extrasForPushed`, the
+ * same predicate that hid them) are deleted together, so nothing can come back.
+ *
+ * A marker with no usable `pushedAt` (written before the stamp was synced) is
+ * treated as expired — those are months old by now.
+ *
+ * Callers must only sweep AFTER the cloud pull has landed: on a device whose
+ * local copy is stale, sweeping first would delete the marker locally without
+ * the extras it owns in the cloud, and those would then arrive un-hidden.
+ */
+export function expiredPushed<T extends ExtraRef>(
+  pushed: PushedRef[],
+  extras: T[],
+  now: Date,
+  maxAgeMs = PUSHED_MAX_AGE_MS,
+): { keys: string[]; extraIds: string[] } {
+  const cutoff = now.getTime() - maxAgeMs;
+  const old = pushed.filter((p) => {
+    const t = pushedAtMs(p);
+    return t == null || t < cutoff;
+  });
+  if (old.length === 0) return { keys: [], extraIds: [] };
+  return {
+    keys: old.map((p) => p.key),
+    extraIds: extrasForAllPushed(old, extras).map((e) => e.id),
+  };
 }
 
 /* ------------------------------------------------------------------ *
