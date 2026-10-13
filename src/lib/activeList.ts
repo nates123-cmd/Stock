@@ -201,6 +201,39 @@ export function pushedKeysCovering(name: string, pushed: PushedRef[]): string[] 
     .map((p) => p.key);
 }
 
+/**
+ * Take these extras away from every marker that owns them BY ID.
+ *
+ * `pushedKeysCovering` only drops NAME-matching markers, on the assumption that
+ * a fresh row's id is in nobody's list. That holds for an add — but the wizard
+ * does not always add. `planWizardWrite` reuses an existing wizard row for the
+ * same item (so a rebuild doesn't duplicate), and that row's id may well sit in
+ * a marker from the LAST time this meal was shopped. The patch lands, the row
+ * stays hidden, and the list comes out short by exactly the items that were
+ * bought last time ("I pushed 10 and only 2 made it").
+ *
+ * A marker emptied of ids that never matched by name owns nothing and is
+ * dropped. One that still name-matches is kept (name-matching is sticky; see
+ * `upsertPushed`) — the caller clears those through `pushedKeysCovering`.
+ * Untouched markers keep their object identity, so a no-op release doesn't
+ * echo-push the whole table to the cloud.
+ */
+export function releasePushedIds<E extends PushedRef>(items: E[], extraIds: string[]): E[] {
+  const ids = new Set(extraIds);
+  if (ids.size === 0) return items;
+  const out: E[] = [];
+  for (const p of items) {
+    if (!p.extraIds?.some((id) => ids.has(id))) {
+      out.push(p);
+      continue;
+    }
+    const rest = p.extraIds.filter((id) => !ids.has(id));
+    if (rest.length === 0 && !matchesByName(p)) continue;
+    out.push({ ...p, extraIds: rest });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ *
  * The build-shopping-list wizard's hand-off
  * ------------------------------------------------------------------ */

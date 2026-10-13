@@ -74,6 +74,7 @@ export default function BuildListScreen() {
   const unsuppress = useShopMetaStore((s) => s.unsuppress);
   const pushedItems = usePushedStore((s) => s.items);
   const restorePushed = usePushedStore((s) => s.restore);
+  const releasePushed = usePushedStore((s) => s.release);
   const learnSynonym = useSynonymsStore((s) => s.learn);
   const declineMatch = useSynonymsStore((s) => s.decline);
 
@@ -398,6 +399,12 @@ export default function BuildListScreen() {
     // and never routes them to Staples, even when the item is also a staple.
     // `recipes` drives the BY RECIPE grouping on the list.
     const write = planWizardWrite(combineRows, existingExtras, parseQty, PLAN_WIZARD);
+    //  3. RELEASE. An UPDATED row keeps its id — and that id may still be owned
+    //     by the marker from the last time this meal was shopped. Rule 1 only
+    //     clears name-matching markers (a NEW row's id is in nobody's list), so
+    //     without this the reused rows were patched and stayed hidden: "pushed
+    //     10, only 2 showed up" — the 2 were the adds, the rest were reuses.
+    releasePushed(write.updates.map((u) => u.extra.id));
     for (const u of write.updates) updateExtra(u.extra.id, u.patch);
     if (write.adds.length > 0) addExtras(write.adds);
     // Land on the real Shop TAB (with tab chrome), not the standalone /shopping

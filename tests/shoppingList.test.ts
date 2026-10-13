@@ -7,6 +7,7 @@ import {
   isNamePushed,
   planWizardWrite,
   pushedKeysCovering,
+  releasePushedIds,
   upsertPushed,
   type ExtraRef,
   type PushedRef,
@@ -87,6 +88,10 @@ class Kitchen {
       for (const key of pushedKeysCovering(r.name, this.pushed)) this.restorePushed(key);
     }
     const write = planWizardWrite(rows, this.extras, parseQty, PLAN_WIZARD);
+    this.pushed = releasePushedIds(
+      this.pushed,
+      write.updates.map((u) => u.extra.id),
+    );
     for (const u of write.updates) {
       Object.assign(u.extra, u.patch);
     }
@@ -476,6 +481,88 @@ describe('plan wizard hand-off', () => {
     k.runWizard(rows);
     expect(k.active().sort()).toEqual(first);
     expect(k.extras).toHaveLength(2);
+  });
+
+  // Nate, 2026-10-13: "I tried to push ~10 ingredients from the recipes into
+  // stock last night from a plan (salmon miso bowls) and only 2 made it."
+  // The meal had been shopped on 9/22. The rebuild REUSED six of those rows
+  // (same name → update in place) and ADDED two. The six reused ids were still
+  // owned by the 9/22 push markers, so they were patched and stayed hidden.
+  it('re-shopping a meal that was pushed last time surfaces every row again', () => {
+    const k = new Kitchen();
+    const bowl = [
+      wizardRow('salmon fillet, skinless', '1 lb', ['Sticky Miso Salmon Bowl']),
+      wizardRow('sushi rice', '2 cups', ['Sticky Miso Salmon Bowl']),
+      wizardRow('nori sheet, toasted', '2', ['Sticky Miso Salmon Bowl']),
+      wizardRow('cucumber, sliced', '1', ['Sticky Miso Salmon Bowl']),
+      wizardRow('avocado, sliced', '1', ['Sticky Miso Salmon Bowl']),
+      wizardRow('grapefruit zest', '1 tsp', ['Sticky Miso Salmon Bowl']),
+    ];
+    k.runWizard(bowl);
+    expect(k.pushAllActive()).toBe(6);
+    expect(k.active()).toEqual([]);
+
+    // Three weeks later: same meal planned again, recipe gained two lines.
+    const again = [
+      ...bowl,
+      wizardRow('scallion, sliced', '2', ['Sticky Miso Salmon Bowl']),
+      wizardRow('grapefruit juice', '2 tbsp', ['Sticky Miso Salmon Bowl']),
+    ];
+    const write = k.runWizard(again);
+    expect(write.updates).toHaveLength(6);
+    expect(write.adds).toHaveLength(2);
+    expect(k.active().sort()).toEqual(again.map((r) => r.name).sort());
+    // No duplicates were created to get there.
+    expect(k.extras).toHaveLength(8);
+    // The old markers are gone — they owned nothing else.
+    expect(k.pushed).toEqual([]);
+  });
+
+  it('releasing a reused row leaves the rest of that push alone', () => {
+    const k = new Kitchen();
+    k.runWizard([wizardRow('feta', '4 oz', ['A']), wizardRow('lemons', '3', ['A'])]);
+    k.addManual('paper towels');
+    k.pushAllActive();
+    expect(k.active()).toEqual([]);
+    // Rebuild for a meal that only shares feta with the last order.
+    k.runWizard([wizardRow('feta', '8 oz', ['B'])]);
+    expect(k.active()).toEqual(['feta']);
+    // lemons + paper towels are still pushed, under markers that still own them.
+    expect(k.pushed.map((p) => p.key).sort()).toEqual(['lemons', 'paper towels']);
+  });
+});
+
+describe('releasePushedIds', () => {
+  const marker = (key: string, extraIds?: string[], nameMatch?: true): PushedRef => ({
+    key,
+    name: key,
+    ...(extraIds ? { extraIds } : {}),
+    ...(nameMatch ? { nameMatch } : {}),
+  });
+
+  it('drops a marker emptied of ids, trims one that keeps others', () => {
+    const out = releasePushedIds(
+      [marker('avocado', ['a1', 'a2', 'a3']), marker('salmon', ['s1'])],
+      ['a1', 's1'],
+    );
+    expect(out).toEqual([marker('avocado', ['a2', 'a3'])]);
+  });
+
+  it('keeps a name-matching marker even when its ids are gone (sticky)', () => {
+    const legacy = marker('feta'); // pre-ids: no extraIds at all
+    const restock = marker('salt', ['x1'], true);
+    const out = releasePushedIds([legacy, restock], ['x1']);
+    expect(out).toEqual([legacy, { ...restock, extraIds: [] }]);
+    // Still hides the name — the caller clears that via pushedKeysCovering.
+    expect(isNamePushed('salt', out)).toBe(true);
+  });
+
+  it('is a no-op by reference when nothing matches', () => {
+    const items = [marker('feta', ['f1']), marker('lemons', ['l1'])];
+    expect(releasePushedIds(items, [])).toBe(items);
+    const out = releasePushedIds(items, ['zzz']);
+    expect(out[0]).toBe(items[0]);
+    expect(out[1]).toBe(items[1]);
   });
 });
 

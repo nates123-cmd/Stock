@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { webPersist } from '@/lib/db/webStore';
-import { upsertPushed, type PushedInput } from '@/lib/activeList';
+import { releasePushedIds, upsertPushed, type PushedInput } from '@/lib/activeList';
 
 export type { PushedInput };
 
@@ -56,6 +56,12 @@ type PushedState = {
   push: (rows: PushedInput[], dest: PushDest, at?: Date) => void;
   /** Pull a name back out (matchKey) — it returns to the active list. */
   restore: (key: string) => void;
+  /**
+   * Stop hiding these extras (by id). For a row the wizard REUSES rather than
+   * adds: its id may still be owned by the marker from the last time the same
+   * meal was shopped, and only an id release can surface it again.
+   */
+  release: (extraIds: string[]) => void;
   /** Empty the pushed list (start a fresh shopping cycle). */
   clear: () => void;
 };
@@ -77,6 +83,11 @@ export const usePushedStore = create<PushedState>((set, get) => ({
   },
 
   restore: (key) => set((s) => ({ items: s.items.filter((e) => e.key !== key) })),
+
+  release: (extraIds) => {
+    if (extraIds.length === 0) return;
+    set((s) => ({ items: releasePushedIds(s.items, extraIds) }));
+  },
 
   clear: () => set({ items: [] }),
 }));
