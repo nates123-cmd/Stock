@@ -207,7 +207,7 @@ describe('malformed rows do not blank the library', () => {
   });
 
   it('normalizeRecipeShape fills the missing arrays and leaves good rows alone', () => {
-    const good = { ...recipe('Plain', ['egg']), tags: [] };
+    const good = { ...recipe('Plain', ['egg']), tags: [], yield: { serves: 2 } };
     expect(normalizeRecipeShape(good)).toBe(good);
 
     const bad = recipe('Salad', ['lettuce']);
@@ -221,6 +221,18 @@ describe('malformed rows do not blank the library', () => {
     expect(last.parsedTimers).toEqual([]);
     expect(last.parsedAmounts).toEqual([]);
     expect(modCount(fixed)).toBe(0);
+  });
+
+  it('normalizeRecipeShape fills a missing or broken yield', () => {
+    const noYield = { ...recipe('Pumpkin Night', ['gnocchi']), tags: [] } as Partial<Recipe>;
+    delete noYield.yield;
+    const fixed = normalizeRecipeShape(noYield as Recipe);
+    expect(fixed.yield).toEqual({ serves: 4 });
+    expect(fixed.yield.totalMinutes).toBeUndefined();
+
+    const timeOnly = { ...recipe('Stew', ['beef']), tags: [] };
+    timeOnly.yield = { totalMinutes: 90 } as Recipe['yield'];
+    expect(normalizeRecipeShape(timeOnly).yield).toEqual({ totalMinutes: 90, serves: 4 });
   });
 });
 

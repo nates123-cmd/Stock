@@ -13,7 +13,9 @@ export function modCount(r: Recipe): number {
 
 /**
  * Fill in the array fields a Recipe's ingredients and steps are required to
- * carry. Rows can arrive without them — an old build cast a partial object to
+ * carry, and the `yield` object (a row written straight to the cloud without
+ * it crashed every screen on `recipe.yield.totalMinutes`). Rows can arrive
+ * without them — an old build cast a partial object to
  * Step, and a cloud row could have been written by any client — and code all
  * over the app indexes into these without checking. Returns the same object
  * when nothing is missing, so callers can key on identity.
@@ -46,8 +48,17 @@ export function normalizeRecipeShape(r: Recipe): Recipe {
   if (!Array.isArray(r.ingredients) || !Array.isArray(r.steps) || !Array.isArray(r.tags)) {
     changed = true;
   }
+  const y = r.yield as Recipe['yield'] | undefined;
+  const yieldOk = !!y && typeof y === 'object' && typeof y.serves === 'number';
+  if (!yieldOk) changed = true;
   if (!changed) return r;
-  return { ...r, ingredients, steps, tags: Array.isArray(r.tags) ? r.tags : [] };
+  return {
+    ...r,
+    ingredients,
+    steps,
+    tags: Array.isArray(r.tags) ? r.tags : [],
+    yield: yieldOk ? r.yield : { ...(y && typeof y === 'object' ? y : {}), serves: 4 },
+  };
 }
 
 export function isModified(r: Recipe): boolean {
