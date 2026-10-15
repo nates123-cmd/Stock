@@ -116,7 +116,7 @@ export function RecipeTools({ recipe, onSave, onHint, children, style }: RecipeT
       const { results, rejected } = await convertToGrams(chosen);
       const skipped = rejected.map((r) => `${r.name} (${r.reason})`).join(', ');
       if (results.length === 0) {
-        onHint(skipped ? `Left unconverted: ${skipped}.` : 'Couldn’t convert those — try again.');
+        onHint(skipped ? `Nothing converted. ${skipped}.` : 'Couldn’t convert those — try again.');
         return;
       }
       const byId = new Map(results.map((r) => [r.id, r.grams]));

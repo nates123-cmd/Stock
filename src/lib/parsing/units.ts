@@ -141,24 +141,37 @@ export async function convertToGrams(
     amount: i.amount,
     unit: i.unit,
   }));
-  const out = await claudeText(
-    'bench-convert-density',
-    CONVERT_SYSTEM,
-    JSON.stringify(payload),
-  );
-
-  const cleaned = out.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  const s = cleaned.indexOf('{');
-  const e = cleaned.lastIndexOf('}');
-  if (s < 0 || e < 0) throw new Error('Bench parse: no JSON in response');
-  const parsed = JSON.parse(cleaned.slice(s, e + 1)) as {
-    items?: { id?: unknown; gramsPerCup?: unknown }[];
-  };
-  if (!Array.isArray(parsed.items)) throw new Error('Bench parse: no items array');
-
+  // A Claude failure must not throw away the rows the table already settled:
+  // the staples convert regardless, and only the rows that needed a density
+  // come back as "left unconverted" with the reason. Before this, one flaky
+  // proxy round trip surfaced as a bare error and converted nothing.
   const byId = new Map<string, number>();
-  for (const x of parsed.items) {
-    if (typeof x.id === 'string' && typeof x.gramsPerCup === 'number') byId.set(x.id, x.gramsPerCup);
+  let claudeFailure: string | null = null;
+  try {
+    const out = await claudeText(
+      'bench-convert-density',
+      CONVERT_SYSTEM,
+      JSON.stringify(payload),
+    );
+    const cleaned = out.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    const s = cleaned.indexOf('{');
+    const e = cleaned.lastIndexOf('}');
+    if (s < 0 || e < 0) throw new Error('no JSON in the reply');
+    const parsed = JSON.parse(cleaned.slice(s, e + 1)) as {
+      items?: { id?: unknown; gramsPerCup?: unknown }[];
+    };
+    if (!Array.isArray(parsed.items)) throw new Error('no items in the reply');
+    for (const x of parsed.items) {
+      if (typeof x.id === 'string' && typeof x.gramsPerCup === 'number') byId.set(x.id, x.gramsPerCup);
+    }
+  } catch (err) {
+    claudeFailure = err instanceof Error ? err.message : String(err);
+  }
+  if (claudeFailure != null) {
+    for (const i of needClaude) {
+      rejected.push({ id: i.id, name: i.canonicalName, reason: claudeFailure });
+    }
+    return { results, rejected };
   }
 
   for (const i of needClaude) {

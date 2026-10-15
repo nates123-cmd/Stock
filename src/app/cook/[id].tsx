@@ -18,6 +18,7 @@ import {
   IngredientAmount,
   IngredientName,
   RecipeTools,
+  RouteError,
 } from '@/components';
 import { colors, layout, palette, InkProvider } from '@/design';
 
@@ -76,6 +77,12 @@ export default function CookScreen() {
       <CookScreenInner />
     </InkProvider>
   );
+}
+
+/** A render error mid-cook retries in place; the root boundary would remount
+ *  the router and drop you on the tabs home instead. */
+export function ErrorBoundary(props: { error: Error; retry: () => void }) {
+  return <RouteError {...props} backLabel="Back to Cook" backTo="/cook" />;
 }
 
 function CookScreenInner() {
@@ -658,11 +665,19 @@ function FocusedBody({
       </Pressable>
 
       <ScrollView contentContainerStyle={styles.focusContent}>
-        <Heading variant="cookStepTitle">{current.title}</Heading>
-        <StepIngredients ingredients={stepIngredients} large />
-        <View style={styles.focusBody}>
-          <StepBody body={current.body} size={20} onStartTimer={onStartTimer} />
-        </View>
+        {/* A dinner shell (links other recipes, no method of its own) has no
+            steps at all; reading `current.title` off it crashed the route. */}
+        {current ? (
+          <>
+            <Heading variant="cookStepTitle">{current.title}</Heading>
+            <StepIngredients ingredients={stepIngredients} large />
+            <View style={styles.focusBody}>
+              <StepBody body={current.body} size={20} onStartTimer={onStartTimer} />
+            </View>
+          </>
+        ) : (
+          <Text color="textMuted">This recipe has no steps of its own.</Text>
+        )}
       </ScrollView>
 
       <TimerStrip timers={timers} onClear={onClearTimer} />
