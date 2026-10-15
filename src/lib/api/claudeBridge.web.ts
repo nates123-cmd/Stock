@@ -21,26 +21,53 @@ const REASON_MODEL = 'claude-sonnet-4-6';
 
 export const CLAUDE_AVAILABLE = !!PROXY_URL;
 
+/** Attempts per call; the proxy is a cold-starting Edge Function and Anthropic
+ *  itself returns the odd 529, so one failed round trip is not an answer. */
+const ATTEMPTS = 3;
+const BACKOFF_MS = 700;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Transient = worth another go: the network dropped, the proxy or the model
+ *  was busy (429/5xx), or the body came back empty / not JSON (a gateway
+ *  timeout page). A 4xx that is our own fault (bad body, too large, forbidden)
+ *  is final. */
+function transient(status: number | null): boolean {
+  return status == null || status === 429 || status >= 500;
+}
+
 async function postProxy(body: Record<string, unknown>): Promise<string> {
   if (!PROXY_URL) {
     throw new Error('Claude proxy not configured (EXPO_PUBLIC_CLAUDE_PROXY_URL).');
   }
-  const res = await fetch(PROXY_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(PROXY_SECRET ? { 'x-stock-proxy-secret': PROXY_SECRET } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  const data = (await res.json().catch(() => ({}))) as {
-    text?: string;
-    error?: string;
-  };
-  if (!res.ok || typeof data.text !== 'string') {
-    throw new Error(`Claude proxy ${res.status}: ${data.error ?? 'unknown error'}`);
+  let lastMessage = 'no response';
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    let status: number | null = null;
+    try {
+      const res = await fetch(PROXY_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(PROXY_SECRET ? { 'x-stock-proxy-secret': PROXY_SECRET } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      status = res.status;
+      const data = (await res.json().catch(() => ({}))) as {
+        text?: string;
+        error?: string;
+      };
+      if (res.ok && typeof data.text === 'string') return data.text;
+      // "unknown error" used to be the whole story when the body wasn't JSON
+      // (a gateway timeout page, an empty 5xx). Say what actually happened.
+      lastMessage = data.error ?? (res.ok ? 'empty reply' : `status ${res.status}, no detail`);
+      if (!transient(status)) break;
+    } catch (e) {
+      lastMessage = e instanceof Error ? e.message : String(e);
+    }
+    if (attempt < ATTEMPTS) await sleep(BACKOFF_MS * attempt);
   }
-  return data.text;
+  throw new Error(`Claude didn't answer (${lastMessage}). Try again in a moment.`);
 }
 
 export async function claudeText(

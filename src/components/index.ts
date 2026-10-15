@@ -41,5 +41,6 @@ export { CaptureSheet } from './CaptureSheet';
 export { GlobalCapture } from './GlobalCapture';
 export { BenchPanel, BenchSheet, ConvertTool, SubTool } from './BenchTools';
 export type { BenchTab, BenchPanelProps } from './BenchTools';
+export { RouteError } from './RouteError';
 export { RecipeTools } from './RecipeTools';
 export type { RecipeToolsProps } from './RecipeTools';

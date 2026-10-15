@@ -13,7 +13,7 @@ import { Overlay } from '@/components';
 import { FolderPicker } from '@/components/FolderPicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow, RecipeTools, EnamelTile, SortableList } from '@/components';
+import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomActionBar, IngredientAmount, IngredientName, FilterChip, ChipRow, RecipeTools, EnamelTile, SortableList, RouteError } from '@/components';
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
@@ -52,6 +52,12 @@ const SOURCE_NAME: Record<RecipeSource['type'], string> = {
   mine: 'mine',
   web: 'the web',
 };
+
+/** Keep a render error on THIS recipe (retry in place) instead of letting the
+ *  root boundary remount the router and dump you on the tabs home. */
+export function ErrorBoundary(props: { error: Error; retry: () => void }) {
+  return <RouteError {...props} backLabel="Back to recipes" backTo="/recipes" />;
+}
 
 export default function RecipeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();

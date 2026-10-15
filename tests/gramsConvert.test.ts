@@ -251,3 +251,24 @@ describe('Claude path — density in, arithmetic here', () => {
     expect(plausibleDensity(5 / 236.6)).toBe(false);
   });
 });
+
+describe('a Claude failure never throws away the table rows', () => {
+  it('converts the staples, reports the rest as unconverted with the reason', async () => {
+    claudeText.mockRejectedValueOnce(new Error("Claude didn't answer (status 502). Try again in a moment."));
+    const { results, rejected } = await convertToGrams([
+      ing('sugar', 'sugar', 5, 'tablespoon'),
+      ing('orzo', 'orzo', 1, 'cup'),
+    ]);
+    expect(results.map((r) => r.id)).toEqual(['sugar']);
+    expect(rejected).toEqual([
+      { id: 'orzo', name: 'orzo', reason: "Claude didn't answer (status 502). Try again in a moment." },
+    ]);
+  });
+
+  it('a reply with no JSON is reported the same way, not thrown', async () => {
+    claudeText.mockResolvedValueOnce('Sorry, I cannot help with that.');
+    const { results, rejected } = await convertToGrams([ing('orzo', 'orzo', 1, 'cup')]);
+    expect(results).toEqual([]);
+    expect(rejected).toEqual([{ id: 'orzo', name: 'orzo', reason: 'no JSON in the reply' }]);
+  });
+});
