@@ -36,7 +36,13 @@ import { useShopMetaStore } from '@/store/shopMeta';
 import { usePushedStore } from '@/store/pushed';
 import { useCartFillStore } from '@/store/cartFill';
 import type { PantryLocation, PantryStatus } from '@/types';
-import { matchKey, looksLikeSameItem } from '@/lib/pantry';
+import {
+  hasBackup,
+  looksLikeSameItem,
+  matchKey,
+  PANTRY_LOCATION_LABEL,
+  PANTRY_LOCATION_ORDER,
+} from '@/lib/pantry';
 import { areApart } from '@/lib/synonyms';
 import { alwaysHaveKey, isAlwaysHave, isExactAlwaysHave } from '@/lib/alwaysHave';
 import {
@@ -222,6 +228,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     for (const p of pantryItems) {
       const s = p.status ?? 'fine';
       if (s === 'fine') continue; // skip the default; only flag interesting states
+      // A spare downstairs means "bring one up", not "buy one" — the list
+      // reads it as fine. The Pantry tab still shows the out flag + the spare.
+      if (hasBackup(p)) continue;
       m.set(matchKey(p.canonicalName), { status: s, name: p.canonicalName });
     }
     return m;
@@ -728,7 +737,7 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  so they're filtered out here to avoid a duplicate row. */
   const pantryRestockLines = useMemo<ShoppingLine[]>(() => {
     const flagged = pantryItems.filter(
-      (p) => p.status === 'low' || p.status === 'out',
+      (p) => (p.status === 'low' || p.status === 'out') && !hasBackup(p),
     );
     if (flagged.length === 0) return [];
     const covered = new Set<string>();
@@ -3355,7 +3364,7 @@ function BuySheet({
 
       <SectionLabel color="textMuted">Where</SectionLabel>
       <View style={styles.locRow}>
-        {(['pantry', 'fridge', 'freezer'] as PantryLocation[]).map((l) => {
+        {PANTRY_LOCATION_ORDER.map((l) => {
           const on = loc === l;
           return (
             <Pressable
@@ -3364,8 +3373,8 @@ function BuySheet({
               style={[styles.locBtn, on && styles.locBtnOn]}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}>
-              <Text variant="bodyStrong" color={on ? 'bg' : 'text'}>
-                {l === 'pantry' ? 'Shelf' : l === 'fridge' ? 'Fridge' : 'Freezer'}
+              <Text variant="bodyStrong" color={on ? 'bg' : 'text'} numberOfLines={1}>
+                {PANTRY_LOCATION_LABEL[l]}
               </Text>
             </Pressable>
           );
@@ -3516,9 +3525,10 @@ const styles = StyleSheet.create({
   storeChipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
   detailFieldLabel: { marginTop: 8 },
   // Buy-confirm sheet: location picker + confirm.
-  locRow: { flexDirection: 'row', gap: 8, paddingTop: 2 },
+  locRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 2 },
   locBtn: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1,

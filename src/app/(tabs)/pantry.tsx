@@ -23,13 +23,20 @@ import {
 } from '@/lib/pantryCategories';
 import { useExtrasStore } from '@/store/extras';
 import {
+  backupCount,
   cycleEstimateDays,
   formatCycle,
   freshnessStatus,
+  hasBackup,
   isCycleStable,
+  isDownstairs,
+  isDownstairsLocation,
   isRecentlyAdded,
+  PANTRY_LOCATION_LABEL,
+  PANTRY_LOCATION_ORDER,
   shortDate,
 } from '@/lib/pantry';
+import { pantryRowFor } from '@/lib/ingredientPantry';
 import type { PantryItem, PantryLocation, PantryStatus } from '@/types';
 
 /**
@@ -93,6 +100,9 @@ export default function PantryScreen() {
   const cycleStatus = usePantryStore((s) => s.cycleStatus);
   const setStatus = usePantryStore((s) => s.setStatus);
   const setCategory = usePantryStore((s) => s.setCategory);
+  const setLocation = usePantryStore((s) => s.setLocation);
+  const setBackups = usePantryStore((s) => s.setBackups);
+  const useBackup = usePantryStore((s) => s.useBackup);
   const removeItem = usePantryStore((s) => s.remove);
   const applyPaste = usePantryStore((s) => s.applyPaste);
   const addExtras = useExtrasStore((s) => s.add);
@@ -107,25 +117,46 @@ export default function PantryScreen() {
   const [addName, setAddName] = useState('');
   const [addLocation, setAddLocation] = useState<PantryLocation>('pantry');
   const [addStaple, setAddStaple] = useState(false);
+  // "This is a spare for downstairs": a second jar of something already
+  // upstairs. Bumps the existing row's backup count instead of restocking it —
+  // the upstairs jar is no fuller, there's just one more in reserve.
+  const [addSpare, setAddSpare] = useState(false);
   const [addToast, setAddToast] = useState<string | null>(null);
   const openAdd = () => {
     setAddName('');
     setAddLocation('pantry');
     setAddStaple(false);
+    setAddSpare(false);
     setAdding(true);
   };
   const submitAdd = async () => {
     const name = addName.trim();
     if (!name) return;
-    const res = await applyPaste([
-      { canonicalName: name, location: addLocation, isStaple: addStaple },
-    ]);
+    const match = addSpare ? pantryRowFor({ canonicalName: name }, items) : undefined;
+    let toast: string;
+    if (match) {
+      const n = backupCount(match) + 1;
+      await setBackups(match.id, n);
+      toast = `${match.canonicalName}: ${n} spare${n === 1 ? '' : 's'} downstairs.`;
+    } else {
+      // A spare of something not tracked upstairs just lives downstairs.
+      const location = addSpare && !isDownstairsLocation(addLocation) ? 'basement' : addLocation;
+      const res = await applyPaste([{ canonicalName: name, location, isStaple: addStaple }]);
+      toast =
+        res.restocks > 0
+          ? `Restocked ${name}.`
+          : isDownstairsLocation(location)
+            ? `Added ${name} downstairs.`
+            : `Added ${name} to the pantry.`;
+    }
     setAdding(false);
-    setAddToast(
-      res.restocks > 0 ? `Restocked ${name}.` : `Added ${name} to the pantry.`,
-    );
+    setAddToast(toast);
     setTimeout(() => setAddToast(null), 3500);
   };
+
+  // Downstairs is collapsed by default: it's reserve stock, not what you cook
+  // from tonight. The count in the header is the glance.
+  const [downstairsOpen, setDownstairsOpen] = useState(false);
 
   const openMenu = (it: PantryItem) => {
     setMenu(it);
@@ -211,8 +242,23 @@ export default function PantryScreen() {
     () => new Set(lowOrOut.map((i) => i.id)),
     [lowOrOut],
   );
+  /**
+   * Downstairs: the basement shelf + chest freezer, plus anything upstairs with
+   * a spare down there. One place, apart from the kitchen categories, because
+   * "do we have more chicken thighs" is a different question from "what's on
+   * the shelf". Still one-row-one-place: low/out rows stay up top.
+   */
+  const downstairs = useMemo(() => {
+    const rank = (i: PantryItem) =>
+      i.location === 'deep-freezer' ? 0 : i.location === 'basement' ? 1 : 2;
+    return visible
+      .filter((i) => !inLowOrOut.has(i.id) && isDownstairs(i))
+      .sort((a, b) => rank(a) - rank(b) || a.canonicalName.localeCompare(b.canonicalName));
+  }, [visible, inLowOrOut]);
+  const inDownstairs = useMemo(() => new Set(downstairs.map((i) => i.id)), [downstairs]);
+
   const categorized = useMemo(() => {
-    const rest = visible.filter((i) => !inLowOrOut.has(i.id));
+    const rest = visible.filter((i) => !inLowOrOut.has(i.id) && !inDownstairs.has(i.id));
     const groups = new Map<PantryCategory, typeof rest>();
     for (const it of rest) {
       // A manual reassignment always beats the keyword guess.
@@ -228,7 +274,7 @@ export default function PantryScreen() {
         items: sortByStatus(groups.get(c)!),
       }),
     );
-  }, [visible, inLowOrOut]);
+  }, [visible, inLowOrOut, inDownstairs]);
 
   return (
     <View style={styles.root}>
@@ -310,6 +356,43 @@ export default function PantryScreen() {
           </Section>
         ))}
 
+        {downstairs.length > 0 ? (
+          <View style={styles.section}>
+            <Pressable
+              onPress={() => setDownstairsOpen((v) => !v)}
+              style={styles.downstairsHead}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: downstairsOpen }}>
+              <SectionLabel style={styles.sectionLabel}>
+                Downstairs · {downstairs.length}
+              </SectionLabel>
+              <View style={styles.downstairsHintRow}>
+                <Text color="textFaint" style={styles.downstairsHint}>
+                  {downstairsOpen ? 'hide' : 'basement + chest freezer'}
+                </Text>
+                <Glyph
+                  name="expand"
+                  size={12}
+                  color="textFaint"
+                  style={downstairsOpen ? styles.chevUp : styles.chev}
+                />
+              </View>
+            </Pressable>
+            {downstairsOpen ? (
+              <Card style={styles.sectionCard}>
+                {downstairs.map((it) => (
+                  <LooseRow
+                    key={`ds:${it.id}`}
+                    item={it}
+                    onCycle={() => cycleStatus(it.id)}
+                    onMenu={() => openMenu(it)}
+                  />
+                ))}
+              </Card>
+            ) : null}
+          </View>
+        ) : null}
+
         {items.length === 0 ? (
           <View style={styles.empty}>
             <Text color="textMuted">Nothing tracked yet.</Text>
@@ -369,6 +452,79 @@ export default function PantryScreen() {
                   </Pressable>
                 );
               })}
+            </View>
+
+            {hasBackup(menu) ? (
+              <Pressable
+                style={styles.menuItem}
+                onPress={async () => {
+                  await useBackup(menu.id);
+                  closeMenu();
+                }}>
+                <Text variant="bodyStrong" color="accent">
+                  Bring one up from downstairs
+                </Text>
+                <Text color="textFaint" style={styles.menuItemHint}>
+                  {backupCount(menu)} spare{backupCount(menu) === 1 ? '' : 's'} downstairs.
+                  Uses one and marks this fine — nothing to buy.
+                </Text>
+              </Pressable>
+            ) : null}
+
+            <View style={styles.noteWrap}>
+              <SectionLabel color="textMuted">Where</SectionLabel>
+              <View style={styles.catChips}>
+                {PANTRY_LOCATION_ORDER.map((loc) => {
+                  const active = menu.location === loc;
+                  return (
+                    <Pressable
+                      key={loc}
+                      onPress={async () => {
+                        await setLocation(menu.id, loc);
+                        closeMenu();
+                      }}
+                      style={[styles.catChip, active && styles.catChipOn]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}>
+                      <Text variant="sectionLabel" color={active ? 'bg' : 'textMuted'}>
+                        {PANTRY_LOCATION_LABEL[loc]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Sealed spares downstairs. A count on THIS row, never a second
+                row — the pantry dedupes by name, so a "basement paprika" would
+                merge straight back into this one. */}
+            <View style={styles.noteWrap}>
+              <SectionLabel color="textMuted">Spares downstairs</SectionLabel>
+              <View style={styles.stepper}>
+                <Pressable
+                  onPress={() => void setBackups(menu.id, backupCount(menu) - 1)}
+                  disabled={backupCount(menu) === 0}
+                  style={[styles.stepBtn, backupCount(menu) === 0 && styles.stepBtnOff]}
+                  accessibilityRole="button"
+                  accessibilityLabel="One fewer spare">
+                  <Text variant="bodyStrong">−</Text>
+                </Pressable>
+                <Numeric variant="bodyStrong" style={styles.stepCount}>
+                  {backupCount(menu)}
+                </Numeric>
+                <Pressable
+                  onPress={() => void setBackups(menu.id, backupCount(menu) + 1)}
+                  style={styles.stepBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel="One more spare">
+                  <Text variant="bodyStrong">+</Text>
+                </Pressable>
+                <Text color="textFaint" style={styles.stepHint}>
+                  {backupCount(menu) === 0
+                    ? 'none in reserve'
+                    : 'kept off the shopping list while any remain'}
+                </Text>
+              </View>
             </View>
 
             {/* Manual reassignment. The keyword guess will never be right for
@@ -479,25 +635,38 @@ export default function PantryScreen() {
 
           <View style={styles.noteWrap}>
             <SectionLabel color="textMuted">Where</SectionLabel>
-            <View style={styles.menuStatusRow}>
-              {(['pantry', 'fridge', 'freezer'] as PantryLocation[]).map((loc) => {
+            <View style={styles.catChips}>
+              {PANTRY_LOCATION_ORDER.map((loc) => {
                 const active = addLocation === loc;
                 return (
                   <Pressable
                     key={loc}
                     onPress={() => setAddLocation(loc)}
-                    style={[
-                      styles.menuStatusBtn,
-                      active && styles.menuStatusBtnActive,
-                    ]}>
-                    <Text variant="bodyStrong" color={active ? 'bg' : 'text'}>
-                      {loc === 'pantry' ? 'Shelf' : loc === 'fridge' ? 'Fridge' : 'Freezer'}
+                    style={[styles.catChip, active && styles.catChipOn]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}>
+                    <Text variant="sectionLabel" color={active ? 'bg' : 'textMuted'}>
+                      {PANTRY_LOCATION_LABEL[loc]}
                     </Text>
                   </Pressable>
                 );
               })}
             </View>
           </View>
+
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => setAddSpare((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ checked: addSpare }}>
+            <Text variant="bodyStrong">
+              {addSpare ? '✓ Spare for downstairs' : 'Spare for downstairs'}
+            </Text>
+            <Text color="textFaint" style={styles.menuItemHint}>
+              A backup of something already upstairs. Counts as one more in
+              reserve instead of a restock.
+            </Text>
+          </Pressable>
 
           <Pressable
             style={styles.menuItem}
@@ -645,6 +814,15 @@ function LooseRow({
           ) : fresh === 'aging' ? (
             <Pill label="use soon" tone="muted" />
           ) : null}
+          {isDownstairsLocation(item.location) ? (
+            <Pill label={PANTRY_LOCATION_LABEL[item.location].toLowerCase()} tone="muted" />
+          ) : null}
+          {hasBackup(item) ? (
+            <Pill
+              label={`${backupCount(item)} spare${backupCount(item) === 1 ? '' : 's'} downstairs`}
+              tone={status === 'fine' ? 'muted' : 'ok'}
+            />
+          ) : null}
           <View style={styles.rightPill}>
             <StatusPill status={status} since={item.statusUpdatedAt} />
           </View>
@@ -716,6 +894,28 @@ const styles = StyleSheet.create({
   subLine: { flexDirection: 'row', alignItems: 'center' },
   stableNote: { fontSize: 12, fontStyle: 'italic' },
   chev: { marginLeft: 6 },
+  chevUp: { marginLeft: 6, transform: [{ rotate: '180deg' }] },
+  downstairsHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
+  downstairsHintRow: { flexDirection: 'row', alignItems: 'center' },
+  downstairsHint: { fontSize: 12, fontStyle: 'italic' },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 4 },
+  stepBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBtnOff: { opacity: 0.4 },
+  stepCount: { minWidth: 20, textAlign: 'center' },
+  stepHint: { fontSize: 12, fontStyle: 'italic', flexShrink: 1 },
   histText: { fontSize: 12 },
   history: {
     marginTop: 10,

@@ -338,7 +338,13 @@ export type CookPlan = {
   origin?: 'paste' | 'manual';
 };
 
-export type PantryLocation = 'pantry' | 'fridge' | 'freezer';
+/**
+ * Where an item physically lives. `basement` is the downstairs storage shelf
+ * (overflow / backup spices, cases of stock); `deep-freezer` is the basement
+ * chest freezer. Both are "downstairs" — out of sight, so the Pantry tab lists
+ * them in their own section rather than folding them into the kitchen shelves.
+ */
+export type PantryLocation = 'pantry' | 'fridge' | 'freezer' | 'basement' | 'deep-freezer';
 
 /** Running-low signal — spec §10. Defaults to 'fine'. */
 export type PantryStatus = 'fine' | 'low' | 'out';
@@ -374,6 +380,14 @@ export type PantryItem = {
    * every item can be reassigned by hand and the choice sticks.
    */
   category?: PantryCategory;
+  /**
+   * Sealed spares kept downstairs (a second jar of paprika, a backup bottle of
+   * soy). NOT a separate row — the pantry dedupes by name, so a "basement
+   * paprika" row would restock-merge into this one anyway. While `backups > 0`
+   * an `out` upstairs means "bring one up", not "buy one", so the shopping
+   * list leaves it alone. Missing reads as 0.
+   */
+  backups?: number;
 };
 
 /**

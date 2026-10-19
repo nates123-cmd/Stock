@@ -58,6 +58,14 @@ type PantryState = {
   applyPaste: (rows: PasteInput[], at?: Date) => Promise<PasteResult>;
   toggleStaple: (id: string) => Promise<void>;
   setLocation: (id: string, location: PantryLocation) => Promise<void>;
+  /** Set how many sealed spares sit downstairs (clamped at 0; 0 clears the field). */
+  setBackups: (id: string, count: number) => Promise<void>;
+  /**
+   * "Brought one up": consume a downstairs spare. Decrements `backups` and
+   * resets status to fine — the upstairs jar is full again, nothing to buy.
+   * No-op when there is no spare to use.
+   */
+  useBackup: (id: string) => Promise<void>;
   /** Manually reassign an item's shelf category (overrides the keyword guess). */
   setCategory: (id: string, category: PantryCategory) => Promise<void>;
   /** spec §10 running-low signal — sets status (+ optional note), stamps statusUpdatedAt. */
@@ -210,6 +218,39 @@ export const usePantryStore = create<PantryState>((set, get) => ({
       items: s.items.map((p) => {
         if (p.id !== id) return p;
         updated = { ...p, location };
+        return updated;
+      }),
+    }));
+    if (updated) await persist(updated);
+  },
+
+  setBackups: async (id, count) => {
+    const n = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+    let updated: PantryItem | undefined;
+    set((s) => ({
+      items: s.items.map((p) => {
+        if (p.id !== id) return p;
+        updated = { ...p, backups: n > 0 ? n : undefined };
+        return updated;
+      }),
+    }));
+    if (updated) await persist(updated);
+  },
+
+  useBackup: async (id) => {
+    let updated: PantryItem | undefined;
+    set((s) => ({
+      items: s.items.map((p) => {
+        if (p.id !== id) return p;
+        const have = p.backups ?? 0;
+        if (have <= 0) return p;
+        const left = have - 1;
+        updated = {
+          ...p,
+          backups: left > 0 ? left : undefined,
+          status: 'fine',
+          statusUpdatedAt: new Date(),
+        };
         return updated;
       }),
     }));

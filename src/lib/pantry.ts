@@ -7,7 +7,7 @@
  * All pure functions — no store, no I/O — so they're trivially testable and
  * reused by both the list screen and the paste flow.
  */
-import type { Ingredient, PantryItem, ShoppingCategory } from '@/types';
+import type { Ingredient, PantryItem, PantryLocation, ShoppingCategory } from '@/types';
 import { monthShort } from '@/lib/format';
 import { areApart, areSynonyms } from '@/lib/synonyms';
 
@@ -52,6 +52,54 @@ export function computeExpiry(acquiredAt: Date, freshnessDays: number): Date {
   return new Date(acquiredAt.getTime() + freshnessDays * DAY);
 }
 
+/* ---------- locations ---------- */
+
+/** Chip order everywhere a location is picked: kitchen first, downstairs last. */
+export const PANTRY_LOCATION_ORDER: PantryLocation[] = [
+  'pantry',
+  'fridge',
+  'freezer',
+  'basement',
+  'deep-freezer',
+];
+
+export const PANTRY_LOCATION_LABEL: Record<PantryLocation, string> = {
+  pantry: 'Shelf',
+  fridge: 'Fridge',
+  freezer: 'Freezer',
+  basement: 'Basement',
+  'deep-freezer': 'Chest freezer',
+};
+
+/** Either freezer — frozen goods don't age, wherever the freezer sits. */
+export function isFrozenLocation(loc: PantryLocation): boolean {
+  return loc === 'freezer' || loc === 'deep-freezer';
+}
+
+/** Out of the kitchen: the basement shelf or the chest freezer. */
+export function isDownstairsLocation(loc: PantryLocation): boolean {
+  return loc === 'basement' || loc === 'deep-freezer';
+}
+
+/** Spares count, tolerant of rows written before the field existed. */
+export function backupCount(item: Pick<PantryItem, 'backups'>): number {
+  const n = item.backups ?? 0;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/** An out/low item with a sealed spare downstairs is a "bring it up", not a buy. */
+export function hasBackup(item: Pick<PantryItem, 'backups'>): boolean {
+  return backupCount(item) > 0;
+}
+
+/**
+ * Does this row belong in the Pantry tab's Downstairs section? Anything that
+ * lives downstairs, plus anything upstairs that has a spare down there.
+ */
+export function isDownstairs(item: Pick<PantryItem, 'location' | 'backups'>): boolean {
+  return isDownstairsLocation(item.location) || hasBackup(item);
+}
+
 /* ---------- recently-added window + freshness status ---------- */
 
 /** 12–14 day window after a paste (spec §10 "Recently added"). */
@@ -65,7 +113,7 @@ export type FreshnessStatus = 'fresh' | 'aging' | 'wilting';
  */
 export function freshnessStatus(item: PantryItem, now = new Date()): FreshnessStatus {
   if (item.isStaple) return 'fresh';
-  if (item.location === 'freezer') return 'fresh'; // freezing pauses the clock
+  if (isFrozenLocation(item.location)) return 'fresh'; // freezing pauses the clock
   const ageDays = (now.getTime() - item.acquiredAt.getTime()) / DAY;
   const budget = item.defaultFreshnessDays;
   if (budget >= 90) return 'fresh'; // long-life pantry goods — don't nag

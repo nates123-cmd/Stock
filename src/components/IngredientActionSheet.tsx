@@ -7,6 +7,7 @@ import { colors } from '@/design';
 import { formatAmount } from '@/lib/format';
 import { usePantryStore } from '@/store/pantry';
 import { pantryRowFor } from '@/lib/ingredientPantry';
+import { backupCount, hasBackup } from '@/lib/pantry';
 import { parseAmount } from '@/lib/amountInput';
 import type { Ingredient, PantryStatus, Unit } from '@/types';
 
@@ -56,6 +57,7 @@ export function IngredientActionSheet({
   const items = usePantryStore((s) => s.items);
   const flagIngredient = usePantryStore((s) => s.flagIngredient);
   const toggleStaple = usePantryStore((s) => s.toggleStaple);
+  const useBackup = usePantryStore((s) => s.useBackup);
   const [mode, setMode] = useState<'menu' | 'edit' | 'confirmRemove'>('menu');
 
   // Fresh menu every time a different row opens the sheet.
@@ -122,12 +124,31 @@ export function IngredientActionSheet({
                 })}
               </View>
               <Text color="textFaint" style={styles.statusHint}>
-                {status === 'fine'
-                  ? 'Low or Out puts it on the shopping list as a restock.'
-                  : status === 'low'
-                    ? 'On the shopping list. Tap Have it once you restock.'
-                    : 'On the shopping list and locked as needed. Tap Have it once you restock.'}
+                {row && hasBackup(row)
+                  ? `${backupCount(row)} spare${backupCount(row) === 1 ? '' : 's'} downstairs — Low or Out stays off the shopping list while any remain.`
+                  : status === 'fine'
+                    ? 'Low or Out puts it on the shopping list as a restock.'
+                    : status === 'low'
+                      ? 'On the shopping list. Tap Have it once you restock.'
+                      : 'On the shopping list and locked as needed. Tap Have it once you restock.'}
               </Text>
+              {row && hasBackup(row) && status !== 'fine' ? (
+                <Pressable
+                  style={styles.menuItem}
+                  onPress={async () => {
+                    await useBackup(row.id);
+                    onHint?.(`${row.canonicalName}: brought one up from downstairs.`);
+                    onClose();
+                  }}
+                  accessibilityRole="button">
+                  <Text variant="bodyStrong" color="accent">
+                    Bring one up from downstairs
+                  </Text>
+                  <Text color="textFaint" style={styles.menuHint}>
+                    Uses a spare and marks it fine.
+                  </Text>
+                </Pressable>
+              ) : null}
 
               {row ? (
                 <MenuItem
