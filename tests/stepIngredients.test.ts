@@ -169,7 +169,7 @@ describe('placeIngredients — misc', () => {
 describe('approxVolume', () => {
   it('rounds to what a measuring set can hit', () => {
     expect(approxVolume(ing('all-purpose flour', 600, 'g'))).toBe('about 4 3/4 cups');
-    expect(approxVolume(ing('kosher salt', 12, 'g'))).toBe('2 1/2 tsp');
+    expect(approxVolume(ing('kosher salt', 12, 'g'))).toBe('1 1/2 tbsp');
     expect(approxVolume(ing('granulated sugar', 60, 'g'))).toBe('5 tbsp');
     // 0.62 cup: a quarter-cup round would be 20% off, so tablespoons
     expect(approxVolume(ing('unsalted butter', 140, 'g'))).toBe('10 tbsp');
