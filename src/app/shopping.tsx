@@ -56,6 +56,7 @@ import {
 import {
   STORES,
   storeLabel,
+  lastRemindersBatch,
   remindersDeepLink,
   REMINDERS_SHORTCUT,
   type ShopMeta,
@@ -1189,6 +1190,22 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
       );
       pushToPushed(pushRefs(rows), 'reminders');
       clearSelection();
+    } catch {
+      setHint(`Install the "${REMINDERS_SHORTCUT}" Shortcut first — see SHORTCUTS.md.`);
+    }
+  };
+
+  // The handoff above cannot see whether the Shortcut actually ran. When iOS
+  // fails it ("An unknown error occurred") the rows are already in Pushed, so
+  // this fires the same batch at the Shortcut again without touching markers.
+  const resendNames = useMemo(() => lastRemindersBatch(pushedItems), [pushedItems]);
+  const resendToReminders = async () => {
+    const url = remindersDeepLink(resendNames);
+    if (!url) return;
+    try {
+      if (Platform.OS === 'web') window.location.href = url;
+      else await Linking.openURL(url);
+      setHint(`Sent ${resendNames.length} to Reminders again.`);
     } catch {
       setHint(`Install the "${REMINDERS_SHORTCUT}" Shortcut first — see SHORTCUTS.md.`);
     }
@@ -2365,6 +2382,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
               <Text variant="sectionLabel" color="textFaint" style={styles.pushedHint}>
                 Clears itself a week after the push
               </Text>
+            ) : null}
+            {pushedOpen && resendNames.length > 0 ? (
+              <Pressable
+                onPress={resendToReminders}
+                hitSlop={8}
+                style={styles.pushedHint}
+                accessibilityRole="button"
+                accessibilityLabel={`Send the last ${resendNames.length} Reminders items again`}>
+                <Text variant="sectionLabel" color="accent">
+                  Not in Reminders? Send last {resendNames.length} again
+                </Text>
+              </Pressable>
             ) : null}
             {pushedOpen
               ? pushedItems.map((e) => (
