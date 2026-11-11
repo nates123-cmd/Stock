@@ -48,3 +48,26 @@ export function remindersDeepLink(itemNames: string[]): string | null {
   const name = encodeURIComponent(REMINDERS_SHORTCUT);
   return `shortcuts://run-shortcut?name=${name}&input=text&text=${text}`;
 }
+
+/**
+ * The names from the most recent push to Reminders, ready to hand to
+ * `remindersDeepLink` a second time.
+ *
+ * The Shortcut handoff is fire-and-forget: Stock opens `shortcuts://` and has
+ * no way to learn whether the Shortcut ran. When iOS answers with "An unknown
+ * error occurred" the rows are already parked in Pushed and nothing reached
+ * Reminders (2026-11-11). This is what "Send again" re-sends: every marker that
+ * shares the newest Reminders push time, i.e. exactly that one batch. Markers
+ * carry the name only, so a re-send goes without quantities.
+ */
+export function lastRemindersBatch(
+  pushed: { name: string; dest: string; pushedAt: Date | string }[],
+): string[] {
+  const at = (p: { pushedAt: Date | string }) => new Date(p.pushedAt).getTime();
+  const sent = pushed.filter((p) => p.dest === 'reminders' && !Number.isNaN(at(p)));
+  if (sent.length === 0) return [];
+  const newest = Math.max(...sent.map(at));
+  return sent
+    .filter((p) => at(p) === newest)
+    .map((p) => p.name.charAt(0).toUpperCase() + p.name.slice(1));
+}
