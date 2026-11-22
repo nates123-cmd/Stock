@@ -23,6 +23,7 @@ import { useHaveStore } from '@/store/have';
 import { useExtrasStore } from '@/store/extras';
 import { useShopMetaStore } from '@/store/shopMeta';
 import { usePrefsStore } from '@/store/prefs';
+import { useRecipeViewsStore } from '@/store/recipeViews';
 import { useSynonymsStore } from '@/store/synonyms';
 import { useCartFillStore } from '@/store/cartFill';
 import { usePushedStore } from '@/store/pushed';
@@ -90,6 +91,7 @@ export default function RootLayout() {
   const hydrateExtras = useExtrasStore((s) => s.hydrate);
   const hydrateShopMeta = useShopMetaStore((s) => s.hydrate);
   const hydratePrefs = usePrefsStore((s) => s.hydrate);
+  const hydrateRecipeViews = useRecipeViewsStore((s) => s.hydrate);
   const hydrateSynonyms = useSynonymsStore((s) => s.hydrate);
   const hydrateCartFill = useCartFillStore((s) => s.hydrate);
   // Pushed markers used to hydrate only when the Shopping screen mounted, so
@@ -115,6 +117,7 @@ export default function RootLayout() {
     hydrateExtras();
     hydrateShopMeta();
     hydratePrefs();
+    hydrateRecipeViews();
     hydrateSynonyms();
     hydrateCartFill();
     hydratePushed();

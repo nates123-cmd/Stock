@@ -24,6 +24,7 @@ import { matchKey, looksLikeSameItem } from '@/lib/pantry';
 import { formatAmount } from '@/lib/format';
 import { sumQtyStrings, parseQty, isMixedUnits } from '@/lib/qty';
 import { reconcileQty } from '@/lib/qtyReconcile';
+import { uid } from '@/lib/id';
 import type { Ingredient, PantryStatus, Recipe } from '@/types';
 
 /**
@@ -172,6 +173,34 @@ export default function BuildListScreen() {
 
   const selected = plannedRecipes.filter((r) => !excluded.has(r.id));
 
+  // Items typed in at the bottom of a recipe step ("we also need limes for
+  // this"). They live beside the recipe for THIS build only — the recipe itself
+  // is not edited — and ride through decisions/combine exactly like a real
+  // ingredient, so tap / swipe / long-press all work on them.
+  const [addedIngs, setAddedIngs] = useState<Record<string, Ingredient[]>>({});
+  const ingsOf = (r: Recipe): Ingredient[] => {
+    const extra = addedIngs[r.id];
+    return extra ? [...r.ingredients, ...extra] : r.ingredients;
+  };
+  const addItem = (recipe: Recipe, rawName: string, rawQty: string) => {
+    const name = rawName.trim().replace(/\s+/g, ' ');
+    if (!name) return;
+    const ing: Ingredient = {
+      id: uid('add'),
+      amount: null,
+      unit: null,
+      canonicalName: name,
+      modificationHistory: [],
+    };
+    setAddedIngs((prev) => ({ ...prev, [recipe.id]: [...(prev[recipe.id] ?? []), ing] }));
+    // A hand-added item is ALWAYS "Shop for", whatever the pantry says: you
+    // typed it because you need to buy it. Without the explicit decision the
+    // default split would file "limes" under Already have the moment a pantry
+    // row fuzzy-matched it, and the add would look like it did nothing.
+    const qty = rawQty.trim();
+    setDecision(recipe.id, ing.id, { section: 'shop', removed: false, ...(qty ? { qty } : {}) });
+  };
+
   const decisionFor = (recipe: Recipe, ing: Ingredient): Decision =>
     decisions[recipe.id]?.[ing.id] ?? {
       section: defaultSection(ing.canonicalName),
@@ -208,7 +237,7 @@ export default function BuildListScreen() {
   const groups = useMemo(() => {
     const byKey = new Map<string, { key: string; name: string; sources: { recipe: string; amt: string }[] }>();
     for (const r of selected) {
-      for (const ing of r.ingredients) {
+      for (const ing of ingsOf(r)) {
         const dec = decisionFor(r, ing);
         if (dec.removed || dec.section !== 'shop') continue;
         // Per-ingredient edits from the detail sheet override the name/qty.
@@ -222,7 +251,7 @@ export default function BuildListScreen() {
     }
     return [...byKey.values()];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, decisions, statusByKey, stapleKeys]);
+  }, [selected, decisions, statusByKey, stapleKeys, addedIngs]);
 
   // effGroups folds `groups` into merged clusters. Two ways to merge:
   //  - AUTO: look-alikes via looksLikeSameItem — the SAME logic the shopping
@@ -494,7 +523,10 @@ export default function BuildListScreen() {
       {/* ---- Step 1..N: per-recipe Shop / Have ---- */}
       {recipe ? (
         <RecipeStep
+          key={recipe.id}
           recipe={recipe}
+          ingredients={ingsOf(recipe)}
+          onAddItem={(name, qty) => addItem(recipe, name, qty)}
           decisionFor={decisionFor}
           statusFor={statusFor}
           pantryMatchFor={pantryMatchFor}
@@ -804,6 +836,8 @@ function IngredientDetail({
 
 function RecipeStep({
   recipe,
+  ingredients,
+  onAddItem,
   decisionFor,
   statusFor,
   onToggleSection,
@@ -819,6 +853,9 @@ function RecipeStep({
   isLast,
 }: {
   recipe: Recipe;
+  /** The recipe's ingredients plus anything added by hand this build. */
+  ingredients: Ingredient[];
+  onAddItem: (name: string, qty: string) => void;
   decisionFor: (r: Recipe, i: Ingredient) => Decision;
   statusFor: (name: string) => PantryStatus | undefined;
   onToggleSection: (ing: Ingredient) => void;
@@ -833,7 +870,19 @@ function RecipeStep({
   onNext: () => void;
   isLast: boolean;
 }) {
-  const active = recipe.ingredients.filter((i) => !decisionFor(recipe, i).removed);
+  const active = ingredients.filter((i) => !decisionFor(recipe, i).removed);
+
+  // Add-an-item row at the bottom (Reminders-style: type, Enter, keep typing).
+  const [addName, setAddName] = useState('');
+  const [addQty, setAddQty] = useState('');
+  const nameRef = useRef<TextInput | null>(null);
+  const submitAdd = () => {
+    if (!addName.trim()) return;
+    onAddItem(addName, addQty);
+    setAddName('');
+    setAddQty('');
+    nameRef.current?.focus();
+  };
   const shop = active.filter((i) => decisionFor(recipe, i).section === 'shop');
   // Have section: FLAGGED items (running-low OR a fuzzy pantry match) float to
   // the top — those are the assumptions you'll want to eyeball / veto.
@@ -999,7 +1048,7 @@ function RecipeStep({
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.list}>
+      <ScrollView contentContainerStyle={styles.list} keyboardShouldPersistTaps="handled">
         <Heading variant="recipeTitle" style={styles.recipeTitle}>
           {recipe.title}
         </Heading>
@@ -1025,6 +1074,48 @@ function RecipeStep({
         ) : (
           have.map((i) => <Row key={i.id} ing={i} section="have" />)
         )}
+
+        <SectionLabel color="textMuted" style={styles.section}>
+          Add an item
+        </SectionLabel>
+        <View style={styles.addRow}>
+          <TextInput
+            ref={nameRef}
+            value={addName}
+            onChangeText={setAddName}
+            placeholder="Something else to buy for this"
+            placeholderTextColor={colors.textFaint}
+            style={[styles.editInput, styles.addName]}
+            returnKeyType="done"
+            blurOnSubmit={false}
+            onSubmitEditing={submitAdd}
+            autoCapitalize="none"
+            accessibilityLabel={`Add an item to shop for with ${recipe.title}`}
+          />
+          <TextInput
+            value={addQty}
+            onChangeText={setAddQty}
+            placeholder="Qty"
+            placeholderTextColor={colors.textFaint}
+            style={[styles.editInput, styles.addQty]}
+            returnKeyType="done"
+            blurOnSubmit={false}
+            onSubmitEditing={submitAdd}
+            autoCapitalize="none"
+            accessibilityLabel="Quantity (optional)"
+          />
+          <Pressable
+            onPress={submitAdd}
+            disabled={!addName.trim()}
+            hitSlop={6}
+            style={[styles.addBtn, !addName.trim() && styles.addBtnOff]}
+            accessibilityRole="button"
+            accessibilityLabel="Add item">
+            <Text color="bg" variant="bodyStrong">
+              Add
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
       <BottomActionBar>
         <Button label="Back" variant="secondary" flex onPress={onBack} />
@@ -1184,6 +1275,18 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   editButtons: { flexDirection: 'row', gap: 10, paddingTop: 6 },
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 4 },
+  addName: { flex: 1, minWidth: 0 },
+  addQty: { width: 76 },
+  addBtn: {
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addBtnOff: { opacity: 0.35 },
   detailActions: { flexDirection: 'row', gap: 10 },
   detailDelete: { alignItems: 'center', paddingVertical: 12 },
   detailCancel: { alignItems: 'center', paddingVertical: 6 },
