@@ -11,6 +11,8 @@
  * up in the detail sheet and the group-by-store headers.
  */
 
+import type { ShopSection } from './shopSections';
+
 export type StoreId = 'wegmans' | 'costco' | 'stopone';
 
 export const STORES: { id: StoreId; label: string }[] = [
@@ -30,6 +32,8 @@ export type ShopMeta = {
   qty?: string;
   brand?: string;
   note?: string;
+  /** Store section picked by hand in shopping mode — beats the keyword guess. */
+  section?: ShopSection;
 };
 
 /** The Apple Shortcut name Nate installs once (see SHORTCUTS.md). */

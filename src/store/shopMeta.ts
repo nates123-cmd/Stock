@@ -63,6 +63,7 @@ const clean = (m: ShopMeta): ShopMeta => {
   if (m.qty && m.qty.trim()) out.qty = m.qty.trim();
   if (m.brand && m.brand.trim()) out.brand = m.brand.trim();
   if (m.note && m.note.trim()) out.note = m.note.trim();
+  if (m.section) out.section = m.section;
   return out;
 };
 

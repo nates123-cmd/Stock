@@ -199,7 +199,7 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * watermelon→water, barley→bar. Anchor on word boundaries, and allow a trailing
  * plural so "tomato" still catches "tomatoes" and "olive" catches "olives".
  */
-function hasPhrase(name: string, phrase: string): boolean {
+export function hasPhrase(name: string, phrase: string): boolean {
   return new RegExp(`(^|\\W)${escapeRe(phrase)}(e?s)?(\\W|$)`).test(name);
 }
 
