@@ -15,6 +15,8 @@ import { useCookPlanStore } from '@/store/cookPlans';
 import { useCookStore } from '@/store/cooks';
 import { usePantryStore } from '@/store/pantry';
 import { usePipelineStore } from '@/store/pipeline';
+import { useRecipeViewsStore } from '@/store/recipeViews';
+import { byRecentlyViewed } from '@/lib/recipeRecency';
 import { isModified } from '@/lib/recipe';
 import { AUTO_TAGS, matchesQuery, norm } from '@/lib/recipeTags';
 import { cuisineLabel, normCuisine } from '@/lib/cuisine';
@@ -29,16 +31,20 @@ type Filter = (typeof BASE_FILTERS)[number];
  * Sorting
  * ------------------------------------------------------------------ */
 
-type SortKey = 'added' | 'cooked' | 'favorites' | 'alpha';
+type SortKey = 'viewed' | 'added' | 'cooked' | 'favorites' | 'alpha';
 
 const SORTS: { key: SortKey; label: string }[] = [
+  { key: 'viewed', label: 'Recently viewed' },
   { key: 'added', label: 'Recently added' },
   { key: 'cooked', label: 'Recently cooked' },
   { key: 'favorites', label: 'Favorites' },
   { key: 'alpha', label: 'A–Z' },
 ];
 
-const SORT_KEY = 'stock:recipe-sort';
+// v2: the default became "Recently viewed". A new key so a stale saved
+// 'added' (the old default, written by any past tap on the sort menu) does not
+// silently keep the old order.
+const SORT_KEY = 'stock:recipe-sort-v2';
 const DENSITY_KEY = 'stock:recipe-density';
 
 type Density = 'comfortable' | 'compact';
@@ -103,6 +109,7 @@ export function RecipeLibrary({
   const cooks = useCookStore((s) => s.cooks);
   const pantry = usePantryStore((s) => s.items);
   const ideas = usePipelineStore((s) => s.ideas);
+  const viewedAt = useRecipeViewsStore((s) => s.viewedAt);
 
   const [segment, setSegment] = useState<Segment>('all');
   /**
@@ -132,7 +139,7 @@ export function RecipeLibrary({
     );
 
   const [sort, setSort] = useState<SortKey>(() =>
-    loadPref<SortKey>(SORT_KEY, ['added', 'cooked', 'favorites', 'alpha'], 'added'),
+    loadPref<SortKey>(SORT_KEY, ['viewed', 'added', 'cooked', 'favorites', 'alpha'], 'viewed'),
   );
   const chooseSort = (k: SortKey) => {
     setSort(k);
@@ -277,6 +284,8 @@ export function RecipeLibrary({
    */
   const comparators: Record<SortKey, (a: Recipe, b: Recipe) => number> = useMemo(
     () => ({
+      // Last opened (or added, whichever is later) first — the default.
+      viewed: byRecentlyViewed<Recipe>(viewedAt),
       added: byNewest,
       cooked: (a, b) => {
         // Never-cooked sinks to the bottom rather than sorting as "epoch",
@@ -297,7 +306,7 @@ export function RecipeLibrary({
         return c !== 0 ? c : byNewest(a, b);
       },
     }),
-    [lastCookedAt],
+    [lastCookedAt, viewedAt],
   );
 
   /**
@@ -450,6 +459,14 @@ export function RecipeLibrary({
     if (!showShelves) return [];
     const live = recipes.filter((r) => r.status !== 'archived');
     const out: { key: string; title: string; count: number; items: Recipe[]; seeAll?: () => void }[] = [];
+    // Leads the shelves: what you had open last is what you most likely want
+    // again. Only recipes actually OPENED count here (the sort below also
+    // folds in the added date; a shelf of things never viewed would be a lie).
+    const viewed = live
+      .filter((r) => viewedAt[r.id] != null)
+      .sort((a, b) => (viewedAt[b.id] ?? 0) - (viewedAt[a.id] ?? 0));
+    if (viewed.length >= 2)
+      out.push({ key: 'viewed', title: 'Recently viewed', count: viewed.length, items: viewed.slice(0, SHELF), seeAll: () => chooseSort('viewed') });
     const cooked = live
       .filter((r) => lastCookedAt.has(r.id))
       .sort((a, b) => (lastCookedAt.get(b.id) ?? 0) - (lastCookedAt.get(a.id) ?? 0));
@@ -468,9 +485,9 @@ export function RecipeLibrary({
     }
     return out.slice(0, 4);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showShelves, recipes, lastCookedAt, cuisinesInUse]);
+  }, [showShelves, recipes, lastCookedAt, cuisinesInUse, viewedAt]);
 
-  const sortLabel = SORTS.find((s) => s.key === sort)?.label ?? 'Recently added';
+  const sortLabel = SORTS.find((s) => s.key === sort)?.label ?? 'Recently viewed';
   const compact = density === 'compact';
 
   return (

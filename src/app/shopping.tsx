@@ -34,6 +34,9 @@ import { useSyncStatus } from '@/lib/sync';
 import { usePantryStore } from '@/store/pantry';
 import { useShopMetaStore } from '@/store/shopMeta';
 import { usePushedStore } from '@/store/pushed';
+import { useShopModeStore } from '@/store/shopMode';
+import { ShoppingMode, type ShopModeRow } from '@/components/ShoppingMode';
+import { groupBySection, sectionFor, type ShopSection } from '@/lib/shopSections';
 import { useCartFillStore } from '@/store/cartFill';
 import type { PantryLocation, PantryStatus } from '@/types';
 import {
@@ -455,13 +458,13 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
    *  by the recipe that asked for each item. Persisted so it stays where you
    *  leave it. Store grouping earns its keep on Staples; recipe grouping only
    *  makes sense on Active, where the rows actually come from recipes. */
-  type GroupBy = 'none' | 'store' | 'recipe';
+  type GroupBy = 'none' | 'store' | 'recipe' | 'section';
   const GROUP_KEY = 'stock:shopping-group-by';
   const [groupBy, setGroupByState] = useState<GroupBy>(() => {
     if (typeof window === 'undefined') return 'none';
     try {
       const v = window.localStorage?.getItem(GROUP_KEY);
-      return v === 'store' || v === 'recipe' ? v : 'none';
+      return v === 'store' || v === 'recipe' || v === 'section' ? v : 'none';
     } catch {
       return 'none';
     }
@@ -1111,6 +1114,74 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupBy, currentRows, shopMetaMap]);
 
+
+  /** Rows bucketed by store section, in walk order — the same grouping shopping
+   *  mode uses, available on the editable list too. */
+  const sectionGroups = useMemo(() => {
+    if (groupBy !== 'section') return null;
+    return groupBySection(currentRows, (r) =>
+      sectionFor(r.baseName, metaFor(r.baseName).section),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupBy, currentRows, shopMetaMap]);
+
+  /* ---------- shopping mode ---------- */
+  const [shopMode, setShopMode] = useState(false);
+  const clearGot = useShopModeStore((s) => s.clearGot);
+  const toModeRow = (r: FlatRow, staple: boolean): ShopModeRow => ({
+    key: r.key,
+    name: r.name,
+    baseName: r.baseName,
+    qty: r.qty,
+    recipes: r.recipes,
+    staple,
+    status: r.pantryStatus,
+    store: metaFor(r.baseName).store ?? null,
+    section: sectionFor(r.baseName, metaFor(r.baseName).section),
+  });
+  const modeActiveRows = useMemo(
+    () => activeRows.map((r) => toModeRow(r, false)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeRows, shopMetaMap],
+  );
+  const modeStapleRows = useMemo(
+    () => stapleRows.map((r) => toModeRow(r, true)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stapleRows, shopMetaMap],
+  );
+  /**
+   * Settle a shopping trip: everything that made it into the cart leaves the
+   * list, and (unless skipped) lands in the pantry in one write.
+   *
+   * Rows leave the way DELETE takes them off — the extra is removed by id — not
+   * via the `have.checked` check-off. That flag is permanent and name-keyed, so
+   * using it here would quietly hide the same item the next time it is added.
+   * A pantry-derived staple has no extra; it leaves because the restock (or
+   * clearLowOut, when the pantry is skipped) puts it back to `fine`.
+   */
+  const finishShopping = async (
+    got: ShopModeRow[],
+    placements: Record<string, PantryLocation> | null,
+  ) => {
+    const source = new Map([...activeRows, ...stapleRows].map((r) => [r.key, r]));
+    if (placements) {
+      await applyPaste(
+        got.map((r) => ({ canonicalName: r.baseName, location: placements[r.key] })),
+      );
+    }
+    for (const g of got) {
+      const row = source.get(g.key);
+      if (!row) continue;
+      if (row.members) unmerge(matchKey(row.baseName));
+      for (const part of row.members ?? [row]) {
+        if (part.extraId) removeExtra(part.extraId);
+      }
+      if (!placements) await clearLowOut(row.baseName);
+    }
+    clearGot(got.map((g) => g.key));
+    setSelected(new Set());
+    setShopMode(false);
+  };
 
   /** The current selection, resolved to rows (drives the pop-up push bar). */
   const selectedRows = useMemo(
@@ -2105,6 +2176,9 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
             {refining ? ' · estimating…' : ''}
           </Text>
         </View>
+        {!editing && activeRows.length + stapleRows.length > 0 ? (
+          <Button label="Shop" glyph="next" onPress={() => setShopMode(true)} />
+        ) : null}
         {embedded ? null : (
           <Pressable onPress={() => router.back()} hitSlop={8}>
             <Text variant="bodyStrong" color="textMuted">
@@ -2248,6 +2322,17 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                   By store
                 </Text>
               </Pressable>
+              <Pressable
+                onPress={() => toggleGroup('section')}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityState={{ selected: groupBy === 'section' }}>
+                <Text
+                  variant="sectionLabel"
+                  color={groupBy === 'section' ? 'accent' : 'textFaint'}>
+                  By section
+                </Text>
+              </Pressable>
               {listView === 'active' ? (
                 <Pressable
                   onPress={() => toggleGroup('recipe')}
@@ -2292,7 +2377,16 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
                   {g.rows.map(renderRow)}
                 </View>
               ))
-            : currentRows.map(renderRow)}
+            : sectionGroups
+              ? sectionGroups.map((g) => (
+                  <View key={`sg:${g.section}`} style={styles.section}>
+                    <SectionLabel color="text">
+                      {g.label} · {g.rows.length}
+                    </SectionLabel>
+                    {g.rows.map(renderRow)}
+                  </View>
+                ))
+              : currentRows.map(renderRow)}
 
         {/* Reminders-style inline add: tap the blank row and type. Enter keeps
             the keyboard up so you can add several in a row. */}
@@ -2541,6 +2635,18 @@ export default function ShoppingList({ embedded = false }: { embedded?: boolean 
           />
         ) : null}
       </Overlay>
+
+      {shopMode ? (
+        <ShoppingMode
+          rows={modeActiveRows}
+          stapleRows={modeStapleRows}
+          onClose={() => setShopMode(false)}
+          onFinish={finishShopping}
+          onMoveSection={(row, section: ShopSection) =>
+            setShopMeta(row.baseName, { section })
+          }
+        />
+      ) : null}
 
       <Overlay visible={buying !== null} onClose={() => setBuying(null)}>
         {buying ? (

@@ -17,6 +17,7 @@ import { Text, Heading, Numeric, SectionLabel, Glyph, Card, Button, BottomAction
 import { SourceBadge } from '@/components';
 import { colors, layout } from '@/design';
 import { useRecipeStore } from '@/store/recipes';
+import { useRecipeViewsStore } from '@/store/recipeViews';
 import { usePlanStore } from '@/store/plan';
 import { useCookStore } from '@/store/cooks';
 import { useSyncStatusStore } from '@/store/syncStatus';
@@ -63,6 +64,14 @@ export default function RecipeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const recipe = useRecipeStore((s) => s.recipes.find((r) => r.id === id));
+  // Stamp the open for the library's "Recently viewed" order. Keyed on the id
+  // and on the recipe EXISTING, so a dead link stamps nothing. Sits above the
+  // early returns below (a hook after a conditional return blanks the screen).
+  const markViewed = useRecipeViewsStore((s) => s.mark);
+  const recipeExists = !!recipe;
+  useEffect(() => {
+    if (id && recipeExists) markViewed(id);
+  }, [id, recipeExists, markViewed]);
   const allRecipes = useRecipeStore((s) => s.recipes);
   const save = useRecipeStore((s) => s.save);
   const toggleFavorite = useRecipeStore((s) => s.toggleFavorite);

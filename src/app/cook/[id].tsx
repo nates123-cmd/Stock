@@ -778,7 +778,13 @@ function GlanceBody({
               <Pressable
                 key={ing.id}
                 onPress={() => onEditIngredient(ing)}
-                style={styles.ingGrid}
+                // A long hold opens the same sheet. Mid-cook, with wet hands,
+                // people press and hold; without this iOS answered the hold
+                // with its text-selection callout and nothing else happened.
+                onLongPress={() => onEditIngredient(ing)}
+                delayLongPress={400}
+                // @ts-expect-error web-only: stop iOS hijacking the long-press
+                style={[styles.ingGrid, { userSelect: 'none', WebkitTouchCallout: 'none' }]}
                 hitSlop={4}
                 accessibilityRole="button"
                 accessibilityLabel={`${ing.canonicalName}, options`}>
